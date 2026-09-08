@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Coc Docs Platform — backend service.
+
+  Java 21 · Spring Boot 3.4 · Maven, per CONST-TECH-06 (the organisation's
+  baseline language, HARNESS-PROCESS-STANDARD §5.7) and ADR-012 §1.
+
+  Deliberately provider-agnostic: plain PostgreSQL over JDBC with Flyway
+  migrations, and S3-API object storage. Backend hosting is [DEFERRED]
+  (PM, 2026-09-08), so nothing here may depend on a specific provider —
+  see CONST-TECH-08 and ADR-012 §2.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.4.1</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.coc</groupId>
+  <artifactId>docs-platform-backend</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <name>Coc Docs Platform Backend</name>
+  <description>REST API for documentation content, navigation, media and accounts</description>
+
+  <properties>
+    <java.version>21</java.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- CONST-OPS-01: content includes Khmer and Korean. Encoding is never
+         left to the platform default on this project. -->
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!-- Authorisation is enforced here, in the service layer, never in the
+         database and never in the frontend. CONST-TECH-07, ADR-012 §3. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+
+    <!-- Google ID tokens are JWTs; verified server-side against Google's JWK
+         set. The frontend never asserts identity. FR-AUTH-001, ADR-012 §4. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+    </dependency>
+
+    <!-- Bean validation on request bodies, in addition to the block-model
+         validator. NFR-SEC-SANITIZE. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+
+    <!-- Plain JDBC, not JPA. The schema is jsonb-heavy and hand-tuned
+         (ADR-003); an ORM would fight it for no benefit at this scale. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- Plain-SQL migrations, portable across any Postgres host. CONST-TECH-08. -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+    </dependency>
+
+    <!-- ===================== test ===================== -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Integration tests run against real Postgres, not an in-memory
+         substitute: the schema relies on partial unique indexes, a deferred
+         constraint trigger and jsonb, none of which H2 reproduces faithfully. -->
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-testcontainers</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <compilerArgs>
+            <arg>-parameters</arg>
+            <arg>-Xlint:all</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
