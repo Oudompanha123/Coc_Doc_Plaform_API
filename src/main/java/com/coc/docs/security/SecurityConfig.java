@@ -66,6 +66,15 @@ public class SecurityConfig {
                         .authenticationEntryPoint(authenticationEntryPoint)
                         .accessDeniedHandler(accessDeniedHandler))
                 .authorizeHttpRequests(authorize -> authorize
+                        // CORS preflight: the browser's OPTIONS probe carries
+                        // no credentials and grants no access by itself: it
+                        // never reaches a controller. Spring's CorsFilter adds
+                        // the response headers but still passes the request
+                        // through this chain, so without this line every
+                        // preflight for a real (authenticated) endpoint would
+                        // be rejected before the actual request is ever sent.
+                        .requestMatchers(HttpMethod.OPTIONS, "/**")
+                        .permitAll()
                         // Default-deny (ADR-011 §2.5): every route requires
                         // authentication unless explicitly allow-listed here,
                         // and this list must stay small and reviewed.

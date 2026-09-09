@@ -3,6 +3,11 @@
 # Every environment-specific value is supplied by environment variables with no
 # usable default. Backend hosting is [DEFERRED] (PM, 2026-09-08), so this file
 # must not assume a provider.  // req: CONST-TECH-08, ADR-012 §2
+#
+# For a personal local setup (your own Postgres, your own Google OAuth Client
+# ID) prefer application-local.yml over editing the defaults below or setting
+# five separate env vars: it's gitignored, so real values there can never end
+# up in a commit. Activate it with SPRING_PROFILES_ACTIVE=local.
 
 spring:
   application:
