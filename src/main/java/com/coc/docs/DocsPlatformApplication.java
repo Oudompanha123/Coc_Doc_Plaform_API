@@ -2,6 +2,7 @@ package com.coc.docs;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 /**
  * Coc Docs Platform backend.
@@ -15,6 +16,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * @see <a href="../../../../../../../docs/design/adr/ADR-012-revision-of-001-backend-stack.md">ADR-012</a>
  */
 @SpringBootApplication
+@ConfigurationPropertiesScan
 public class DocsPlatformApplication {
 
     public static void main(String[] args) {

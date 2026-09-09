@@ -55,6 +55,28 @@ app:
   # // req: ADR-012 §4
   frontend-origin: ${FRONTEND_ORIGIN:http://localhost:3000}
 
+  cookie:
+    # ADR-011 §2.5 D1 (default): frontend and backend share a registrable
+    # parent domain, so `Lax` behaves exactly as in a single-service design —
+    # no CSRF-token framework needs to be built. Switch to `None` only
+    # alongside the D2 fallback (mandatory Origin-header checks on every
+    # state-changing endpoint), never on its own.  // req: NFR-SEC-SESSION
+    same-site: ${COOKIE_SAME_SITE:Lax}
+    # `secure` cookies require HTTPS. Left true everywhere except local HTTP
+    # dev, which overrides via env var rather than a profile-specific default
+    # — this is the one flag that must never be silently false in prod.
+    secure: ${COOKIE_SECURE:true}
+    # Empty = host-only cookie (fine for local dev, where frontend/backend
+    # differ only by port on `localhost`). Set to the shared parent domain
+    # (e.g. `.example.com`) once ADR-011 §2.5's D1 domain decision is final.
+    domain: ${COOKIE_DOMAIN:}
+
+  oidc:
+    # How long a nonce issued by POST /api/auth/nonce remains valid. Short by
+    # design: it only has to survive one Google sign-in round trip.
+    # // req: FR-AUTH-001, TM-001
+    nonce-ttl: PT5M
+
   storage:
     # S3 API, whichever provider ends up behind it: Supabase Storage, AWS S3,
     # Azure via gateway, or on-prem MinIO.  // req: CONST-TECH-08
