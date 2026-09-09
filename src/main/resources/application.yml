@@ -23,15 +23,6 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: false
 
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          # Google ID tokens are verified server-side against Google's JWK set.
-          # The frontend never asserts identity.  // req: FR-AUTH-001, TM-001
-          issuer-uri: https://accounts.google.com
-          audiences: ${GOOGLE_CLIENT_ID:}
-
   jackson:
     default-property-inclusion: non_null
 
@@ -51,9 +42,24 @@ app:
   session-ttl: P1D
 
   # The frontend origin, for CORS. Two services on different origins is a new
-  # attack surface that did not exist in the single-service design.
-  # // req: ADR-012 §4
+  # attack surface that did not exist in the single-service design. Exactly one
+  # origin, never a wildcard: allowCredentials and a wildcard are mutually
+  # exclusive, and a pattern would let a lookalike host through.
+  # // req: ADR-012 §4, NFR-SEC-CHANNEL
   frontend-origin: ${FRONTEND_ORIGIN:http://localhost:3000}
+
+  # Whether the session cookie carries `Secure`. Defaults to true so a
+  # deployment is safe unless it deliberately opts out; local development over
+  # plain http must set it false, or the browser discards the cookie and
+  # sign-in appears to succeed and then does nothing.
+  # // req: NFR-SEC-SESSION, NFR-SEC-CHANNEL
+  cookie-secure: ${COOKIE_SECURE:true}
+
+  # The Google OAuth client id that ID tokens must be addressed to. Absent by
+  # default so the reader path, migrations and the test suite need no Google
+  # credentials; sign-in then refuses with a clear message rather than the
+  # application failing to start.  // req: FR-AUTH-001
+  google-client-id: ${GOOGLE_CLIENT_ID:}
 
   storage:
     # S3 API, whichever provider ends up behind it: Supabase Storage, AWS S3,

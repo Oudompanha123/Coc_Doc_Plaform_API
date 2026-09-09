@@ -1,0 +1,43 @@
+package com.coc.docs.auth;
+
+import com.coc.docs.account.Account;
+import com.coc.docs.account.AppRole;
+import java.time.Instant;
+import java.util.UUID;
+import org.springframework.security.core.Authentication;
+
+/**
+ * Builds the authentication object a resolved session produces, for tests.
+ *
+ * <p>Lives in this package so that {@code SessionAuthentication} can stay
+ * package-private in production code. A test needing a caller is not a reason to
+ * widen an API.
+ *
+ * <p>Deliberately not {@code @WithMockUser}: that grants an authority string of
+ * its own choosing, and the thing worth testing is that {@link AppRole}'s ladder
+ * and the rule table in {@code SecurityConfig} agree. A test that invented its
+ * own authorities could pass while the real mapping was wrong.
+ *
+ * <p>// req: FR-AUTH-005
+ */
+public final class TestCallers {
+
+    private TestCallers() {}
+
+    public static CurrentUser user(AppRole role) {
+        Account account = new Account(
+                UUID.randomUUID(),
+                role.wire() + "@example.com",
+                "Test " + role.wire(),
+                role,
+                null,
+                Instant.now(),
+                Instant.now());
+        return new CurrentUser(account, new byte[] {1, 2, 3});
+    }
+
+    /** The same authentication the real filter installs, for a caller of this role. */
+    public static Authentication authentication(AppRole role) {
+        return new SessionAuthenticationFilter.SessionAuthentication(user(role));
+    }
+}

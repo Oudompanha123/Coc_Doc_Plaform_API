@@ -1,0 +1,28 @@
+# Test profile.
+#
+# The datasource is supplied by Testcontainers through @ServiceConnection, so
+# nothing here names a host. Flyway runs against the container on context start,
+# which makes every integration test a migration test as well.
+#
+# No Google client id: sign-in is exercised against a stub, and requiring real
+# credentials to run the suite would mean the suite does not get run.
+
+spring:
+  flyway:
+    enabled: true
+    clean-disabled: false
+
+app:
+  session-ttl: P1D
+  frontend-origin: http://localhost:3000
+  cookie-secure: false
+  google-client-id: ""
+  storage:
+    endpoint: ""
+    bucket: test-bucket
+    region: us-east-1
+
+logging:
+  level:
+    org.testcontainers: WARN
+    com.github.dockerjava: WARN

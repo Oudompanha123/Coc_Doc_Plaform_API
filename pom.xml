@@ -34,6 +34,15 @@
     <!-- CONST-OPS-01: content includes Khmer and Korean. Encoding is never
          left to the platform default on this project. -->
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+    <!-- Overrides the version Spring Boot 3.4.1 manages (1.15.x), which refuses
+         to instrument class files newer than Java 24. Mockito is built on
+         Byte Buddy, so on a JDK 25 toolchain every mock-based test fails to
+         start. The compiler still targets Java 21 (CONST-TECH-06); this only
+         affects what the test JVM can instrument.
+
+         Remove when the managed version supports the JDK in use. -->
+    <byte-buddy.version>1.18.13</byte-buddy.version>
   </properties>
 
   <dependencies>
@@ -103,6 +112,11 @@
     <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>

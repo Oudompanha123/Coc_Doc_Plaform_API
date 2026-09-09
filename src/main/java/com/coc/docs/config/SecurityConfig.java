@@ -1,0 +1,154 @@
+package com.coc.docs.config;
+
+import com.coc.docs.account.AppRole;
+import com.coc.docs.auth.SessionAuthenticationFilter;
+import java.util.List;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+/**
+ * The single authorisation chokepoint.
+ *
+ * <p>ADR-011 chose middleware enforcement over per-route checks precisely so
+ * that adding a route cannot quietly add an unprotected route. That choice is
+ * this file, and the property that makes it work is the last rule:
+ * {@code anyRequest().hasRole(SUPER_ADMIN)}. A route nobody remembered to
+ * declare is not open — it is reachable only by a super admin, which is
+ * conspicuous enough to be found immediately. Default-deny inverts the risk, so
+ * the failure mode of forgetfulness is a locked door rather than an open one.
+ *
+ * <p>This closes TM-019, modelled on exactly the shape where a new route ships
+ * without a check.
+ *
+ * <p>// req: FR-AUTH-005, FR-AUTH-006, FR-AUTH-008, NFR-SEC-AUTH, ADR-011, ADR-012
+ */
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    private final AppProperties properties;
+
+    public SecurityConfig(AppProperties properties) {
+        this.properties = properties;
+    }
+
+    @Bean
+    SecurityFilterChain filterChain(
+            HttpSecurity http,
+            SessionAuthenticationFilter sessionFilter,
+            ProblemResponses problemResponses)
+            throws Exception {
+
+        http
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+
+                // 401 for "no session", 403 for "wrong role". Without an explicit
+                // entry point Spring Security answers 403 to both, and the
+                // frontend cannot then tell a visitor who must sign in from one
+                // who already has and lacks the role. See ProblemResponses.
+                .exceptionHandling(handling -> handling
+                        .authenticationEntryPoint(problemResponses)
+                        .accessDeniedHandler(problemResponses))
+
+                // CSRF protection is not needed and would be dead configuration.
+                // The credential is a SameSite=Lax cookie, but that is not what
+                // the argument rests on: the API accepts only application/json
+                // bodies, which a cross-site form cannot produce, and the CORS
+                // policy below allows exactly one origin. There is no
+                // browser-initiated cross-site path that would carry the cookie.
+                .csrf(csrf -> csrf.disable())
+
+                // No servlet session. The credential is the app_session row, and
+                // a container session would be a second, shorter-lived and
+                // silently divergent notion of who the caller is.
+                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+
+                .headers(headers -> headers
+                        // Media is served from object storage, not from here, but
+                        // an API response that a browser sniffs as HTML is the
+                        // same class of problem. // req: NFR-SEC-UPLOAD
+                        .contentTypeOptions(Customizer.withDefaults())
+                        .frameOptions(frame -> frame.deny())
+                        .httpStrictTransportSecurity(hsts -> hsts
+                                .includeSubDomains(true)
+                                .maxAgeInSeconds(31_536_000)))
+
+                .addFilterBefore(sessionFilter, UsernamePasswordAuthenticationFilter.class)
+
+                .authorizeHttpRequests(authorize -> authorize
+                        // --- public: no session yet, by necessity -------------
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/google").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/me").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
+                        // Liveness only. Carries no version, no configuration and
+                        // no dependency status, so it discloses nothing.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll()
+                        // Browsers send a credential-free preflight; rejecting it
+                        // would make every cross-origin call fail before the real
+                        // request was ever sent.
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+
+                        // --- account management: super_admin floor ------------
+                        // A fixed floor above admin, per FR-AUTH-008: an admin
+                        // publishes content, and granting roles is a different
+                        // kind of authority.
+                        .requestMatchers("/api/v1/admin/accounts/**")
+                        .hasRole(AppRole.SUPER_ADMIN.name())
+
+                        // --- editorial writes and admin reads ----------------
+                        .requestMatchers("/api/v1/admin/**").hasRole(AppRole.ADMIN.name())
+
+                        // --- reader path -------------------------------------
+                        // The whole site sits at a `user` floor in the MVP.
+                        // FR-PUBLIC-001 (guest reading) is Won't-have, and
+                        // lowering specific pages is a phase-2 decision that
+                        // BR-026 requires be made deliberately.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/sections/**").hasRole(AppRole.USER.name())
+                        .requestMatchers(HttpMethod.GET, "/api/v1/pages/**").hasRole(AppRole.USER.name())
+
+                        // --- default deny ------------------------------------
+                        // Deliberately the strictest role, not authenticated().
+                        // See the class comment: this line is the control.
+                        .anyRequest().hasRole(AppRole.SUPER_ADMIN.name()));
+
+        return http.build();
+    }
+
+    /**
+     * CORS for exactly one origin, with credentials.
+     *
+     * <p>The two services sit on different origins, which is a surface the
+     * single-service design did not have (ADR-012). {@code allowCredentials} and
+     * a wildcard origin are mutually exclusive for good reason, and the origin
+     * here is configuration rather than a pattern so that a staging host cannot
+     * be reached by a lookalike domain.
+     *
+     * <p>// req: NFR-SEC-CHANNEL, ADR-012
+     */
+    @Bean
+    CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(List.of(properties.frontendOrigin()));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("Content-Type", "Accept", "If-Match"));
+        // The frontend reads the canonical location out of a 301 when a slug has
+        // been renamed, which a browser will not expose unless it is listed.
+        config.setExposedHeaders(List.of("Location"));
+        config.setAllowCredentials(true);
+        config.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/api/**", config);
+        return source;
+    }
+}
