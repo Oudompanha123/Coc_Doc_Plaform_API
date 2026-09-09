@@ -128,6 +128,46 @@
           </compilerArgs>
         </configuration>
       </plugin>
+
+      <!--
+        Fail the build on the wrong JDK rather than asking six people to be
+        careful. RISK-020: one developer reported Java 25 on day one while
+        CONST-TECH-06 specifies 21. The build still succeeded, because the
+        release target is 21 regardless of which JDK compiles it — which is
+        exactly why the divergence went unnoticed.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-toolchain</id>
+            <goals><goal>enforce</goal></goals>
+            <configuration>
+              <rules>
+                <requireJavaVersion>
+                  <version>[21,22)</version>
+                  <message>
+This project requires Java 21 (CONST-TECH-06). You are building with a
+different JDK.
+
+Spring Boot 3.4 predates Java 25 and does not list it as supported, and
+six developers on differing JDKs produces defects that reproduce on one
+machine only.
+
+Install JDK 21 and make sure `java -version` reports 21 for this project.
+SDKMAN, jEnv, or your IDE's per-project SDK setting all handle this.
+                  </message>
+                </requireJavaVersion>
+                <requireMavenVersion>
+                  <version>[3.9,)</version>
+                  <message>This project requires Maven 3.9 or newer.</message>
+                </requireMavenVersion>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
     </plugins>
   </build>
 </project>
