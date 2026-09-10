@@ -102,6 +102,13 @@ public class SecurityConfig {
                         // A fixed floor above admin, per FR-AUTH-008: an admin
                         // publishes content, and granting roles is a different
                         // kind of authority.
+                        //
+                        // This is also the whole of NFR-SEC-PII's enforcement.
+                        // Every account's email and display name is reachable
+                        // through this prefix and nowhere else in the API, so
+                        // the personal-data boundary is this one line rather
+                        // than a property spread across response types.
+                        // // req: FR-AUTH-008, NFR-SEC-PII
                         .requestMatchers("/api/v1/admin/accounts/**")
                         .hasRole(AppRole.SUPER_ADMIN.name())
 

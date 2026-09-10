@@ -17,7 +17,20 @@ import org.springframework.stereotype.Repository;
  * revokes those grants from {@code public} as well, so the append-only property
  * does not rest on nobody adding a method here later.
  *
- * <p>// req: FR-OPS-001, NFR-OPS-AUDIT, ADR-006
+ * <p>Every row carries {@code actor_email}, denormalised so the trail stays
+ * readable after an account is deactivated — which makes this table personal
+ * data under NFR-SEC-PII. It satisfies that requirement today by being
+ * unreachable: the read methods below exist, but no controller calls them, so
+ * there is no route through which an audit row can leave the service.
+ *
+ * <p>That is a property of the current wiring, not a guarantee. <b>A controller
+ * added over these reads must sit behind the {@code super_admin} floor</b>
+ * ({@code /api/v1/admin/accounts/**} in {@code SecurityConfig}), alongside the
+ * other route that returns other people's identities. The default-deny terminal
+ * rule makes forgetting safe rather than open, but it would place an audit route
+ * at {@code super_admin} by accident rather than by decision.
+ *
+ * <p>// req: FR-OPS-001, NFR-OPS-AUDIT, NFR-SEC-PII, ADR-006
  */
 @Repository
 public class AuditRepository {
