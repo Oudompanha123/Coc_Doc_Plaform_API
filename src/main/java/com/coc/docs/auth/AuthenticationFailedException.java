@@ -1,9 +1,10 @@
 package com.coc.docs.auth;
 
 /**
- * Any reason a sign-in attempt is refused: a forged/expired/wrong-audience
- * token, a nonce that doesn't match, an email with no provisioned account, or
- * a deactivated one.
+ * Any reason a sign-in attempt is refused, on either sign-in path (ADR-014):
+ * a forged/expired/wrong-audience token, a nonce that doesn't match, a wrong
+ * password, an email with no provisioned account, or one that's deactivated,
+ * still pending review, or was rejected.
  *
  * <p>{@link #reason()} is for the audit log only. Per {@code UC-004} E-3, the
  * HTTP response must be identical regardless of which of these happened — no

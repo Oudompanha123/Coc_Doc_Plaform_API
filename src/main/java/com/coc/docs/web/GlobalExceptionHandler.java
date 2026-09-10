@@ -1,6 +1,7 @@
 package com.coc.docs.web;
 
 import com.coc.docs.auth.AuthenticationFailedException;
+import com.coc.docs.auth.EmailAlreadyRegisteredException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -19,10 +20,21 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleAuthenticationFailed(AuthenticationFailedException e) {
         // Deliberately generic, and deliberately NOT e.getMessage()/e.reason():
         // UC-004 E-3 forbids the response revealing *why* a sign-in was
-        // refused (bad token vs. no account vs. deactivated). The caller
-        // already wrote the specific reason to the audit log before this
-        // exception was thrown; it must never also reach the HTTP body.
+        // refused (bad token vs. no account vs. deactivated/pending/rejected).
+        // The caller already wrote the specific reason to the audit log
+        // before this exception was thrown; it must never also reach the
+        // HTTP body.
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new ApiError("Sign-in failed"));
+    }
+
+    @ExceptionHandler(EmailAlreadyRegisteredException.class)
+    public ResponseEntity<ApiError> handleEmailAlreadyRegistered(EmailAlreadyRegisteredException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiError(e.getMessage()));
+    }
+
+    @ExceptionHandler(AdminActionException.class)
+    public ResponseEntity<ApiError> handleAdminAction(AdminActionException e) {
+        return ResponseEntity.status(e.status()).body(new ApiError(e.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

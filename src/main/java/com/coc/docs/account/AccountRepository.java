@@ -17,7 +17,7 @@ import org.springframework.stereotype.Repository;
 public class AccountRepository {
 
     private static final String SELECT_COLUMNS =
-            "select id, email, display_name, role, deactivated_at from account";
+            "select id, email, display_name, role, status, deactivated_at from account";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -44,12 +44,62 @@ public class AccountRepository {
         return rows.stream().findFirst();
     }
 
+    /** Backs {@code GET /api/admin/accounts/pending} (ADR-014). */
+    public List<Account> findByStatus(AccountStatus status) {
+        return jdbcTemplate.query(
+                SELECT_COLUMNS + " where status = ?::account_status order by created_at",
+                AccountRepository::mapRow,
+                status.wire());
+    }
+
+    /**
+     * The password sign-in path only (ADR-014) — the only query in this
+     * class that ever reads {@code password_hash}.
+     */
+    public Optional<AccountCredential> findCredentialByEmailIgnoreCase(String email) {
+        List<AccountCredential> rows = jdbcTemplate.query(
+                SELECT_COLUMNS + ", password_hash from account where lower(email) = lower(?)",
+                AccountRepository::mapCredentialRow,
+                email);
+        return rows.stream().findFirst();
+    }
+
+    /**
+     * Creates a self-registered account awaiting review (ADR-014). Role and
+     * status are never taken from the caller — always {@code user} /
+     * {@code pending} — so registering is never a privilege-escalation or
+     * self-activation path (FR-AUTH-005).
+     */
+    public Account insertPendingRegistration(String email, String displayName, String passwordHash) {
+        return jdbcTemplate.queryForObject(
+                "insert into account (email, display_name, password_hash, status) "
+                        + "values (?, ?, ?, 'pending') "
+                        + "returning id, email, display_name, role, status, deactivated_at",
+                AccountRepository::mapRow,
+                email,
+                displayName,
+                passwordHash);
+    }
+
+    /** Moves a registration from {@code pending} to {@code active} or {@code rejected} (ADR-014). */
+    public int updateStatus(UUID id, AccountStatus status) {
+        return jdbcTemplate.update(
+                "update account set status = ?::account_status, updated_at = now() where id = ?",
+                status.wire(),
+                id);
+    }
+
     private static Account mapRow(ResultSet rs, int rowNum) throws SQLException {
         return new Account(
                 (UUID) rs.getObject("id"),
                 rs.getString("email"),
                 rs.getString("display_name"),
                 Role.fromDb(rs.getString("role")),
+                AccountStatus.fromDb(rs.getString("status")),
                 rs.getTimestamp("deactivated_at") != null);
+    }
+
+    private static AccountCredential mapCredentialRow(ResultSet rs, int rowNum) throws SQLException {
+        return new AccountCredential(mapRow(rs, rowNum), rs.getString("password_hash"));
     }
 }

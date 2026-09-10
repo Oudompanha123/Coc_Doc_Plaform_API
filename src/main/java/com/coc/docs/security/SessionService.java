@@ -55,8 +55,11 @@ public class SessionService {
 
     /**
      * Resolves a raw cookie value to the account it belongs to, or empty if
-     * the token is missing, unknown, expired, revoked, or the account has
-     * since been deactivated.
+     * the token is missing, unknown, expired, revoked, or the account can no
+     * longer sign in (deactivated, or — ADR-014 — no longer {@code active}
+     * by status, though in practice a session is never issued to a
+     * non-active account in the first place; this is a defence-in-depth
+     * check for a status change after the fact).
      */
     public Optional<Account> validate(String rawToken) {
         if (rawToken == null || rawToken.isBlank()) {
@@ -68,7 +71,7 @@ public class SessionService {
             return Optional.empty();
         }
         sessionRepository.touch(tokenHash);
-        return accountRepository.findById(accountId.get()).filter(account -> !account.deactivated());
+        return accountRepository.findById(accountId.get()).filter(Account::canSignIn);
     }
 
     /**

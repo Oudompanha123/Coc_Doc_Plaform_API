@@ -14,6 +14,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -79,7 +81,15 @@ public class SecurityConfig {
                         // authentication unless explicitly allow-listed here,
                         // and this list must stay small and reviewed.
                         // // req: FR-AUTH-005, TM-019, TM-027
-                        .requestMatchers(HttpMethod.POST, "/api/auth/nonce", "/api/auth/login")
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/api/auth/nonce",
+                                "/api/auth/login",
+                                // ADR-014's second, password-based sign-in
+                                // path — same "unauthenticated by necessity"
+                                // reasoning as the two routes above.
+                                "/api/auth/register",
+                                "/api/auth/login-password")
                         .permitAll()
                         .requestMatchers("/actuator/health/**")
                         .permitAll()
@@ -124,6 +134,17 @@ public class SecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
+    }
+
+    /**
+     * Bcrypt, for the password self-registration path only (ADR-014) — the
+     * Google/Keycloak path never touches this bean. A work factor of 12
+     * (double BCrypt's default 10 rounds) given this runs on request-time,
+     * human-facing endpoints, not a hot path.
+     */
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder(12);
     }
 
     /**

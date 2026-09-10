@@ -5,16 +5,23 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+
+import com.coc.docs.account.AccountPrincipal;
 import com.coc.docs.account.Role;
 import com.coc.docs.auth.dto.AuthResponse;
 import com.coc.docs.auth.dto.LoginRequest;
 import com.coc.docs.auth.dto.NonceResponse;
+import com.coc.docs.auth.dto.PasswordLoginRequest;
+import com.coc.docs.auth.dto.RegisterRequest;
+import com.coc.docs.auth.dto.RegisterResponse;
 import com.coc.docs.testsupport.KeycloakTestTokens;
 import com.coc.docs.web.ApiError;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,11 +33,14 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -62,6 +72,7 @@ class AuthFlowIntegrationTest {
     private static final KeycloakTestTokens TOKENS = new KeycloakTestTokens();
     private static final String ACTIVE_EMAIL = "admin@example.com";
     private static final String DEACTIVATED_EMAIL = "gone@example.com";
+    private static final String SUPER_ADMIN_EMAIL = "root@example.com";
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES =
@@ -95,6 +106,8 @@ class AuthFlowIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    private UUID superAdminId;
+
     @BeforeEach
     void seedAccounts() {
         jdbcTemplate.update("delete from app_session");
@@ -109,6 +122,12 @@ class AuthFlowIntegrationTest {
                 "insert into account (email, display_name, role, deactivated_at) values (?, ?, 'user', now())",
                 DEACTIVATED_EMAIL,
                 "Gone User");
+        // ADR-014: approving/rejecting a registration is a super_admin-only action.
+        superAdminId = jdbcTemplate.queryForObject(
+                "insert into account (email, display_name, role) values (?, ?, 'super_admin') returning id",
+                UUID.class,
+                SUPER_ADMIN_EMAIL,
+                "Root Admin");
     }
 
     @Test
@@ -172,6 +191,112 @@ class AuthFlowIntegrationTest {
         mockMvc.perform(post("/api/auth/logout").cookie(sessionCookie)).andExpect(status().isNoContent());
 
         mockMvc.perform(get("/api/auth/me").cookie(sessionCookie)).andExpect(status().isUnauthorized());
+    }
+
+    // -------------------------------------------------------------------
+    // ADR-014: password self-registration + super_admin approval
+    // -------------------------------------------------------------------
+
+    @Test
+    void registrationCreatesAPendingAccountThatCannotSignInYet() throws Exception {
+        MockHttpServletResponse response = register("new@example.com", "New Person", "correct horse battery");
+
+        assertThat(response.getStatus()).isEqualTo(201);
+        RegisterResponse body = objectMapper.readValue(response.getContentAsString(), RegisterResponse.class);
+        assertThat(body.status()).isEqualTo("PENDING");
+
+        MockHttpServletResponse loginResponse = loginWithPassword("new@example.com", "correct horse battery");
+        assertThat(loginResponse.getStatus()).isEqualTo(401);
+        assertAuditLogged("auth.login.failure", "pending_approval");
+    }
+
+    @Test
+    void registeringTheSameEmailTwiceIsRefused() throws Exception {
+        register("dup@example.com", "First", "correct horse battery");
+
+        MockHttpServletResponse second = register("dup@example.com", "Second", "another password");
+
+        assertThat(second.getStatus()).isEqualTo(409);
+    }
+
+    @Test
+    void approvingARegistrationLetsItSignInWithPassword() throws Exception {
+        register("approved@example.com", "Approved Person", "correct horse battery");
+        UUID accountId = jdbcTemplate.queryForObject(
+                "select id from account where email = ?", UUID.class, "approved@example.com");
+
+        mockMvc.perform(post("/api/admin/accounts/{id}/approve", accountId).with(asSuperAdmin()))
+                .andExpect(status().isOk());
+
+        MockHttpServletResponse loginResponse = loginWithPassword("approved@example.com", "correct horse battery");
+        assertThat(loginResponse.getStatus()).isEqualTo(200);
+        assertThat(loginResponse.getCookie("coc_session")).isNotNull();
+    }
+
+    @Test
+    void aWrongPasswordAndAPendingAccountGetTheSameGenericRefusal() throws Exception {
+        register("wrongpw@example.com", "Someone", "correct horse battery");
+        UUID accountId = jdbcTemplate.queryForObject(
+                "select id from account where email = ?", UUID.class, "wrongpw@example.com");
+        mockMvc.perform(post("/api/admin/accounts/{id}/approve", accountId).with(asSuperAdmin()))
+                .andExpect(status().isOk());
+
+        MockHttpServletResponse response = loginWithPassword("wrongpw@example.com", "not the password");
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString())
+                .isEqualTo(objectMapper.writeValueAsString(new ApiError("Sign-in failed")));
+    }
+
+    @Test
+    void rejectingARegistrationPermanentlyBlocksPasswordSignIn() throws Exception {
+        register("rejected@example.com", "Rejected Person", "correct horse battery");
+        UUID accountId = jdbcTemplate.queryForObject(
+                "select id from account where email = ?", UUID.class, "rejected@example.com");
+
+        mockMvc.perform(post("/api/admin/accounts/{id}/reject", accountId).with(asSuperAdmin()))
+                .andExpect(status().isOk());
+
+        MockHttpServletResponse loginResponse = loginWithPassword("rejected@example.com", "correct horse battery");
+        assertThat(loginResponse.getStatus()).isEqualTo(401);
+        assertAuditLogged("auth.login.failure", "rejected");
+    }
+
+    @Test
+    void onlyASuperAdminCanApproveARegistration() throws Exception {
+        register("needsreview@example.com", "Needs Review", "correct horse battery");
+        UUID accountId = jdbcTemplate.queryForObject(
+                "select id from account where email = ?", UUID.class, "needsreview@example.com");
+        AccountPrincipal regularAdmin = new AccountPrincipal(UUID.randomUUID(), ACTIVE_EMAIL, "Active Admin", Role.ADMIN);
+        var adminAuth = new UsernamePasswordAuthenticationToken(
+                regularAdmin, null, List.of(new SimpleGrantedAuthority(Role.ADMIN.authority())));
+
+        mockMvc.perform(post("/api/admin/accounts/{id}/approve", accountId).with(authentication(adminAuth)))
+                .andExpect(status().isForbidden());
+    }
+
+    private RequestPostProcessor asSuperAdmin() {
+        AccountPrincipal principal = new AccountPrincipal(superAdminId, SUPER_ADMIN_EMAIL, "Root Admin", Role.SUPER_ADMIN);
+        var authorities = List.of(new SimpleGrantedAuthority(Role.SUPER_ADMIN.authority()));
+        return authentication(new UsernamePasswordAuthenticationToken(principal, null, authorities));
+    }
+
+    private MockHttpServletResponse register(String email, String displayName, String password) throws Exception {
+        return mockMvc
+                .perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new RegisterRequest(email, displayName, password))))
+                .andReturn()
+                .getResponse();
+    }
+
+    private MockHttpServletResponse loginWithPassword(String email, String password) throws Exception {
+        return mockMvc
+                .perform(post("/api/auth/login-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new PasswordLoginRequest(email, password))))
+                .andReturn()
+                .getResponse();
     }
 
     private record NonceExchange(String value, Cookie cookie) {}
