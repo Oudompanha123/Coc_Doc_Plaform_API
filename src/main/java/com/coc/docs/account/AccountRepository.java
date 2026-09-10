@@ -19,6 +19,15 @@ public class AccountRepository {
     private static final String SELECT_COLUMNS =
             "select id, email, display_name, role, status, deactivated_at from account";
 
+    /**
+     * {@code password_hash} is deliberately not in {@link #SELECT_COLUMNS} —
+     * every other query in this class must never read it. A full column
+     * list of its own, not the (broken) shortcut of appending to
+     * {@code SELECT_COLUMNS}, which already ends in {@code from account}.
+     */
+    private static final String SELECT_COLUMNS_WITH_CREDENTIAL =
+            "select id, email, display_name, role, status, deactivated_at, password_hash from account";
+
     private final JdbcTemplate jdbcTemplate;
 
     public AccountRepository(JdbcTemplate jdbcTemplate) {
@@ -58,7 +67,7 @@ public class AccountRepository {
      */
     public Optional<AccountCredential> findCredentialByEmailIgnoreCase(String email) {
         List<AccountCredential> rows = jdbcTemplate.query(
-                SELECT_COLUMNS + ", password_hash from account where lower(email) = lower(?)",
+                SELECT_COLUMNS_WITH_CREDENTIAL + " where lower(email) = lower(?)",
                 AccountRepository::mapCredentialRow,
                 email);
         return rows.stream().findFirst();
