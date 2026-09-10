@@ -3,7 +3,7 @@ package com.coc.docs.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.coc.docs.testsupport.GoogleTestTokens;
+import com.coc.docs.testsupport.KeycloakTestTokens;
 import java.time.Instant;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -13,19 +13,19 @@ import org.springframework.mock.env.MockEnvironment;
  * No Spring context, no database, no network — pure unit tests of the
  * verification logic against a locally-signed token. // req: FR-AUTH-001, TM-001
  */
-class GoogleIdTokenServiceTest {
+class KeycloakIdTokenServiceTest {
 
-    private final GoogleTestTokens tokens = new GoogleTestTokens();
+    private final KeycloakTestTokens tokens = new KeycloakTestTokens();
 
-    private GoogleIdTokenService service() {
-        return new GoogleIdTokenService(tokens.decoder(), GoogleTestTokens.AUDIENCE, new MockEnvironment());
+    private KeycloakIdTokenService service() {
+        return new KeycloakIdTokenService(tokens.decoder(), KeycloakTestTokens.AUDIENCE, new MockEnvironment());
     }
 
     @Test
     void verifiesAWellFormedToken() {
         String jwt = tokens.sign(tokens.defaultClaims());
 
-        VerifiedGoogleIdentity identity = service().verify(jwt, "expected-nonce");
+        VerifiedIdentity identity = service().verify(jwt, "expected-nonce");
 
         assertThat(identity.email()).isEqualTo("person@example.com");
         assertThat(identity.displayName()).isEqualTo("Person Example");
@@ -33,7 +33,7 @@ class GoogleIdTokenServiceTest {
 
     @Test
     void rejectsATokenSignedByAnUntrustedKey() {
-        GoogleTestTokens attacker = new GoogleTestTokens();
+        KeycloakTestTokens attacker = new KeycloakTestTokens();
         String forged = attacker.sign(tokens.defaultClaims());
 
         assertReasonIs("token_invalid", () -> service().verify(forged, "expected-nonce"));
@@ -79,7 +79,7 @@ class GoogleIdTokenServiceTest {
 
     @Test
     void failsFastAtStartupWithoutAConfiguredAudience() {
-        assertThatThrownBy(() -> new GoogleIdTokenService(tokens.decoder(), "", new MockEnvironment()))
+        assertThatThrownBy(() -> new KeycloakIdTokenService(tokens.decoder(), "", new MockEnvironment()))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -89,7 +89,7 @@ class GoogleIdTokenServiceTest {
         testProfile.addActiveProfile("test");
 
         // Must not throw, even with a blank audience.
-        new GoogleIdTokenService(tokens.decoder(), "", testProfile);
+        new KeycloakIdTokenService(tokens.decoder(), "", testProfile);
     }
 
     private static void assertReasonIs(String expectedReason, Runnable verifyCall) {

@@ -9,7 +9,7 @@ import com.coc.docs.account.Role;
 import com.coc.docs.auth.dto.AuthResponse;
 import com.coc.docs.auth.dto.LoginRequest;
 import com.coc.docs.auth.dto.NonceResponse;
-import com.coc.docs.testsupport.GoogleTestTokens;
+import com.coc.docs.testsupport.KeycloakTestTokens;
 import com.coc.docs.web.ApiError;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
@@ -42,10 +42,10 @@ import org.testcontainers.utility.DockerImageName;
  * doesn't faithfully reproduce; this project carries no H2 dependency at all).
  *
  * <p>Network-free: the {@link JwtDecoder} bean is replaced with one trusting
- * only a locally generated key ({@link GoogleTestTokens}), so nothing here
- * depends on reaching the real {@code accounts.google.com} JWKS endpoint —
- * that autoconfigured wiring is Spring's own well-tested code; this class
- * verifies the login API's own logic on top of it.
+ * only a locally generated key ({@link KeycloakTestTokens}), so nothing here
+ * depends on reaching a real Keycloak realm's JWKS endpoint — that
+ * autoconfigured wiring is Spring's own well-tested code; this class verifies
+ * the login API's own logic on top of it.
  *
  * <p>{@code disabledWithoutDocker = true}: skips cleanly on a machine with no
  * Docker (this sandbox, notably) instead of failing.
@@ -59,7 +59,7 @@ import org.testcontainers.utility.DockerImageName;
 @Import(AuthFlowIntegrationTest.TestJwtConfig.class)
 class AuthFlowIntegrationTest {
 
-    private static final GoogleTestTokens TOKENS = new GoogleTestTokens();
+    private static final KeycloakTestTokens TOKENS = new KeycloakTestTokens();
     private static final String ACTIVE_EMAIL = "admin@example.com";
     private static final String DEACTIVATED_EMAIL = "gone@example.com";
 
@@ -74,7 +74,7 @@ class AuthFlowIntegrationTest {
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         // Non-blank on purpose: exercises the real audience-mismatch path
         // rather than the (separately, unit-tested) fail-fast startup guard.
-        registry.add("spring.security.oauth2.resourceserver.jwt.audiences", () -> GoogleTestTokens.AUDIENCE);
+        registry.add("spring.security.oauth2.resourceserver.jwt.audiences", () -> KeycloakTestTokens.AUDIENCE);
     }
 
     /** Swaps out the real, network-backed autoconfigured JwtDecoder for one trusting only our test key. */
@@ -132,7 +132,7 @@ class AuthFlowIntegrationTest {
 
     @Test
     void signInForAnUnprovisionedEmailIsRefusedAndLogged() throws Exception {
-        // UC-004 E-1 / TC-004-02: a valid Google identity with no matching account grants nothing.
+        // UC-004 E-1 / TC-004-02: a valid identity with no matching account grants nothing.
         NonceExchange nonce = requestNonce();
 
         MockHttpServletResponse response = login(idTokenFor("nobody@example.com", nonce.value()), nonce.cookie());

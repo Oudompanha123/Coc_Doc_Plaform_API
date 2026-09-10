@@ -25,32 +25,37 @@ import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 
 /**
- * Signs and verifies test-only Google-ID-token-shaped JWTs with a locally
- * generated RSA key — no network call to Google's real JWKS endpoint.
+ * Signs and verifies test-only Keycloak-ID-token-shaped JWTs with a locally
+ * generated RSA key — no network call to a real Keycloak realm.
+ *
+ * <p>{@code ISSUER}/{@code AUDIENCE} are placeholders shaped like a Keycloak
+ * realm issuer and client id (ADR-013); they do not need to match any real
+ * local realm configuration, since {@link #decoder()} trusts only this
+ * instance's own key rather than fetching a JWK set over the network.
  *
  * <p>{@link #decoder()} mirrors what {@code spring-boot-starter-oauth2-resource-server}'s
  * autoconfiguration builds in production (timestamp + audience validation on
  * top of signature/issuer checking) closely enough to exercise
- * {@code GoogleIdTokenService}'s own logic realistically, without this test
+ * {@code KeycloakIdTokenService}'s own logic realistically, without this test
  * suite depending on Spring Boot's autoconfiguration machinery itself or on
  * the network — that autoconfigured wiring is Spring's own well-tested code.
  */
-public final class GoogleTestTokens {
+public final class KeycloakTestTokens {
 
-    public static final String ISSUER = "https://accounts.google.com";
-    public static final String AUDIENCE = "test-client-id.apps.googleusercontent.com";
+    public static final String ISSUER = "https://keycloak.example.test/realms/coc-docs";
+    public static final String AUDIENCE = "coc-docs-backend";
     private static final String KEY_ID = "test-key";
 
     private final RSAPublicKey publicKey;
     private final RSAPrivateKey privateKey;
 
-    public GoogleTestTokens() {
+    public KeycloakTestTokens() {
         KeyPair pair = generateKeyPair();
         this.publicKey = (RSAPublicKey) pair.getPublic();
         this.privateKey = (RSAPrivateKey) pair.getPrivate();
     }
 
-    /** A well-formed set of Google-ID-token claims. Mutate the returned map before {@link #sign} to test a variation. */
+    /** A well-formed set of Keycloak-ID-token claims. Mutate the returned map before {@link #sign} to test a variation. */
     public Map<String, Object> defaultClaims() {
         Instant now = Instant.now();
         Map<String, Object> claims = new LinkedHashMap<>();
@@ -78,7 +83,7 @@ public final class GoogleTestTokens {
         }
     }
 
-    /** Trusts only this instance's own key, so a token signed by a *different* {@code GoogleTestTokens} fails signature validation. */
+    /** Trusts only this instance's own key, so a token signed by a *different* {@code KeycloakTestTokens} fails signature validation. */
     public JwtDecoder decoder() {
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withPublicKey(publicKey).build();
         OAuth2TokenValidator<Jwt> audienceValidator = jwt -> jwt.getAudience() != null

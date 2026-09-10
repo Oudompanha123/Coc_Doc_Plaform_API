@@ -31,13 +31,16 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Google sign-in, session issuance/validation and sign-out.
+ * Google sign-in (brokered through Keycloak, per ADR-013), session
+ * issuance/validation and sign-out.
  *
  * // req: FR-AUTH-001, FR-AUTH-002, FR-AUTH-007, NFR-SEC-AUTH, NFR-SEC-SESSION
  */
 @RestController
 @RequestMapping("/api/auth")
-@Tag(name = "Authentication", description = "Google OIDC sign-in, backend session issuance and sign-out.")
+@Tag(
+        name = "Authentication",
+        description = "Google sign-in brokered through Keycloak (ADR-013), backend session issuance and sign-out.")
 public class AuthController {
 
     private static final String NONCE_COOKIE = "coc_oidc_nonce";
@@ -45,7 +48,7 @@ public class AuthController {
     private static final String AUTH_COOKIE_PATH = "/api/auth";
     private static final int NONCE_BYTES = 24;
 
-    private final GoogleIdTokenService googleIdTokenService;
+    private final KeycloakIdTokenService keycloakIdTokenService;
     private final AccountRepository accountRepository;
     private final SessionService sessionService;
     private final AuditLogger auditLogger;
@@ -54,13 +57,13 @@ public class AuthController {
     private final SecureRandom random = new SecureRandom();
 
     public AuthController(
-            GoogleIdTokenService googleIdTokenService,
+            KeycloakIdTokenService keycloakIdTokenService,
             AccountRepository accountRepository,
             SessionService sessionService,
             AuditLogger auditLogger,
             CookieSupport cookies,
             AppProperties appProperties) {
-        this.googleIdTokenService = googleIdTokenService;
+        this.keycloakIdTokenService = keycloakIdTokenService;
         this.accountRepository = accountRepository;
         this.sessionService = sessionService;
         this.auditLogger = auditLogger;
@@ -69,11 +72,11 @@ public class AuthController {
     }
 
     @Operation(
-            summary = "Issue a one-time nonce for a Google sign-in attempt",
-            description = "Pass the returned value as the `nonce` option to Google Identity Services' sign-in "
-                    + "call, then submit the resulting credential to POST /api/auth/login. The same value is "
-                    + "also set as a short-lived httpOnly cookie, which /login reads back itself — the caller "
-                    + "never needs to resend it.")
+            summary = "Issue a one-time nonce for a sign-in attempt",
+            description = "Pass the returned value as the `nonce` option to the sign-in call, then submit the "
+                    + "resulting credential to POST /api/auth/login. The same value is also set as a "
+                    + "short-lived httpOnly cookie, which /login reads back itself — the caller never needs to "
+                    + "resend it.")
     @ApiResponse(responseCode = "200", description = "Nonce issued")
     @PostMapping("/nonce")
     public NonceResponse nonce(HttpServletResponse response) {
@@ -87,9 +90,11 @@ public class AuthController {
     }
 
     @Operation(
-            summary = "Verify a Google ID token and issue a backend session",
-            description = "Signature, issuer, audience and nonce are checked server-side against Google's "
-                    + "published JWK set before anything here is believed. // req: TM-001")
+            summary = "Verify a Keycloak-issued ID token and issue a backend session",
+            description = "Signature, issuer, audience and nonce are checked server-side against the configured "
+                    + "Keycloak realm's published JWK set before anything here is believed. Keycloak brokers "
+                    + "Google upstream (ADR-013); this endpoint never trusts Google's JWK set directly, and "
+                    + "roles are never read from the token — only from the account table. // req: TM-001, TM-003")
     @ApiResponse(responseCode = "200", description = "Signed in; the coc_session cookie is now set")
     @ApiResponse(
             responseCode = "401",
@@ -106,11 +111,11 @@ public class AuthController {
 
         String attemptedEmail = "";
         try {
-            VerifiedGoogleIdentity identity = googleIdTokenService.verify(request.idToken(), nonceCookie);
+            VerifiedIdentity identity = keycloakIdTokenService.verify(request.idToken(), nonceCookie);
             attemptedEmail = identity.email();
 
-            // No auto-provisioning (UC-004 E-1): a valid Google identity with
-            // no matching account grants nothing.
+            // No auto-provisioning (UC-004 E-1): a valid identity with no
+            // matching account grants nothing.
             Account account = accountRepository
                     .findByEmailIgnoreCase(identity.email())
                     .orElseThrow(() -> new AuthenticationFailedException("no_account"));

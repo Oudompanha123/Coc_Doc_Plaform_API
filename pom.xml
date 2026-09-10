@@ -49,8 +49,10 @@
       <artifactId>spring-boot-starter-security</artifactId>
     </dependency>
 
-    <!-- Google ID tokens are JWTs; verified server-side against Google's JWK
-         set. The frontend never asserts identity. FR-AUTH-001, ADR-012 §4. -->
+    <!-- The sign-in credential is a JWT; verified server-side against the
+         configured issuer's JWK set (Keycloak's realm, which brokers Google
+         upstream — ADR-013, revising ADR-008). The frontend never asserts
+         identity. FR-AUTH-001, ADR-012 §4. -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
