@@ -2,7 +2,7 @@ package com.coc.docs.config;
 
 import com.coc.docs.auth.KeycloakIdTokenService;
 import java.util.List;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
@@ -34,7 +34,13 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
  * <p>// req: FR-AUTH-001, NFR-SEC-AUTH, ADR-013
  */
 @Configuration
-@ConditionalOnProperty(prefix = "app.keycloak", name = "issuer-uri")
+// Blank counts as absent. @ConditionalOnProperty matches on a key being
+// present, so the obvious `issuer-uri: ${KEYCLOAK_ISSUER_URI:}` placeholder
+// would activate this with no host, build a decoder pointing at
+// "/protocol/openid-connect/certs", and fail the boot. A deployment that has
+// not stood Keycloak up must be indistinguishable from one that never
+// mentioned it.
+@ConditionalOnExpression("!'${app.keycloak.issuer-uri:}'.trim().isEmpty()")
 public class KeycloakAuthConfig {
 
     /**
