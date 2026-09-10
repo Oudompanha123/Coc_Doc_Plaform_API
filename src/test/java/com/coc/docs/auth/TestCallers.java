@@ -1,6 +1,7 @@
 package com.coc.docs.auth;
 
 import com.coc.docs.account.Account;
+import com.coc.docs.account.AccountStatus;
 import com.coc.docs.account.AppRole;
 import java.time.Instant;
 import java.util.UUID;
@@ -30,6 +31,7 @@ public final class TestCallers {
                 role.wire() + "@example.com",
                 "Test " + role.wire(),
                 role,
+                AccountStatus.ACTIVE,
                 null,
                 Instant.now(),
                 Instant.now());

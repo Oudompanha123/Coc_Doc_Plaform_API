@@ -3,6 +3,8 @@ package com.coc.docs.config;
 import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
@@ -26,5 +28,19 @@ public class AppConfig {
     @Bean
     Clock clock() {
         return Clock.systemUTC();
+    }
+
+    /**
+     * bcrypt, for the password self-registration path (ADR-014).
+     *
+     * <p>{@code DelegatingPasswordEncoder} would prefix stored hashes with
+     * {@code {bcrypt}}; a plain encoder keeps the column readable as what it is
+     * and matches what {@code V3__account_registration.sql} documents. Strength
+     * is left at the Spring default (10) — raising it is a deployment tuning
+     * decision, not something to hard-code differently from everyone else.
+     */
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
     }
 }

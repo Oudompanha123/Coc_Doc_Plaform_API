@@ -1,6 +1,8 @@
 package com.coc.docs.auth;
 
 import com.coc.docs.account.Account;
+import com.coc.docs.account.AccountStatus;
+import com.coc.docs.account.AccountCredential;
 import com.coc.docs.account.AccountRepository;
 import com.coc.docs.account.AppRole;
 import com.coc.docs.audit.AuditAction;
@@ -16,6 +18,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Optional;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,6 +53,17 @@ public class SessionService {
     private final Clock clock;
     private final SecureRandom random = new SecureRandom();
 
+    /**
+     * A valid bcrypt digest of a value nothing can supply, used so that an
+     * unknown email costs the same work as a known one. Without it, the miss
+     * path skips the hash and answers measurably faster — which discloses
+     * which addresses are registered just as surely as a different message.
+     */
+    private static final String DUMMY_HASH =
+            "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
+    private final PasswordEncoder passwordEncoder;
+
     public SessionService(
             SessionRepository sessions,
             AccountRepository accounts,
@@ -57,7 +71,8 @@ public class SessionService {
             GoogleIdTokenVerifier google,
             AppProperties properties,
             ObjectMapper json,
-            Clock clock) {
+            Clock clock,
+            PasswordEncoder passwordEncoder) {
         this.sessions = sessions;
         this.accounts = accounts;
         this.audit = audit;
@@ -65,6 +80,7 @@ public class SessionService {
         this.properties = properties;
         this.json = json;
         this.clock = clock;
+        this.passwordEncoder = passwordEncoder;
     }
 
     /** An issued session: the plaintext token, which exists only here and in the response. */
@@ -105,8 +121,14 @@ public class SessionService {
                 .map(existing -> refreshName(existing, identity.displayName()))
                 .orElseGet(() -> createAccount(identity));
 
-        if (!account.isActive()) {
-            throw new GoogleIdTokenVerifier.AuthenticationFailure("this account is deactivated");
+        // canSignIn, not isActive: someone who self-registered and is still
+        // awaiting approval must not get in through the Google door instead
+        // (ADR-014). Same email, same account row, one gate.
+        if (!account.canSignIn()) {
+            throw new GoogleIdTokenVerifier.AuthenticationFailure(
+                    account.status() == AccountStatus.PENDING
+                            ? "this registration is awaiting approval"
+                            : "this account cannot sign in");
         }
 
         Instant now = clock.instant();
@@ -136,6 +158,7 @@ public class SessionService {
                     existing.email(),
                     displayName,
                     existing.role(),
+                    existing.status(),
                     existing.deactivatedAt(),
                     existing.createdAt(),
                     existing.updatedAt());
@@ -256,5 +279,81 @@ public class SessionService {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is required and absent from this JVM", e);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Password sign-in (ADR-014)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Exchanges an email and password for a session.
+     *
+     * <p><b>Every failure returns the same exception with the same message.</b>
+     * Unknown address, wrong password, pending approval and rejected all look
+     * identical to the caller. Telling them apart turns this endpoint into an
+     * oracle for which colleagues have accounts, and — because a pending
+     * registration is a real person's application — for who has applied.
+     *
+     * <p>The password is compared even when the account cannot sign in, and a
+     * dummy comparison runs when the address is unknown. Skipping the hash on
+     * the miss path makes an unknown address answer measurably faster than a
+     * known one, which is the same disclosure by another route.
+     *
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-014
+     */
+    @Transactional
+    public IssuedSession signInWithPassword(
+            String email, String rawPassword, String userAgent, String ipAddress) {
+
+        Optional<AccountCredential> found = accounts.findCredentialByEmailIgnoreCase(email);
+
+        boolean passwordMatches;
+        if (found.isEmpty() || found.get().passwordHash() == null) {
+            // Spend the same work as a real comparison. The hash is a valid
+            // bcrypt digest of a value nothing can supply.
+            passwordEncoder.matches(rawPassword, DUMMY_HASH);
+            passwordMatches = false;
+        } else {
+            passwordMatches = passwordEncoder.matches(rawPassword, found.get().passwordHash());
+        }
+
+        if (!passwordMatches || !found.get().account().canSignIn()) {
+            audit.append(
+                    null,
+                    "unauthenticated",
+                    AuditAction.AUTH_REJECTED,
+                    AuditAction.TARGET_SESSION,
+                    null,
+                    json.createObjectNode().put("reason", "password_sign_in_refused").put("email", email));
+            throw new GoogleIdTokenVerifier.AuthenticationFailure("email or password not accepted");
+        }
+
+        return issue(found.get().account(), userAgent, ipAddress, "password");
+    }
+
+    /**
+     * Records a session for an already-authenticated account.
+     *
+     * <p>Shared by both sign-in paths deliberately: session lifetime, hashing
+     * and the audit entry are properties of a session, not of how someone
+     * proved who they were.
+     */
+    private IssuedSession issue(Account account, String userAgent, String ipAddress, String via) {
+        Instant expiresAt = clock.instant().plus(properties.sessionTtl());
+        String token = newToken();
+        sessions.insert(hash(token), account.id(), expiresAt, userAgent, ipAddress);
+
+        audit.append(
+                account.id(),
+                account.email(),
+                AuditAction.AUTH_SIGN_IN,
+                AuditAction.TARGET_SESSION,
+                account.id(),
+                json.createObjectNode()
+                        .put("role", account.role().wire())
+                        .put("via", via)
+                        .put("expiresAt", expiresAt.toString()));
+
+        return new IssuedSession(token, account, expiresAt);
     }
 }

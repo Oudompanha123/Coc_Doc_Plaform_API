@@ -88,6 +88,10 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize
                         // --- public: no session yet, by necessity -------------
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/google").permitAll()
+                        // ADR-014: applying for an account, and signing in with one. Public
+                        // by necessity — nobody has a session before either succeeds.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login-password").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/me").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
                         // Liveness only. Carries no version, no configuration and

@@ -188,4 +188,87 @@ public class AccountService {
 
         return accounts.findById(account.id()).orElseThrow();
     }
+
+    // -----------------------------------------------------------------------
+    // Self-registration and approval (ADR-014)
+    // -----------------------------------------------------------------------
+
+    /** The queue a {@code super_admin} works through. Oldest first. */
+    public List<Account> listPending() {
+        return accounts.findByStatus(AccountStatus.PENDING);
+    }
+
+    /**
+     * Records a self-registration, awaiting a {@code super_admin}'s decision.
+     *
+     * <p>The caller passes an already-hashed password. Hashing belongs to the
+     * web layer's encoder, not here, so no plaintext ever reaches a class that
+     * also writes to the audit trail.
+     *
+     * <p>The audit entry records the address applied for and nothing else. A
+     * registration is an untrusted stranger's claim about themselves until
+     * someone approves it, and there is no actor id to attribute it to.
+     */
+    @Transactional
+    public Account register(String email, String displayName, String passwordHash) {
+        // Checked here as well as by the unique index, so the API can answer
+        // 409 with an explanation instead of a raised constraint becoming a 500.
+        if (accounts.findByEmail(email).isPresent()) {
+            throw ApiException.conflict("that email address is already registered");
+        }
+
+        Account created = accounts.insertPendingRegistration(email, displayName, passwordHash);
+
+        audit.append(
+                null,
+                email,
+                AuditAction.ACCOUNT_REGISTER,
+                AuditAction.TARGET_ACCOUNT,
+                created.id(),
+                json.createObjectNode().put("subject", email).put("status", created.status().wire()));
+
+        return created;
+    }
+
+    /** Approves a pending registration. The account can sign in from the next request. */
+    @Transactional
+    public Account approve(UUID accountId, CurrentUser actor) {
+        return decide(accountId, AccountStatus.ACTIVE, AuditAction.ACCOUNT_APPROVE, actor);
+    }
+
+    /**
+     * Rejects a pending registration.
+     *
+     * <p>Rejected rather than deleted, for the same reason accounts are
+     * deactivated rather than deleted: the audit trail has to be able to answer
+     * "who applied, and who turned them down" a year later (NFR-OPS-AUDIT).
+     */
+    @Transactional
+    public Account reject(UUID accountId, CurrentUser actor) {
+        return decide(accountId, AccountStatus.REJECTED, AuditAction.ACCOUNT_REJECT, actor);
+    }
+
+    private Account decide(UUID accountId, AccountStatus target, String action, CurrentUser actor) {
+        Account account = require(accountId);
+
+        // Only a pending registration is a decision to make. Re-approving an
+        // active account, or reversing a rejection, is an account change and
+        // belongs on the PATCH path where it is audited as one.
+        if (account.status() != AccountStatus.PENDING) {
+            throw ApiException.conflict(
+                    "account " + account.email() + " is " + account.status().wire() + ", not pending");
+        }
+
+        accounts.updateStatus(account.id(), target);
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                action,
+                AuditAction.TARGET_ACCOUNT,
+                account.id(),
+                json.createObjectNode().put("subject", account.email()).put("status", target.wire()));
+
+        return accounts.findById(account.id()).orElseThrow();
+    }
 }

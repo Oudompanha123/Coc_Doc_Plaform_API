@@ -1,6 +1,7 @@
 package com.coc.docs.web;
 
 import com.coc.docs.account.AccountService;
+import com.coc.docs.account.dto.AccountSummary;
 import com.coc.docs.account.AppRole;
 import com.coc.docs.auth.CurrentUser;
 import java.util.List;
@@ -8,6 +9,7 @@ import java.util.UUID;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -71,5 +73,33 @@ public class AdminAccountController {
         // second, which reported an error while a role change had already landed.
         return ApiDtos.AccountResponse.of(
                 accounts.update(accountId, role, request.active(), actor));
+    }
+
+    // -----------------------------------------------------------------------
+    // Self-registration approval (ADR-014)
+    // -----------------------------------------------------------------------
+
+    /**
+     * The queue of people waiting to be let in.
+     *
+     * <p>Under the same {@code super_admin} floor as the rest of this
+     * controller. Deciding who gets an account is the same kind of authority as
+     * granting a role, and an {@code admin} has neither (FR-AUTH-008).
+     */
+    @GetMapping("/pending")
+    List<AccountSummary> pending() {
+        return accounts.listPending().stream().map(AccountSummary::of).toList();
+    }
+
+    /** Lets a pending registration sign in, from the next request onward. */
+    @PostMapping("/{accountId}/approve")
+    AccountSummary approve(@PathVariable UUID accountId, @AuthenticationPrincipal CurrentUser actor) {
+        return AccountSummary.of(accounts.approve(accountId, actor));
+    }
+
+    /** Refuses a pending registration. The row stays, so the decision stays auditable. */
+    @PostMapping("/{accountId}/reject")
+    AccountSummary reject(@PathVariable UUID accountId, @AuthenticationPrincipal CurrentUser actor) {
+        return AccountSummary.of(accounts.reject(accountId, actor));
     }
 }

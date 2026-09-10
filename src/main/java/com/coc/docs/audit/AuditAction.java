@@ -28,6 +28,10 @@ public final class AuditAction {
     public static final String ACCOUNT_DEACTIVATE = "account.deactivate";
     public static final String ACCOUNT_REACTIVATE = "account.reactivate";
 
+    public static final String ACCOUNT_REGISTER = "account.register";
+    public static final String ACCOUNT_APPROVE = "account.approve";
+    public static final String ACCOUNT_REJECT = "account.reject";
+
     public static final String AUTH_SIGN_IN = "auth.sign_in";
     public static final String AUTH_SIGN_OUT = "auth.sign_out";
     public static final String AUTH_REJECTED = "auth.rejected";
