@@ -45,6 +45,15 @@ public final class ApiDtos {
      * That is a courtesy, not a control — the same role is checked server-side on
      * every request, and a client that lies to itself about this gains nothing
      * (ADR-011, alternative B3).
+     *
+     * <p>This carries personal data (email, display name) from the one route the
+     * filter chain leaves open, so it is where NFR-SEC-PII is most easily broken.
+     * It holds because the payload is built from the caller's own resolved
+     * session and never from a lookup the caller names: there is no parameter
+     * here to point at somebody else. An unauthenticated caller gets
+     * {@link #anonymous()}, which carries nothing.
+     *
+     * <p>// req: NFR-SEC-PII, FR-AUTH-005
      */
     public record MeResponse(
             UUID id, String email, String displayName, String role, boolean authenticated) {
@@ -54,7 +63,14 @@ public final class ApiDtos {
                     user.id(), user.email(), user.account().displayName(), user.role().wire(), true);
         }
 
-        /** For a caller with no usable session. Not an error: the reader UI asks first. */
+        /**
+         * For a caller with no usable session. Not an error: the reader UI asks first.
+         *
+         * <p>Every field is null rather than absent or defaulted. This is the
+         * response an unauthenticated request to {@code /auth/me} receives, and
+         * NFR-SEC-PII's "never exposed to guest or unauthenticated requests" is
+         * satisfied here or not at all. // req: NFR-SEC-PII
+         */
         public static MeResponse anonymous() {
             return new MeResponse(null, null, null, null, false);
         }
@@ -238,6 +254,19 @@ public final class ApiDtos {
     // Accounts
     // -----------------------------------------------------------------------
 
+    /**
+     * One account, for the administration screen.
+     *
+     * <p>The densest personal data in the API: every account's email and display
+     * name in one list. It is reachable only through
+     * {@code /api/v1/admin/accounts/**}, which the filter chain floors at
+     * {@code super_admin} — above the {@code admin} floor the rest of
+     * {@code /admin/**} carries (FR-AUTH-008). Nothing else in the API returns
+     * another person's email, which is what keeps NFR-SEC-PII to one guarded
+     * route rather than a property to re-check on every response.
+     *
+     * <p>// req: NFR-SEC-PII, FR-AUTH-008
+     */
     public record AccountResponse(
             UUID id,
             String email,
