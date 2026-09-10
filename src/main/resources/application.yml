@@ -28,8 +28,7 @@ spring:
 
   datasource:
     # Any PostgreSQL 15+ instance: managed, corporate, or on-prem.
-    url: ${DB_URL:jdbc:postgresql://192.168.178.41:5432/cocdocs?currentSchema=cocdocs_dev}
-    # url: ${DB_URL:jdbc:postgresql://192.168.178.41:5432/cocdocs}
+    # url: 
     username: ${DB_USER:postgres}
     password: ${DB_PASSWORD:Panhaoudom123}
     hikari:
@@ -49,8 +48,8 @@ spring:
           # Google ID tokens are verified server-side against Google's JWK set.
           # The frontend never asserts identity.  // req: FR-AUTH-001, TM-001
           # issuer-uri: https://accounts.google.com 
-          issuer-uri: http://localhost:8180/realms/docs_platform
-          audiences: cocdocs-frontend
+          issuer-uri: 
+          audiences: 
 
   jackson:
     default-property-inclusion: non_null
