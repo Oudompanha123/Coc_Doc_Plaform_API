@@ -10,14 +10,28 @@
 # up in a commit. Activate it with SPRING_PROFILES_ACTIVE=local.
 
 spring:
+  # Default active profile — deliberately NOT "no profile", so `mvn
+  # spring-boot:run`/an IDE run configuration works with zero setup beyond
+  # application-dev.yml (committed alongside this file; see its own header).
+  # Personal secrets (a real DB_PASSWORD, GOOGLE_CLIENT_ID, etc.) are supplied
+  # as environment variables, never a file, matching every ${VAR:default}
+  # placeholder below. An OS environment variable outranks this property in
+  # Spring Boot's precedence, so any real deployment overrides it simply by
+  # setting SPRING_PROFILES_ACTIVE (to "prod", or to nothing) — nothing here
+  # can leak into an environment that sets that variable, which every
+  # non-local deployment must.
+  profiles:
+    active: dev
+
   application:
     name: docs-platform-backend
 
   datasource:
     # Any PostgreSQL 15+ instance: managed, corporate, or on-prem.
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/cocdocs}
+    url: ${DB_URL:jdbc:postgresql://192.168.178.41:5432/cocdocs?currentSchema=cocdocs_dev}
+    # url: ${DB_URL:jdbc:postgresql://192.168.178.41:5432/cocdocs}
     username: ${DB_USER:postgres}
-    password: ${DB_PASSWORD:}
+    password: ${DB_PASSWORD:Panhaoudom123}
     hikari:
       maximum-pool-size: ${DB_POOL_MAX:10}
       # NFR-SCALE-01 sizing: 200 pages, 10 concurrent editors. A large pool
@@ -34,8 +48,9 @@ spring:
         jwt:
           # Google ID tokens are verified server-side against Google's JWK set.
           # The frontend never asserts identity.  // req: FR-AUTH-001, TM-001
-          issuer-uri: https://accounts.google.com
-          audiences: ${GOOGLE_CLIENT_ID:}
+          # issuer-uri: https://accounts.google.com 
+          issuer-uri: http://localhost:8180/realms/docs_platform
+          audiences: cocdocs-frontend
 
   jackson:
     default-property-inclusion: non_null
