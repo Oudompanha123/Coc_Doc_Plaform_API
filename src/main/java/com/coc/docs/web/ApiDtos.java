@@ -1,6 +1,9 @@
 package com.coc.docs.web;
 
 import com.coc.docs.account.Account;
+import com.coc.docs.account.AppRole;
+import com.coc.docs.account.Permission;
+import com.coc.docs.account.RoleRepository;
 import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.page.Page;
 import com.coc.docs.page.PageRepository;
@@ -302,7 +305,14 @@ public final class ApiDtos {
             String role,
             boolean active,
             Instant createdAt,
-            Instant lastSignInAt) {
+            Instant lastSignInAt,
+            /**
+             * Every role held, rank order. {@code role} above is the highest
+             * of these and is what authorisation compares against; this is
+             * here so an administrator can see the whole grant rather than
+             * its effect (ADR-016).
+             */
+            List<String> roles) {
 
         public static AccountResponse of(Account account) {
             return of(account, null);
@@ -316,7 +326,11 @@ public final class ApiDtos {
                     account.role().wire(),
                     account.isActive(),
                     account.createdAt(),
-                    lastSignInAt);
+                    lastSignInAt,
+                    account.roles().stream()
+                            .sorted(java.util.Comparator.comparingInt(Enum::ordinal))
+                            .map(AppRole::wire)
+                            .toList());
         }
     }
 
@@ -327,7 +341,31 @@ public final class ApiDtos {
      * that changing a role does not require restating whether the account is
      * active and risk toggling it by omission.
      */
-    public record UpdateAccountRequest(String role, Boolean active) {}
+    /**
+     * A change to a role, an activation state, a display name, or any
+     * combination. An absent field means "leave alone".
+     */
+    public record UpdateAccountRequest(String role, Boolean active, String displayName) {}
+
+    /**
+     * One role and what it grants.
+     *
+     * <p>Sent so the administration screen can show what a role means rather
+     * than leaving someone to infer it from the name. Read-only: roles are
+     * seeded by migration, not created here (ADR-016).
+     */
+    public record RoleResponse(
+            String key, int rank, String description, List<String> permissions, int accountCount) {
+
+        public static RoleResponse of(RoleRepository.RoleDetail detail) {
+            return new RoleResponse(
+                    detail.role().wire(),
+                    detail.rank(),
+                    detail.description(),
+                    detail.permissions().stream().map(Permission::key).toList(),
+                    detail.accountCount());
+        }
+    }
 
     /**
      * An account a {@code super_admin} creates before its owner first signs in.

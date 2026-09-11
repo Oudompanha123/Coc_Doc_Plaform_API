@@ -65,7 +65,9 @@ public class AccountService {
      * <p>// req: FR-AUTH-003, FR-AUTH-004, FR-AUTH-005, UC-004
      */
     @Transactional
-    public Account update(UUID accountId, AppRole newRole, Boolean active, CurrentUser actor) {
+    public Account update(
+            UUID accountId, AppRole newRole, Boolean active, String displayName, CurrentUser actor) {
+
         Account result = accounts
                 .findById(accountId)
                 .orElseThrow(() -> ApiException.notFound("account " + accountId));
@@ -76,7 +78,33 @@ public class AccountService {
         if (active != null) {
             result = setActive(accountId, active, actor);
         }
+        if (displayName != null) {
+            result = renameFor(accountId, displayName, actor);
+        }
         return result;
+    }
+
+    /**
+     * Corrects an account's display name.
+     *
+     * <p>Worth knowing before using it: for anyone who signs in with Google,
+     * this is temporary. Sign-in refreshes the name from the identity provider,
+     * so an administrator's correction survives only until that person next
+     * signs in. It is genuinely useful for an account created by invite, which
+     * carries an address-derived placeholder until its owner first arrives.
+     *
+     * <p>Not audited as a security event, unlike role and activation changes:
+     * a display name grants nothing. The row's {@code updated_at} moves, which
+     * is the trail that matches the weight of the change.
+     */
+    @Transactional
+    public Account renameFor(UUID accountId, String displayName, CurrentUser actor) {
+        String trimmed = displayName.trim();
+        if (trimmed.isEmpty()) {
+            throw ApiException.badRequest("a display name cannot be blank");
+        }
+        accounts.updateDisplayName(accountId, trimmed);
+        return accounts.findById(accountId).orElseThrow();
     }
 
     /**

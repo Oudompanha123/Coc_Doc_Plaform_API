@@ -114,6 +114,13 @@ public class SecurityConfig {
                         // the personal-data boundary is this one line rather
                         // than a property spread across response types.
                         // // req: FR-AUTH-008, NFR-SEC-PII
+                        // The role catalogue answers "what may an admin do",
+                        // which is the same class of question as who holds a
+                        // role — so it sits under the same super_admin floor,
+                        // not the admin floor the rest of /admin carries.
+                        .requestMatchers("/api/v1/admin/roles/**")
+                        .hasRole(AppRole.SUPER_ADMIN.name())
+
                         .requestMatchers("/api/v1/admin/accounts/**")
                         .hasRole(AppRole.SUPER_ADMIN.name())
 

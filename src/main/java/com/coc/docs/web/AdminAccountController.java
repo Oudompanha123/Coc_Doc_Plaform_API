@@ -103,8 +103,8 @@ public class AdminAccountController {
             @RequestBody ApiDtos.UpdateAccountRequest request,
             @AuthenticationPrincipal CurrentUser actor) {
 
-        if (request.role() == null && request.active() == null) {
-            throw ApiException.badRequest("supply a role, an active flag, or both");
+        if (request.role() == null && request.active() == null && request.displayName() == null) {
+            throw ApiException.badRequest("supply a role, an active flag, a display name, or any combination");
         }
 
         // Parsed before anything is written, so an unknown role name is a 400
@@ -120,10 +120,10 @@ public class AdminAccountController {
         // calls let a request that changed both commit the first and fail the
         // second, which reported an error while a role change had already landed.
         return ApiDtos.AccountResponse.of(
-                accounts.update(accountId, role, request.active(), actor));
+                accounts.update(accountId, role, request.active(), request.displayName(), actor));
     }
 
-    // -----------------------------------------------------------------------
+        // -----------------------------------------------------------------------
     // Self-registration approval (ADR-014)
     // -----------------------------------------------------------------------
 

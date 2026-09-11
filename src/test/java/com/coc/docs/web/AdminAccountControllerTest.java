@@ -51,7 +51,7 @@ import org.springframework.context.annotation.Import;
  *
  * <p>// req: FR-AUTH-003, FR-AUTH-005, FR-AUTH-008, UC-004
  */
-@WebMvcTest
+@WebMvcTest(controllers = com.coc.docs.web.AdminAccountController.class)
 @Import({SecurityConfig.class, ProblemResponses.class, AdminAccountControllerTest.Beans.class})
 class AdminAccountControllerTest {
 
