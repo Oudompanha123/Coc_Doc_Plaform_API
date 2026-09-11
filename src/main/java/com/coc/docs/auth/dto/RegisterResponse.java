@@ -4,10 +4,12 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
  * Returned by {@code POST /api/auth/register}. Registration never signs the
- * caller in — no session cookie is set here; the account cannot sign in at
- * all until a super_admin approves it (ADR-014).
+ * caller in itself — no session cookie is set here — but the account is
+ * created {@code active} and can sign in on the very next request, via
+ * {@code POST /api/v1/auth/login-password} (no {@code super_admin} approval
+ * gate; see {@code AuthController.register}'s javadoc, ADR-014).
  */
 public record RegisterResponse(
-        @Schema(description = "Always PENDING: a super_admin must approve the registration before it can sign in.")
+        @Schema(description = "Always ACTIVE: the account can sign in immediately, no approval step.")
                 String status,
         String message) {}

@@ -9,10 +9,15 @@ spring:
     name: docs-platform-backend
 
   datasource:
-    # Any PostgreSQL 15+ instance: managed, corporate, or on-prem.
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/cocdocs}
-    username: ${DB_USER:postgres}
-    password: ${DB_PASSWORD:}
+    # Any PostgreSQL 15+ instance: managed, corporate, or on-prem. No usable
+    # default for host/port/name/credentials, matching this file's own rule
+    # above — a missing DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD fails
+    # startup clearly instead of silently reaching whichever host used to be
+    # hardcoded here. Set them via a local .env.local (see .env.example) —
+    # never committed, .gitignore already covers it.
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=cocdocs_dev
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
     hikari:
       maximum-pool-size: ${DB_POOL_MAX:10}
       # NFR-SCALE-01 sizing: 200 pages, 10 concurrent editors. A large pool

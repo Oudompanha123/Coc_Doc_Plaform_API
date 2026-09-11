@@ -1,0 +1,4 @@
+# Registers DotenvEnvironmentPostProcessor so .env.local (repo root) is read
+# no matter how the app is launched (IDE run, mvn spring-boot:run, packaged
+# jar) — see that class's javadoc.
+org.springframework.boot.env.EnvironmentPostProcessor=com.coc.docs.config.DotenvEnvironmentPostProcessor

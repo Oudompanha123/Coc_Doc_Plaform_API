@@ -13,9 +13,14 @@ import java.util.UUID;
  * would lose information an administrator needs:
  *
  * <ul>
- *   <li>{@code status} — was this registration ever approved at all? A
- *       self-registered account starts {@link AccountStatus#PENDING} and only a
- *       {@code super_admin} moves it on (ADR-014).
+ *   <li>{@code status} — was this registration ever approved at all? As of
+ *       the 2026-09-11 revision of ADR-014, a self-registered account also
+ *       starts {@link AccountStatus#ACTIVE} immediately — the approval gate
+ *       ADR-014 originally described no longer applies to the register
+ *       endpoint (see {@code AccountService.register}'s javadoc).
+ *       {@link AccountStatus#PENDING} and {@link AccountStatus#REJECTED}
+ *       remain meaningful for any account a {@code super_admin} explicitly
+ *       moves into those states.
  *   <li>{@code deactivatedAt} — was an approved account later turned off?
  * </ul>
  *

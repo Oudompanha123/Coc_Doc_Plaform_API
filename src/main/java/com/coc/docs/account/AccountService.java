@@ -199,15 +199,20 @@ public class AccountService {
     }
 
     /**
-     * Records a self-registration, awaiting a {@code super_admin}'s decision.
+     * Records a self-registration. Creates the account {@code active}
+     * immediately — no {@code super_admin} approval gate — per explicit
+     * product direction (2026-09-11), reversing the auto-activation
+     * ADR-014 explicitly rejected in its "Alternatives Considered" table.
+     * See that ADR for the security tradeoff this reopens: anyone reaching
+     * this endpoint can grant themselves a working account. Recorded here
+     * pending an ADR revision.
      *
      * <p>The caller passes an already-hashed password. Hashing belongs to the
      * web layer's encoder, not here, so no plaintext ever reaches a class that
      * also writes to the audit trail.
      *
-     * <p>The audit entry records the address applied for and nothing else. A
-     * registration is an untrusted stranger's claim about themselves until
-     * someone approves it, and there is no actor id to attribute it to.
+     * <p>The audit entry records the address applied for and nothing else —
+     * there is no actor id to attribute a self-registration to.
      */
     @Transactional
     public Account register(String email, String displayName, String passwordHash) {
@@ -217,7 +222,7 @@ public class AccountService {
             throw ApiException.conflict("that email address is already registered");
         }
 
-        Account created = accounts.insertPendingRegistration(email, displayName, passwordHash);
+        Account created = accounts.insertSelfRegisteredAccount(email, displayName, passwordHash);
 
         audit.append(
                 null,

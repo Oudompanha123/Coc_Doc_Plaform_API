@@ -1,9 +1,10 @@
 # Development profile — committed, shared by every developer. Nothing
-# sensitive belongs in this file: a real DB password, Google OAuth client id,
-# or any other personal/per-machine value is supplied as an environment
-# variable when you run the app (DB_URL, DB_PASSWORD, GOOGLE_CLIENT_ID, ...),
-# exactly matching the ${VAR:default} placeholders in application.yml — never
-# hardcoded here, since this file is part of the repository.
+# sensitive belongs in this file: a real DB host, name, user, password, or
+# Google OAuth client id is supplied as an environment variable when you run
+# the app (DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, GOOGLE_CLIENT_ID,
+# ...) — see .env.example — exactly matching the ${VAR} placeholders in
+# application.yml — never hardcoded here, since this file is part of the
+# repository.
 #
 # Active by default (application.yml's spring.profiles.active: dev). Only
 # the one setting below actually differs from the base config for local

@@ -163,7 +163,11 @@ public class AccountRepository {
     }
 
     /**
-     * Creates a self-registered account awaiting review (ADR-014).
+     * Creates a self-registered account, active immediately — no
+     * {@code super_admin} approval gate. This reverses the gate ADR-014
+     * originally put here (see that ADR's "Alternatives Considered" table,
+     * which explicitly rejected auto-activation); recorded here per explicit
+     * product direction (2026-09-11), pending its own ADR revision.
      *
      * <p>Role and status are literals here, never parameters. A registration
      * request that could choose either would be a self-service route to
@@ -171,10 +175,10 @@ public class AccountRepository {
      * project. The caller supplies an email, a name and a hash; nothing else it
      * sends can reach this statement.
      */
-    public Account insertPendingRegistration(String email, String displayName, String passwordHash) {
+    public Account insertSelfRegisteredAccount(String email, String displayName, String passwordHash) {
         return jdbc.sql("""
                         insert into account (email, display_name, password_hash, role, status)
-                        values (?, ?, ?, 'user'::app_role, 'pending'::account_status)
+                        values (?, ?, ?, 'user'::app_role, 'active'::account_status)
                         returning
                         """ + " " + COLUMNS)
                 .params(email, displayName, passwordHash)

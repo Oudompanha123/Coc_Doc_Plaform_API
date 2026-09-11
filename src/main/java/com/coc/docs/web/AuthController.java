@@ -1,5 +1,6 @@
 package com.coc.docs.web;
 
+import com.coc.docs.account.Account;
 import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.account.AccountService;
 import com.coc.docs.auth.SessionService;
@@ -9,6 +10,7 @@ import com.coc.docs.auth.dto.RegisterResponse;
 import com.coc.docs.config.AppProperties;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import java.util.Locale;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -173,25 +175,31 @@ public class AuthController {
     /**
      * Applies for an account.
      *
-     * <p>Creates nothing anyone can sign in with: the row is {@code pending}
-     * with role {@code user}, and only a {@code super_admin} moves it on. Role
-     * and status are literals in the insert, never taken from this request —
-     * that is what keeps registration off the privilege-escalation path
-     * (TM-025).
+     * <p>Creates an account that can sign in immediately: the row is
+     * {@code active} with role {@code user}. Role and status are literals in
+     * the insert, never taken from this request — that is what keeps
+     * registration off the privilege-escalation path (TM-025).
      *
-     * <p>202, not 201: the account is not usable yet, and a 201 with a Location
-     * would suggest otherwise.
+     * <p>As of 2026-09-11, product direction removed the {@code super_admin}
+     * approval gate ADR-014 originally put here — see
+     * {@code AccountService.register}'s javadoc and ADR-014's "Alternatives
+     * Considered" table, which explicitly rejected this for the security
+     * reason it reopens. Recorded here pending that ADR's own revision.
+     *
+     * <p>200, not 202: the account is usable as soon as this call returns, so
+     * there is nothing left "accepted but pending".
      *
      * <p>// req: FR-AUTH-002, FR-AUTH-003, ADR-014
      */
     @PostMapping("/register")
-    @ResponseStatus(HttpStatus.ACCEPTED)
+    @ResponseStatus(HttpStatus.OK)
     RegisterResponse register(@Valid @RequestBody RegisterRequest request) {
-        accounts.register(
+        Account created = accounts.register(
                 request.email(), request.displayName(), passwordEncoder.encode(request.password()));
 
         return new RegisterResponse(
-                "PENDING", "Your registration is waiting for an administrator to approve it.");
+                created.status().wire().toUpperCase(Locale.ROOT),
+                "Your account has been created. You can now log in.");
     }
 
     /**

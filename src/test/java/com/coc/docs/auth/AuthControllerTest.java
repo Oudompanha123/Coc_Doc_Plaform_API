@@ -11,7 +11,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.coc.docs.account.Account;
 import com.coc.docs.account.AccountService;
+import com.coc.docs.account.AccountStatus;
 import com.coc.docs.account.AppRole;
 import com.coc.docs.config.AppProperties;
 import com.coc.docs.config.ProblemResponses;
@@ -20,6 +22,7 @@ import com.coc.docs.content.BlockBodyValidator;
 import com.coc.docs.page.PageService;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -274,6 +277,42 @@ class AuthControllerTest {
             mvc.perform(post("/api/v1/auth/logout")).andExpect(status().isNoContent());
 
             verify(sessions, never()).signOut(any());
+        }
+    }
+
+    /**
+     * As of the 2026-09-11 revision of ADR-014, a self-registration is
+     * created {@code active} immediately — no {@code super_admin} approval
+     * gate. This replaces the {@code PENDING}/"awaiting approval" behaviour
+     * these tests would otherwise have covered.
+     */
+    @Nested
+    @DisplayName("POST /api/v1/auth/register")
+    class Register {
+
+        @Test
+        @DisplayName("creates the account active and reports that it can sign in immediately")
+        void createsActiveAccount() throws Exception {
+            Account created = new Account(
+                    UUID.randomUUID(),
+                    "new.person@example.com",
+                    "New Person",
+                    AppRole.USER,
+                    AccountStatus.ACTIVE,
+                    null,
+                    Instant.now(),
+                    Instant.now());
+            when(accountService.register(eq("new.person@example.com"), eq("New Person"), any()))
+                    .thenReturn(created);
+
+            mvc.perform(post("/api/v1/auth/register")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"email":"new.person@example.com","displayName":"New Person","password":"hunter2222"}
+                                    """))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("ACTIVE"))
+                    .andExpect(jsonPath("$.message").value("Your account has been created. You can now log in."));
         }
     }
 }
