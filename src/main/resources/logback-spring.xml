@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Coc Docs Platform — backend logging.
+
+  ADDITIVE, NOT A REPLACEMENT
+  This includes Spring Boot's own defaults, so `logging.level.*` and
+  `logging.pattern.*` in application.yml keep working exactly as they do now.
+  Nothing here overrides a level someone set there; this adds a file appender
+  and profile-scoped detail that properties alone cannot express.
+
+  WHAT YOU SEE WHERE
+    console        everything, human-readable, coloured
+    logs/backend.log   the same, rolled daily, 10 days kept
+
+  // req: NFR-OPS-AUDIT
+-->
+<configuration>
+
+  <!-- Boot's conversion rules and ${CONSOLE_LOG_PATTERN}. Including this is
+       what keeps logging.pattern.console in application.yml authoritative. -->
+  <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+  <property name="LOG_DIR" value="${LOG_DIR:-logs}"/>
+
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+      <charset>UTF-8</charset>
+    </encoder>
+  </appender>
+
+  <!--
+    A file as well as the console, because the console scrolls away and the
+    interesting part of a startup failure is usually forty lines above where
+    you started reading.
+
+    UTF-8 explicitly: content here includes Khmer and Korean, and a log written
+    in the platform default codepage is unreadable on this machine
+    (CONST-OPS-01).
+  -->
+  <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_DIR}/backend.log</file>
+    <!-- SizeAndTime, not TimeBased: %i in the pattern is the size index, and
+         TimeBasedRollingPolicy rejects it outright at startup. -->
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+      <fileNamePattern>${LOG_DIR}/backend.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+      <maxFileSize>10MB</maxFileSize>
+      <maxHistory>10</maxHistory>
+      <totalSizeCap>200MB</totalSizeCap>
+    </rollingPolicy>
+    <encoder>
+      <pattern>${FILE_LOG_PATTERN}</pattern>
+      <charset>UTF-8</charset>
+    </encoder>
+  </appender>
+
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+    <appender-ref ref="FILE"/>
+  </root>
+
+  <!--
+    Development detail. Scoped to the dev profile so a deployment never picks
+    it up by accident.
+  -->
+  <springProfile name="dev">
+    <!-- Our own code, in full. -->
+    <logger name="com.coc.docs" level="DEBUG"/>
+
+    <!-- The SQL statement that ran. Useful when a query returns nothing and
+         you cannot tell whether the problem is the filter or the data. -->
+    <logger name="org.springframework.jdbc.core.JdbcTemplate" level="DEBUG"/>
+    <logger name="org.springframework.jdbc.core.simple.JdbcClient" level="DEBUG"/>
+
+    <!--
+      DELIBERATELY ABSENT — do not add these:
+
+        org.springframework.jdbc.core.StatementCreatorUtils   TRACE
+        org.hibernate.type.descriptor.sql                     TRACE
+
+      They log every bound parameter. This schema now holds bcrypt hashes
+      (ADR-014) and session token digests, and the password sign-in path binds
+      the plaintext password as a parameter on its way to the encoder. Turning
+      parameter binding on writes credentials to a file on disk and to anyone's
+      terminal scrollback. If you genuinely need to see a parameter, log the
+      one value you need at the call site and remove it before committing.
+    -->
+
+    <!-- Which rule matched, and why a request was refused. Logs paths and
+         authorities, not credentials. -->
+    <logger name="org.springframework.security.web.FilterChainProxy" level="DEBUG"/>
+
+    <!-- Migration names and versions as Flyway applies them — the fastest way
+         to see a checksum mismatch coming. -->
+    <logger name="org.flywaydb" level="DEBUG"/>
+  </springProfile>
+
+  <!--
+    Anything not dev keeps the root INFO level. Raising a level in a deployment
+    is a configuration change (logging.level.* in application.yml), not an edit
+    to this file.
+  -->
+
+</configuration>
