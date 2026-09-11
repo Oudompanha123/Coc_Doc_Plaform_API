@@ -157,7 +157,7 @@ public class SessionService {
                     existing.id(),
                     existing.email(),
                     displayName,
-                    existing.role(),
+                    existing.roles(),
                     existing.status(),
                     existing.deactivatedAt(),
                     existing.createdAt(),
@@ -210,7 +210,7 @@ public class SessionService {
         return accounts
                 .findById(found.get().accountId())
                 .filter(Account::isActive)
-                .map(account -> new CurrentUser(account, tokenHash));
+                .map(account -> new CurrentUser(account, accounts.findPermissions(account.id()), tokenHash));
     }
 
     // -----------------------------------------------------------------------

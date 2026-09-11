@@ -7,6 +7,8 @@ import com.coc.docs.auth.SessionRepository;
 import com.coc.docs.web.ApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
+import java.util.EnumSet;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -99,16 +101,46 @@ public class AccountService {
      */
     @Transactional
     public Account changeRole(UUID accountId, AppRole newRole, CurrentUser actor) {
+        return setRoles(accountId, EnumSet.of(newRole), actor);
+    }
+
+    /**
+     * Replaces the set of roles an account holds (ADR-016).
+     *
+     * <p>{@link #changeRole} is this with a set of one, kept because the admin
+     * API still speaks in a single role and because most changes really are
+     * "make this person an admin".
+     *
+     * <p>An empty set is refused. It is reachable in the schema — a row in
+     * {@code account} with nothing in {@code account_role} — and
+     * {@link Account#role()} correctly reports {@code guest} for it, but
+     * arriving there through this method is almost always a mistake in the
+     * caller rather than an intent, and the resulting account cannot be told
+     * apart from a broken one. Deactivate the account instead; that says what
+     * was meant and is reversible in one step.
+     *
+     * <p>// req: FR-AUTH-005, FR-AUTH-008, UC-004
+     */
+    @Transactional
+    public Account setRoles(UUID accountId, Set<AppRole> newRoles, CurrentUser actor) {
         Account account = accounts
                 .findById(accountId)
                 .orElseThrow(() -> ApiException.notFound("account " + accountId));
 
-        if (account.role() == newRole) {
+        if (newRoles == null || newRoles.isEmpty()) {
+            throw ApiException.badRequest(
+                    "an account must hold at least one role; deactivate it instead of removing them all");
+        }
+
+        Set<AppRole> current = account.roles();
+        if (current.equals(newRoles)) {
             return account;
         }
 
-        boolean losingSuperAdmin = account.role() == AppRole.SUPER_ADMIN
-                && newRole != AppRole.SUPER_ADMIN
+        // The floor is about the super_admin role specifically, not about rank:
+        // losing it is what removes the ability to grant roles back.
+        boolean losingSuperAdmin = current.contains(AppRole.SUPER_ADMIN)
+                && !newRoles.contains(AppRole.SUPER_ADMIN)
                 && account.isActive();
 
         if (losingSuperAdmin && accounts.isLastActiveSuperAdmin(account.id())) {
@@ -117,12 +149,15 @@ public class AccountService {
                             + account.email());
         }
 
-        accounts.updateRole(account.id(), newRole);
+        accounts.replaceRoles(account.id(), newRoles, actor.id());
 
-        // Only on a demotion. A promotion takes effect on the next request
+        // Only when rank drops. A promotion takes effect on the next request
         // anyway, and signing someone out to give them more authority would be
-        // gratuitous.
-        int revoked = newRole.isAtLeast(account.role()) ? 0 : sessions.revokeAllFor(account.id());
+        // gratuitous. Compared on the highest rank held, because that is what
+        // every authorisation check reads.
+        AppRole before = account.role();
+        AppRole after = account.withRoles(newRoles).role();
+        int revoked = after.isAtLeast(before) ? 0 : sessions.revokeAllFor(account.id());
 
         audit.append(
                 actor.id(),
@@ -132,11 +167,19 @@ public class AccountService {
                 account.id(),
                 json.createObjectNode()
                         .put("subject", account.email())
-                        .put("from", account.role().wire())
-                        .put("to", newRole.wire())
+                        .put("from", wire(current))
+                        .put("to", wire(newRoles))
                         .put("sessionsRevoked", revoked));
 
         return accounts.findById(account.id()).orElseThrow();
+    }
+
+    /** Role sets in the audit trail, ordered by rank so two equal sets always read identically. */
+    private static String wire(Set<AppRole> roles) {
+        return roles.stream()
+                .sorted(java.util.Comparator.comparingInt(Enum::ordinal))
+                .map(AppRole::wire)
+                .collect(java.util.stream.Collectors.joining(","));
     }
 
     /**

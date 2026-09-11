@@ -1,33 +1,62 @@
 package com.coc.docs.account;
 
+import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
+import java.util.EnumSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Reads and writes {@code account} rows.
+ * Reads and writes {@code account} rows and the roles they hold.
  *
- * <p>// req: FR-AUTH-003, FR-AUTH-005, FR-AUTH-008, ADR-014
+ * <p>Roles live in {@code account_role} (ADR-016), so every read here joins and
+ * aggregates them rather than selecting a column. They are aggregated in the
+ * same statement rather than fetched per account: the account list is one
+ * query, not one plus N.
+ *
+ * <p>// req: FR-AUTH-003, FR-AUTH-005, FR-AUTH-008, ADR-014, ADR-016
  */
 @Repository
 public class AccountRepository {
 
-    private static final String COLUMNS =
-            "id, email, display_name, role, status, deactivated_at, created_at, updated_at";
+    /**
+     * The account columns, always aliased {@code a}.
+     *
+     * <p>{@code password_hash} is deliberately absent: every query in this
+     * class except {@link #findCredentialByEmailIgnoreCase} must be incapable
+     * of reading it. Kept as its own list rather than appended, so neither can
+     * drift into the other by accident.
+     */
+    private static final String ACCOUNT_COLUMNS =
+            "a.id, a.email, a.display_name, a.status, a.deactivated_at, a.created_at, a.updated_at";
 
     /**
-     * {@code password_hash} is deliberately absent from {@link #COLUMNS}: every
-     * query in this class except {@link #findCredentialByEmailIgnoreCase} must
-     * be incapable of reading it. Kept as its own list rather than appended to
-     * {@code COLUMNS}, so neither can drift into the other by accident.
+     * {@code filter (where ...)} rather than a plain {@code array_agg}: the
+     * left join produces one null row for an account holding no roles, and
+     * without the filter that account would come back holding a set containing
+     * null instead of an empty one.
      */
-    private static final String COLUMNS_WITH_CREDENTIAL = COLUMNS + ", password_hash";
+    private static final String ROLES_COLUMN =
+            "coalesce(array_agg(ar.role_key::text) filter (where ar.role_key is not null), '{}') as roles";
+
+    private static final String FROM =
+            " from account a left join account_role ar on ar.account_id = a.id ";
+
+    /** Grouped by the primary key, so every other account column is functionally dependent and needs no repeating. */
+    private static final String GROUP_BY = " group by a.id ";
+
+    private static final String SELECT = "select " + ACCOUNT_COLUMNS + ", " + ROLES_COLUMN + FROM;
+
+    private static final String SELECT_WITH_CREDENTIAL =
+            "select " + ACCOUNT_COLUMNS + ", a.password_hash, " + ROLES_COLUMN + FROM;
 
     private static final RowMapper<Account> MAPPER = AccountRepository::map;
 
@@ -41,21 +70,39 @@ public class AccountRepository {
     }
 
     private static Account map(ResultSet rs, int rowNum) throws SQLException {
-        String raw = rs.getString("role");
-        Optional<AppRole> role = AppRole.parse(raw);
-        if (role.isEmpty()) {
-            throw new SQLException("account.role holds a value outside the app_role enum: " + raw);
-        }
         OffsetDateTime deactivated = rs.getObject("deactivated_at", OffsetDateTime.class);
         return new Account(
                 rs.getObject("id", UUID.class),
                 rs.getString("email"),
                 rs.getString("display_name"),
-                role.get(),
+                readRoles(rs),
                 AccountStatus.fromDb(rs.getString("status")),
                 deactivated == null ? null : deactivated.toInstant(),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
                 rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+    }
+
+    /**
+     * Fails loudly on a role name this application does not know, rather than
+     * dropping it.
+     *
+     * <p>Silently skipping would quietly reduce someone's access — and a
+     * reduction in access reads, to everyone involved, as the system working
+     * correctly. Nobody reports it, so it is never found.
+     */
+    private static Set<AppRole> readRoles(ResultSet rs) throws SQLException {
+        Array array = rs.getArray("roles");
+        if (array == null) {
+            return EnumSet.noneOf(AppRole.class);
+        }
+        String[] keys = (String[]) array.getArray();
+        Set<AppRole> roles = EnumSet.noneOf(AppRole.class);
+        for (String key : keys) {
+            roles.add(AppRole.parse(key)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "account_role.role_key holds a value outside the app_role enum: " + key)));
+        }
+        return roles;
     }
 
     // -----------------------------------------------------------------------
@@ -63,7 +110,7 @@ public class AccountRepository {
     // -----------------------------------------------------------------------
 
     public Optional<Account> findById(UUID id) {
-        return jdbc.sql("select " + COLUMNS + " from account where id = ?")
+        return jdbc.sql(SELECT + " where a.id = ?" + GROUP_BY)
                 .param(id)
                 .query(MAPPER)
                 .optional();
@@ -75,14 +122,14 @@ public class AccountRepository {
      * second account for the same person.
      */
     public Optional<Account> findByEmail(String email) {
-        return jdbc.sql("select " + COLUMNS + " from account where lower(email) = lower(?)")
+        return jdbc.sql(SELECT + " where lower(a.email) = lower(?)" + GROUP_BY)
                 .param(email)
                 .query(MAPPER)
                 .optional();
     }
 
     public List<Account> findAll() {
-        return jdbc.sql("select " + COLUMNS + " from account order by email")
+        return jdbc.sql(SELECT + GROUP_BY + " order by a.email")
                 .query(MAPPER)
                 .list();
     }
@@ -94,7 +141,7 @@ public class AccountRepository {
      * behind Friday's registrations.
      */
     public List<Account> findByStatus(AccountStatus status) {
-        return jdbc.sql("select " + COLUMNS + " from account where status = ?::account_status order by created_at")
+        return jdbc.sql(SELECT + " where a.status = ?::account_status" + GROUP_BY + " order by a.created_at")
                 .param(status.wire())
                 .query(MAPPER)
                 .list();
@@ -109,10 +156,43 @@ public class AccountRepository {
      * response time alone tells an attacker which addresses are registered.
      */
     public Optional<AccountCredential> findCredentialByEmailIgnoreCase(String email) {
-        return jdbc.sql("select " + COLUMNS_WITH_CREDENTIAL + " from account where lower(email) = lower(?)")
+        return jdbc.sql(SELECT_WITH_CREDENTIAL + " where lower(a.email) = lower(?)" + GROUP_BY)
                 .param(email)
                 .query(CREDENTIAL_MAPPER)
                 .optional();
+    }
+
+    /**
+     * Every permission granted by any role this account holds.
+     *
+     * <p>Resolved per request alongside the account, never cached in the
+     * session row and never carried in a token: a revoked permission has to
+     * take effect on the caller's next request, which is the whole reason
+     * sessions here are opaque rather than JWTs (ADR-011).
+     *
+     * <p>// req: FR-AUTH-005, TM-003
+     */
+    public Set<Permission> findPermissions(UUID accountId) {
+        List<String> keys = jdbc.sql("""
+                        select distinct rp.permission_key
+                        from account_role ar
+                        join role_permission rp on rp.role_key = ar.role_key
+                        where ar.account_id = ?
+                        """)
+                .param(accountId)
+                .query(String.class)
+                .list();
+
+        Set<Permission> permissions = EnumSet.noneOf(Permission.class);
+        for (String key : keys) {
+            // Unknown key: the database grants something this build has no
+            // constant for. Ignored rather than fatal — a permission the code
+            // never checks cannot be enforced anyway, and refusing to
+            // authenticate would turn a forward-compatible deployment into an
+            // outage. PermissionTest is what keeps the two in step.
+            Permission.parse(key).ifPresent(permissions::add);
+        }
+        return permissions;
     }
 
     /**
@@ -127,8 +207,12 @@ public class AccountRepository {
      */
     public boolean isLastActiveSuperAdmin(UUID excluding) {
         Integer remaining = jdbc.sql("""
-                        select count(*) from account
-                        where role = 'super_admin' and deactivated_at is null and id <> ?
+                        select count(*)
+                        from account_role ar
+                        join account a on a.id = ar.account_id
+                        where ar.role_key = 'super_admin'
+                          and a.deactivated_at is null
+                          and a.id <> ?
                         """)
                 .param(excluding)
                 .query(Integer.class)
@@ -152,14 +236,16 @@ public class AccountRepository {
      * administrator's identity provider already vouched for.
      */
     public Account insert(String email, String displayName, AppRole role) {
-        return jdbc.sql("""
-                        insert into account (email, display_name, role, status)
-                        values (?, ?, ?::app_role, 'active'::account_status)
-                        returning
-                        """ + " " + COLUMNS)
-                .params(email, displayName, role.wire())
-                .query(MAPPER)
+        UUID id = jdbc.sql("""
+                        insert into account (email, display_name, status)
+                        values (?, ?, 'active'::account_status)
+                        returning id
+                        """)
+                .params(email, displayName)
+                .query(UUID.class)
                 .single();
+        grantRole(id, role, null);
+        return findById(id).orElseThrow();
     }
 
     /**
@@ -173,17 +259,19 @@ public class AccountRepository {
      * request that could choose either would be a self-service route to
      * {@code super_admin}, which is TM-025 — the second-highest threat on the
      * project. The caller supplies an email, a name and a hash; nothing else it
-     * sends can reach this statement.
+     * sends can reach these statements.
      */
     public Account insertSelfRegisteredAccount(String email, String displayName, String passwordHash) {
-        return jdbc.sql("""
-                        insert into account (email, display_name, password_hash, role, status)
-                        values (?, ?, ?, 'user'::app_role, 'active'::account_status)
-                        returning
-                        """ + " " + COLUMNS)
+        UUID id = jdbc.sql("""
+                        insert into account (email, display_name, password_hash, status)
+                        values (?, ?, ?, 'active'::account_status)
+                        returning id
+                        """)
                 .params(email, displayName, passwordHash)
-                .query(MAPPER)
+                .query(UUID.class)
                 .single();
+        grantRole(id, AppRole.USER, null);
+        return findById(id).orElseThrow();
     }
 
     /** A {@code super_admin}'s approve or reject on a pending registration (ADR-014). */
@@ -203,10 +291,43 @@ public class AccountRepository {
                 .update();
     }
 
-    public int updateRole(UUID id, AppRole role) {
-        return jdbc.sql("update account set role = ?::app_role, updated_at = now() where id = ?")
-                .params(role.wire(), id)
+    /**
+     * Grants one role. Idempotent — granting a role already held is not an
+     * error, and must not disturb {@code granted_at}.
+     *
+     * <p>{@code grantedBy} is null only for roles no human granted: the
+     * default role a first sign-in provisions itself.
+     */
+    public int grantRole(UUID accountId, AppRole role, UUID grantedBy) {
+        return jdbc.sql("""
+                        insert into account_role (account_id, role_key, granted_by)
+                        values (?, ?::app_role, ?)
+                        on conflict (account_id, role_key) do nothing
+                        """)
+                .params(accountId, role.wire(), grantedBy)
                 .update();
+    }
+
+    /** Revokes one role. Revoking one not held is a no-op, not an error. */
+    public int revokeRole(UUID accountId, AppRole role) {
+        return jdbc.sql("delete from account_role where account_id = ? and role_key = ?::app_role")
+                .params(accountId, role.wire())
+                .update();
+    }
+
+    /**
+     * Replaces the whole set in one transaction.
+     *
+     * <p>Delete-then-insert rather than a diff. The set is tiny, and the
+     * intermediate state is never visible: the {@code super_admin} guard is a
+     * deferred constraint trigger, so it is evaluated at commit against the
+     * final state, not against the momentary emptiness in between.
+     */
+    public void replaceRoles(UUID accountId, Set<AppRole> roles, UUID grantedBy) {
+        jdbc.sql("delete from account_role where account_id = ?").param(accountId).update();
+        for (AppRole role : new LinkedHashSet<>(roles)) {
+            grantRole(accountId, role, grantedBy);
+        }
     }
 
     /** Deactivate, never delete: authored content keeps its attribution. */

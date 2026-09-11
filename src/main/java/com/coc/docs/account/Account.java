@@ -1,6 +1,10 @@
 package com.coc.docs.account;
 
 import java.time.Instant;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.EnumSet;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -38,11 +42,44 @@ public record Account(
         UUID id,
         String email,
         String displayName,
-        AppRole role,
+        Set<AppRole> roles,
         AccountStatus status,
         Instant deactivatedAt,
         Instant createdAt,
         Instant updatedAt) {
+
+    /**
+     * Defensive copy. The role set backs every authorisation decision made
+     * during a request; it must not change underneath one.
+     */
+    public Account {
+        roles = (roles == null || roles.isEmpty())
+                ? Collections.unmodifiableSet(EnumSet.noneOf(AppRole.class))
+                : Collections.unmodifiableSet(EnumSet.copyOf(roles));
+    }
+
+    /**
+     * The highest-ranked role held — what every {@code isAtLeast} check
+     * compares against.
+     *
+     * <p><b>Highest, deliberately.</b> With a set of roles, "is the caller at
+     * least admin" has to pick one. Picking the highest means holding an extra
+     * low-ranked role can never take access away; the alternative would make
+     * granting someone a role a potentially destructive act, which is not how
+     * anyone expects a grant to behave.
+     *
+     * <p>Falls back to {@link AppRole#GUEST} when no role is held. That state
+     * is reachable — a {@code super_admin} can revoke the last one — and it
+     * means "nothing", not an exception on a hot path.
+     */
+    public AppRole role() {
+        return roles.stream().max(Comparator.comparingInt(Enum::ordinal)).orElse(AppRole.GUEST);
+    }
+
+    /** Whether this account holds a role specifically, as opposed to out-ranking it. */
+    public boolean hasRole(AppRole role) {
+        return roles.contains(role);
+    }
 
     /** False once a {@code super_admin} has deactivated the account. */
     public boolean isActive() {
@@ -63,6 +100,11 @@ public record Account(
 
     /** A copy with a different status, for a {@code super_admin}'s approve or reject. */
     public Account withStatus(AccountStatus newStatus) {
-        return new Account(id, email, displayName, role, newStatus, deactivatedAt, createdAt, updatedAt);
+        return new Account(id, email, displayName, roles, newStatus, deactivatedAt, createdAt, updatedAt);
+    }
+
+    /** A copy holding a different set of roles. */
+    public Account withRoles(Set<AppRole> newRoles) {
+        return new Account(id, email, displayName, newRoles, status, deactivatedAt, createdAt, updatedAt);
     }
 }

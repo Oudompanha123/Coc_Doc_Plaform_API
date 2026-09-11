@@ -297,7 +297,7 @@ class AuthControllerTest {
                     UUID.randomUUID(),
                     "new.person@example.com",
                     "New Person",
-                    AppRole.USER,
+                    java.util.EnumSet.of(AppRole.USER),
                     AccountStatus.ACTIVE,
                     null,
                     Instant.now(),

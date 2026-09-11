@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 class AccountTest {
 
     private Account account(AccountStatus status, boolean deactivated) {
-        return new Account(UUID.randomUUID(), "person@example.com", "Person", AppRole.USER, status, deactivated ? java.time.Instant.now() : null, java.time.Instant.now(), java.time.Instant.now());
+        return new Account(UUID.randomUUID(), "person@example.com", "Person", java.util.EnumSet.of(AppRole.USER), status, deactivated ? java.time.Instant.now() : null, java.time.Instant.now(), java.time.Instant.now());
     }
 
     @Test

@@ -91,15 +91,30 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
         }
 
         /**
-         * Grants the caller's own role and every role beneath it, so a
-         * {@code hasRole("USER")} rule admits an admin without each rule having
-         * to spell out the whole ladder.
+         * Grants the caller's rank and every rank beneath it, plus every
+         * permission their roles carry.
+         *
+         * <p>The rank ladder is kept so a {@code hasRole("USER")} rule still
+         * admits an admin without spelling out the ladder. Permissions are
+         * added as plain authorities with no {@code ROLE_} prefix, so a rule
+         * reads {@code hasAuthority("content.publish")} and cannot be confused
+         * with {@code hasRole()}, which prefixes silently.
+         *
+         * <p>Both, because they answer different questions: {@code
+         * page.min_role} asks for a rank, an endpoint asks for a capability
+         * (ADR-016).
          */
         private static List<GrantedAuthority> authorities(CurrentUser user) {
-            return java.util.Arrays.stream(com.coc.docs.account.AppRole.values())
-                    .filter(candidate -> user.role().isAtLeast(candidate))
-                    .map(candidate -> (GrantedAuthority) new SimpleGrantedAuthority(candidate.authority()))
-                    .toList();
+            List<GrantedAuthority> granted = new java.util.ArrayList<>(
+                    java.util.Arrays.stream(com.coc.docs.account.AppRole.values())
+                            .filter(candidate -> user.role().isAtLeast(candidate))
+                            .map(candidate -> (GrantedAuthority) new SimpleGrantedAuthority(candidate.authority()))
+                            .toList());
+
+            user.permissions()
+                    .forEach(permission -> granted.add(new SimpleGrantedAuthority(permission.key())));
+
+            return List.copyOf(granted);
         }
 
         @Override

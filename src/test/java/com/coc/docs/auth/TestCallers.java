@@ -30,12 +30,12 @@ public final class TestCallers {
                 UUID.randomUUID(),
                 role.wire() + "@example.com",
                 "Test " + role.wire(),
-                role,
+                java.util.EnumSet.of(role),
                 AccountStatus.ACTIVE,
                 null,
                 Instant.now(),
                 Instant.now());
-        return new CurrentUser(account, new byte[] {1, 2, 3});
+        return new CurrentUser(account, com.coc.docs.account.TestPermissions.of(role), new byte[] {1, 2, 3});
     }
 
     /** The same authentication the real filter installs, for a caller of this role. */
