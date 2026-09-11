@@ -35,8 +35,25 @@ public final class ApiDtos {
     // Auth
     // -----------------------------------------------------------------------
 
-    /** The sign-in request: a Google ID token and nothing else. */
+    /**
+     * The sign-in request: an ID token and nothing else.
+     *
+     * <p>No nonce field, deliberately. The expected nonce is read from the
+     * {@code coc_oidc_nonce} cookie, because a value the caller supplies
+     * cannot be evidence about the caller — a replayer would send the captured
+     * token together with the nonce baked into it and both would agree.
+     */
     public record GoogleSignInRequest(@NotBlank String idToken) {}
+
+    /**
+     * The nonce for one sign-in attempt.
+     *
+     * <p>Returned in the body so the caller can pass it to Keycloak, and set
+     * as an {@code httpOnly} cookie so the backend keeps a copy the caller
+     * cannot choose. Both, deliberately: the body copy is an instruction, the
+     * cookie copy is the evidence.
+     */
+    public record NonceResponse(String nonce) {}
 
     /**
      * Who the caller is.
