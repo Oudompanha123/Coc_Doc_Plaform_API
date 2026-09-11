@@ -8,6 +8,8 @@ import com.coc.docs.auth.dto.PasswordLoginRequest;
 import com.coc.docs.auth.dto.RegisterRequest;
 import com.coc.docs.auth.dto.RegisterResponse;
 import com.coc.docs.config.AppProperties;
+import com.coc.docs.auth.NonceService;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.Locale;
@@ -43,32 +45,71 @@ public class AuthController {
     private final AppProperties properties;
     private final AccountService accounts;
     private final PasswordEncoder passwordEncoder;
+    private final NonceService nonces;
 
     public AuthController(
             SessionService sessions,
             AppProperties properties,
             AccountService accounts,
-            PasswordEncoder passwordEncoder) {
+            PasswordEncoder passwordEncoder,
+            NonceService nonces) {
         this.sessions = sessions;
         this.properties = properties;
         this.accounts = accounts;
         this.passwordEncoder = passwordEncoder;
+        this.nonces = nonces;
     }
 
     /**
-     * Exchanges a verified Google ID token for a session cookie.
+     * Starts a Google sign-in attempt.
      *
-     * <p>// req: FR-AUTH-001, FR-AUTH-002
+     * <p>Returns a one-time nonce and sets the same value as a short-lived
+     * {@code httpOnly} cookie. The caller passes the returned value to
+     * Keycloak; the backend later compares the ID token's {@code nonce} claim
+     * against the <em>cookie</em>, never against anything the request body
+     * carries. {@link NonceService} explains why that distinction is the whole
+     * control rather than a detail of it (TM-001).
+     *
+     * <p>Public, and it has to be — it is the first call of a sign-in, made
+     * before anyone is signed in. It discloses nothing and creates nothing.
+     *
+     * <p>// req: FR-AUTH-001, NFR-SEC-AUTH, TM-001, ADR-013
+     */
+    @PostMapping("/nonce")
+    ResponseEntity<ApiDtos.NonceResponse> nonce() {
+        String value = nonces.newNonce();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, nonceCookie(value).toString())
+                .body(new ApiDtos.NonceResponse(value));
+    }
+
+    /**
+     * Exchanges a verified ID token for a session cookie — and, for someone
+     * arriving for the first time, creates their account at role {@code user}.
+     *
+     * <p>That is what "register with Google" is here: there is no separate
+     * registration endpoint, because a second place deciding what a new
+     * account may do is a second place to get it wrong. See
+     * {@code SessionService.createAccount}.
+     *
+     * <p>// req: FR-AUTH-001, FR-AUTH-002, FR-AUTH-003
      */
     @PostMapping("/google")
     ResponseEntity<ApiDtos.MeResponse> signIn(
             @Valid @RequestBody ApiDtos.GoogleSignInRequest request, HttpServletRequest http) {
 
-        SessionService.IssuedSession issued =
-                sessions.signIn(request.idToken(), http.getHeader(HttpHeaders.USER_AGENT), clientIp(http));
+        SessionService.IssuedSession issued = sessions.signIn(
+                request.idToken(),
+                readCookie(http, NonceService.COOKIE_NAME),
+                http.getHeader(HttpHeaders.USER_AGENT),
+                clientIp(http));
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, sessionCookie(issued).toString())
+                // Spent. Leaving it in place would let a captured ID token be
+                // replayed for the rest of the nonce's five minutes, which is
+                // most of what the nonce exists to prevent.
+                .header(HttpHeaders.SET_COOKIE, expiredNonceCookie().toString())
                 .body(new ApiDtos.MeResponse(
                         issued.account().id(),
                         issued.account().email(),
@@ -144,6 +185,53 @@ public class AuthController {
                 .path("/")
                 .maxAge(0)
                 .build();
+    }
+
+    /**
+     * The nonce cookie.
+     *
+     * <p>{@code httpOnly} for the reason the whole mechanism depends on: if
+     * script could read it, an XSS could read the expected value and mint a
+     * matching token request, and the nonce would be checking the caller
+     * against a value the caller supplied.
+     *
+     * <p>{@code path=/} rather than scoped to the auth routes. The browser
+     * must send it on the sign-in POST, and a narrower path is one of those
+     * settings that works until someone moves an endpoint.
+     */
+    private ResponseCookie nonceCookie(String value) {
+        return ResponseCookie.from(NonceService.COOKIE_NAME, value)
+                .httpOnly(true)
+                .secure(properties.cookieSecure())
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(NonceService.TTL)
+                .build();
+    }
+
+    private ResponseCookie expiredNonceCookie() {
+        return ResponseCookie.from(NonceService.COOKIE_NAME, "")
+                .httpOnly(true)
+                .secure(properties.cookieSecure())
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(0)
+                .build();
+    }
+
+    /** Null when absent or blank, which {@code KeycloakIdTokenService} refuses outright. */
+    private static String readCookie(HttpServletRequest request, String name) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) {
+            return null;
+        }
+        for (Cookie cookie : cookies) {
+            if (name.equals(cookie.getName())) {
+                String value = cookie.getValue();
+                return (value == null || value.isBlank()) ? null : value;
+            }
+        }
+        return null;
     }
 
     /**

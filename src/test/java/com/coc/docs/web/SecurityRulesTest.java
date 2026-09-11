@@ -67,6 +67,11 @@ class SecurityRulesTest {
     @MockitoBean SessionService sessionService;
     @MockitoBean BlockBodyValidator validator;
 
+    // Mocked: this test is about which routes the filter chain admits, not
+    // about what a nonce contains. AuthController needs it to construct, so
+    // without it the whole context fails before a single rule is exercised.
+    @MockitoBean com.coc.docs.auth.NonceService nonceService;
+
     @TestConfiguration
     static class Beans {
 
@@ -124,6 +129,14 @@ class SecurityRulesTest {
             // the question the frontend asks on every load, and an anonymous
             // visitor is the expected answer, not an error.
             mvc.perform(get(path)).andExpect(status().isOk());
+        }
+
+        @Test
+        void nonce_is_reachable_without_a_session() throws Exception {
+            // It has to be: it is the first call of a sign-in, made by someone
+            // who is by definition not signed in yet. A 401 here would make
+            // Google sign-in impossible to start.
+            mvc.perform(post("/api/v1/auth/nonce")).andExpect(status().isOk());
         }
 
         @Test

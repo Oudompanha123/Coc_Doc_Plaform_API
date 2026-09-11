@@ -18,6 +18,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Optional;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,6 +49,13 @@ public class SessionService {
     private final AccountRepository accounts;
     private final AuditRepository audit;
     private final GoogleIdTokenVerifier google;
+
+    /**
+     * The ADR-013 broker, present only when a Keycloak realm is configured.
+     * An {@link ObjectProvider} rather than a required dependency, because a
+     * deployment without Keycloak must still boot and serve the reader path.
+     */
+    private final ObjectProvider<KeycloakIdTokenService> keycloak;
     private final AppProperties properties;
     private final ObjectMapper json;
     private final Clock clock;
@@ -69,6 +77,7 @@ public class SessionService {
             AccountRepository accounts,
             AuditRepository audit,
             GoogleIdTokenVerifier google,
+            ObjectProvider<KeycloakIdTokenService> keycloak,
             AppProperties properties,
             ObjectMapper json,
             Clock clock,
@@ -77,6 +86,7 @@ public class SessionService {
         this.accounts = accounts;
         this.audit = audit;
         this.google = google;
+        this.keycloak = keycloak;
         this.properties = properties;
         this.json = json;
         this.clock = clock;
@@ -103,11 +113,12 @@ public class SessionService {
      * <p>// req: FR-AUTH-001, FR-AUTH-003, FR-AUTH-005
      */
     @Transactional
-    public IssuedSession signIn(String idToken, String userAgent, String ipAddress) {
-        GoogleIdTokenVerifier.GoogleIdentity identity;
+    public IssuedSession signIn(
+            String idToken, String expectedNonce, String userAgent, String ipAddress) {
+        VerifiedIdentity identity;
         try {
-            identity = google.verify(idToken);
-        } catch (GoogleIdTokenVerifier.AuthenticationFailure e) {
+            identity = verifyIdToken(idToken, expectedNonce);
+        } catch (GoogleIdTokenVerifier.AuthenticationFailure | AuthenticationFailedException e) {
             // Recorded without an actor id, because there is no verified actor.
             ObjectNode detail = json.createObjectNode().put("reason", e.getMessage());
             audit.append(
@@ -120,6 +131,12 @@ public class SessionService {
                 .findByEmail(identity.email())
                 .map(existing -> refreshName(existing, identity.displayName()))
                 .orElseGet(() -> createAccount(identity));
+
+        // Note for the reader: the line above is where "register with Google"
+        // happens. There is no separate Google registration endpoint, and
+        // deliberately so — a first sign-in provisions the account at role
+        // `user` and nothing more (see createAccount). Two endpoints would mean
+        // two places that decide what a new account may do.
 
         // canSignIn, not isActive: someone who self-registered and is still
         // awaiting approval must not get in through the Google door instead
@@ -166,7 +183,17 @@ public class SessionService {
         return existing;
     }
 
-    private Account createAccount(GoogleIdTokenVerifier.GoogleIdentity identity) {
+    /**
+     * Registration by Google, which is simply a first sign-in.
+     *
+     * <p><b>Role is the literal {@link AppRole#USER}</b>, never anything the
+     * token carried. Whoever the identity provider says you are, arriving here
+     * for the first time buys read access and nothing else; everything above
+     * that is granted by a {@code super_admin} afterwards. This is the same
+     * rule the password registration path follows, and it is what keeps
+     * account creation off the privilege-escalation path (TM-025).
+     */
+    private Account createAccount(VerifiedIdentity identity) {
         Account created = accounts.insert(identity.email(), identity.displayName(), AppRole.USER);
         audit.append(
                 created.id(),
@@ -176,9 +203,34 @@ public class SessionService {
                 created.id(),
                 json.createObjectNode()
                         .put("role", created.role().wire())
-                        .put("via", "google-sign-in")
-                        .put("googleSubject", identity.subject()));
+                        .put("via", "google-sign-in"));
         return created;
+    }
+
+    /**
+     * Verifies the ID token with whichever identity the deployment trusts.
+     *
+     * <p>ADR-013 moved that trust to Keycloak, which brokers Google upstream.
+     * The Keycloak verifier only exists when a realm is configured
+     * ({@code app.keycloak.issuer-uri}); where it is not, this falls back to
+     * verifying a Google-issued token directly, which is what ADR-008
+     * originally specified.
+     *
+     * <p>The fallback is not a permissive default. Both paths verify a
+     * signature, an issuer and an audience; they differ only in whose keys
+     * they trust. What the fallback cannot do is check the nonce — Google's
+     * own ID token carries one only if the client requested it, and this
+     * project's direct-Google path never did. That is stated here rather than
+     * hidden, because it means replay protection (TM-001) arrives with
+     * Keycloak and not before.
+     */
+    private VerifiedIdentity verifyIdToken(String idToken, String expectedNonce) {
+        KeycloakIdTokenService broker = keycloak.getIfAvailable();
+        if (broker != null) {
+            return broker.verify(idToken, expectedNonce);
+        }
+        GoogleIdTokenVerifier.GoogleIdentity google = this.google.verify(idToken);
+        return new VerifiedIdentity(google.email(), google.displayName());
     }
 
     // -----------------------------------------------------------------------

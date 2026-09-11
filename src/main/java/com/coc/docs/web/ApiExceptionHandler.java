@@ -1,5 +1,6 @@
 package com.coc.docs.web;
 
+import com.coc.docs.auth.AuthenticationFailedException;
 import com.coc.docs.auth.GoogleIdTokenVerifier;
 import java.util.List;
 import java.util.Map;
@@ -51,8 +52,8 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
      * audience, unverified email, deactivated account -- is recorded in the audit
      * trail and told to nobody else. // req: TM-001
      */
-    @ExceptionHandler(GoogleIdTokenVerifier.AuthenticationFailure.class)
-    ProblemDetail handleAuthFailure(GoogleIdTokenVerifier.AuthenticationFailure e) {
+    @ExceptionHandler({GoogleIdTokenVerifier.AuthenticationFailure.class, AuthenticationFailedException.class})
+    ProblemDetail handleAuthFailure(RuntimeException e) {
         log.info("sign-in refused: {}", e.getMessage());
         return ProblemDetail.forStatusAndDetail(
                 HttpStatus.UNAUTHORIZED, "sign-in could not be completed");
@@ -113,6 +114,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return List.of(
                 ApiException.class,
                 GoogleIdTokenVerifier.AuthenticationFailure.class,
+                AuthenticationFailedException.class,
                 AccessDeniedException.class);
     }
 }

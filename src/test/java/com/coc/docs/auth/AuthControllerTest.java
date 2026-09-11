@@ -79,6 +79,13 @@ class AuthControllerTest {
     @TestConfiguration
     static class Beans {
 
+        /** The real one: it is pure SecureRandom, and a stub would make the
+         *  cookie-versus-body test below prove nothing. */
+        @Bean
+        NonceService nonceService() {
+            return new NonceService();
+        }
+
         /** Real bcrypt, not a stub: these tests exercise the filter chain, and a
          *  fake encoder would let a password path pass that production refuses. */
         @Bean
@@ -132,7 +139,7 @@ class AuthControllerTest {
         @DisplayName("issues a session and reports the caller as authenticated")
         void issuesSession() throws Exception {
             var caller = TestCallers.user(AppRole.ADMIN);
-            when(sessions.signIn(eq("good-token"), any(), any()))
+            when(sessions.signIn(eq("good-token"), any(), any(), any()))
                     .thenReturn(new SessionService.IssuedSession(
                             "opaque-session-token",
                             caller.account(),
@@ -156,7 +163,7 @@ class AuthControllerTest {
         @DisplayName("sets an HttpOnly, Lax, root-path session cookie")
         void setsHardenedCookie() throws Exception {
             var caller = TestCallers.user(AppRole.USER);
-            when(sessions.signIn(any(), any(), any()))
+            when(sessions.signIn(any(), any(), any(), any()))
                     .thenReturn(new SessionService.IssuedSession(
                             "opaque-session-token", caller.account(), Instant.now()));
 
@@ -184,7 +191,7 @@ class AuthControllerTest {
                             .content(body("")))
                     .andExpect(status().isBadRequest());
 
-            verify(sessions, never()).signIn(any(), any(), any());
+            verify(sessions, never()).signIn(any(), any(), any(), any());
         }
 
         /**
@@ -195,7 +202,7 @@ class AuthControllerTest {
         @Test
         @DisplayName("answers a generic 401 when sign-in is refused")
         void genericUnauthorized() throws Exception {
-            when(sessions.signIn(any(), any(), any()))
+            when(sessions.signIn(any(), any(), any(), any()))
                     .thenThrow(new GoogleIdTokenVerifier.AuthenticationFailure(
                             "this account is deactivated"));
 
@@ -313,6 +320,112 @@ class AuthControllerTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value("ACTIVE"))
                     .andExpect(jsonPath("$.message").value("Your account has been created. You can now log in."));
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /api/v1/auth/nonce")
+    class Nonce {
+
+        @Test
+        @DisplayName("returns a nonce and sets it as a hardened, short-lived cookie")
+        void issuesNonceCookie() throws Exception {
+            MvcResult result = mvc.perform(post("/api/v1/auth/nonce"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.nonce").isNotEmpty())
+                    .andReturn();
+
+            assertThat(result.getResponse().getHeader(HttpHeaders.SET_COOKIE))
+                    .contains(NonceService.COOKIE_NAME + "=")
+                    // HttpOnly is the control, not a hardening detail: a nonce
+                    // script can read is a nonce an XSS can satisfy.
+                    .contains("HttpOnly")
+                    .contains("SameSite=Lax")
+                    .contains("Path=/")
+                    .contains("Max-Age=" + NonceService.TTL.toSeconds());
+        }
+
+        @Test
+        @DisplayName("issues a different nonce each time")
+        void noncesAreNotReused() throws Exception {
+            String first = mvc.perform(post("/api/v1/auth/nonce"))
+                    .andReturn()
+                    .getResponse()
+                    .getContentAsString();
+            String second = mvc.perform(post("/api/v1/auth/nonce"))
+                    .andReturn()
+                    .getResponse()
+                    .getContentAsString();
+
+            assertThat(first).isNotEqualTo(second);
+        }
+
+        /**
+         * The point of the whole mechanism. The expected nonce must come from
+         * the cookie, because a value carried in the request body is chosen by
+         * the caller — a replayer would send the captured token together with
+         * the nonce baked into it, and the two would agree.
+         */
+        @Test
+        @DisplayName("sign-in verifies against the cookie, not the request body")
+        void signInReadsTheCookieNotTheBody() throws Exception {
+            var caller = TestCallers.user(AppRole.USER);
+            when(sessions.signIn(any(), any(), any(), any()))
+                    .thenReturn(new SessionService.IssuedSession(
+                            "opaque-session-token", caller.account(), Instant.now()));
+
+            mvc.perform(post("/api/v1/auth/google")
+                            .cookie(new jakarta.servlet.http.Cookie(
+                                    NonceService.COOKIE_NAME, "nonce-from-cookie"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"idToken":"good-token","nonce":"nonce-from-body"}"""))
+                    .andExpect(status().isOk());
+
+            verify(sessions).signIn(eq("good-token"), eq("nonce-from-cookie"), any(), any());
+        }
+
+        @Test
+        @DisplayName("passes null when no nonce cookie is present, rather than inventing one")
+        void missingCookieIsNull() throws Exception {
+            var caller = TestCallers.user(AppRole.USER);
+            when(sessions.signIn(any(), any(), any(), any()))
+                    .thenReturn(new SessionService.IssuedSession(
+                            "opaque-session-token", caller.account(), Instant.now()));
+
+            mvc.perform(post("/api/v1/auth/google")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body("good-token")))
+                    .andExpect(status().isOk());
+
+            // Null, so KeycloakIdTokenService refuses with missing_nonce. A
+            // blank string would be equally refused today, but only because
+            // that check happens to test isBlank as well.
+            verify(sessions).signIn(eq("good-token"), eq(null), any(), any());
+        }
+
+        @Test
+        @DisplayName("spends the nonce cookie on a successful sign-in")
+        void clearsNonceAfterUse() throws Exception {
+            var caller = TestCallers.user(AppRole.USER);
+            when(sessions.signIn(any(), any(), any(), any()))
+                    .thenReturn(new SessionService.IssuedSession(
+                            "opaque-session-token", caller.account(), Instant.now()));
+
+            MvcResult result = mvc.perform(post("/api/v1/auth/google")
+                            .cookie(new jakarta.servlet.http.Cookie(
+                                    NonceService.COOKIE_NAME, "spent"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body("good-token")))
+                    .andExpect(status().isOk())
+                    .andReturn();
+
+            // Left in place, a captured ID token stays replayable for the rest
+            // of the nonce's five minutes.
+            assertThat(result.getResponse().getHeaders(HttpHeaders.SET_COOKIE))
+                    .anySatisfy(header -> assertThat(header)
+                            .contains(NonceService.COOKIE_NAME + "=")
+                            .contains("Max-Age=0"));
         }
     }
 }
