@@ -129,7 +129,7 @@ public class SessionService {
 
         Account account = accounts
                 .findByEmail(identity.email())
-                .map(existing -> refreshName(existing, identity.displayName()))
+                .map(existing -> refreshProfile(existing, identity))
                 .orElseGet(() -> createAccount(identity));
 
         // Note for the reader: the line above is where "register with Google"
@@ -167,20 +167,41 @@ public class SessionService {
         return new IssuedSession(token, account, expiresAt);
     }
 
-    private Account refreshName(Account existing, String displayName) {
-        if (!existing.displayName().equals(displayName)) {
-            accounts.updateDisplayName(existing.id(), displayName);
-            return new Account(
-                    existing.id(),
-                    existing.email(),
-                    displayName,
-                    existing.roles(),
-                    existing.status(),
-                    existing.deactivatedAt(),
-                    existing.createdAt(),
-                    existing.updatedAt());
+    /**
+     * Brings the display name and profile picture back in step with the
+     * identity provider on every sign-in.
+     *
+     * <p>Only what the provider owns. Role, status and deactivation belong to
+     * this system and are never touched here — signing in must not be able to
+     * change what someone may do.
+     */
+    private Account refreshProfile(Account existing, VerifiedIdentity identity) {
+        String displayName = identity.displayName();
+        String avatarUrl = identity.avatarUrl();
+
+        boolean nameChanged = !existing.displayName().equals(displayName);
+        boolean avatarChanged = !java.util.Objects.equals(existing.avatarUrl(), avatarUrl);
+
+        if (!nameChanged && !avatarChanged) {
+            return existing;
         }
-        return existing;
+        if (nameChanged) {
+            accounts.updateDisplayName(existing.id(), displayName);
+        }
+        if (avatarChanged) {
+            accounts.updateAvatarUrl(existing.id(), avatarUrl);
+        }
+
+        return new Account(
+                existing.id(),
+                existing.email(),
+                displayName,
+                existing.roles(),
+                avatarUrl,
+                existing.status(),
+                existing.deactivatedAt(),
+                existing.createdAt(),
+                existing.updatedAt());
     }
 
     /**
@@ -194,7 +215,8 @@ public class SessionService {
      * account creation off the privilege-escalation path (TM-025).
      */
     private Account createAccount(VerifiedIdentity identity) {
-        Account created = accounts.insert(identity.email(), identity.displayName(), AppRole.USER);
+        Account created =
+                accounts.insert(identity.email(), identity.displayName(), AppRole.USER, identity.avatarUrl());
         audit.append(
                 created.id(),
                 created.email(),
@@ -230,7 +252,9 @@ public class SessionService {
             return broker.verify(idToken, expectedNonce);
         }
         GoogleIdTokenVerifier.GoogleIdentity google = this.google.verify(idToken);
-        return new VerifiedIdentity(google.email(), google.displayName());
+        // The direct-Google fallback carries no picture: this path never
+        // requested the profile scope, so there is no claim to read.
+        return new VerifiedIdentity(google.email(), google.displayName(), null);
     }
 
     // -----------------------------------------------------------------------

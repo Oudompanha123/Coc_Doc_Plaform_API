@@ -36,7 +36,7 @@ public class AccountRepository {
      * drift into the other by accident.
      */
     private static final String ACCOUNT_COLUMNS =
-            "a.id, a.email, a.display_name, a.status, a.deactivated_at, a.created_at, a.updated_at";
+            "a.id, a.email, a.display_name, a.avatar_url, a.status, a.deactivated_at, a.created_at, a.updated_at";
 
     /**
      * {@code filter (where ...)} rather than a plain {@code array_agg}: the
@@ -76,6 +76,7 @@ public class AccountRepository {
                 rs.getString("email"),
                 rs.getString("display_name"),
                 readRoles(rs),
+                rs.getString("avatar_url"),
                 AccountStatus.fromDb(rs.getString("status")),
                 deactivated == null ? null : deactivated.toInstant(),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
@@ -235,13 +236,13 @@ public class AccountRepository {
      * <p>Provisioned {@code active}: nobody needs to approve what an
      * administrator's identity provider already vouched for.
      */
-    public Account insert(String email, String displayName, AppRole role) {
+    public Account insert(String email, String displayName, AppRole role, String avatarUrl) {
         UUID id = jdbc.sql("""
-                        insert into account (email, display_name, status)
-                        values (?, ?, 'active'::account_status)
+                        insert into account (email, display_name, avatar_url, status)
+                        values (?, ?, ?, 'active'::account_status)
                         returning id
                         """)
-                .params(email, displayName)
+                .params(email, displayName, avatarUrl)
                 .query(UUID.class)
                 .single();
         grantRole(id, role, null);
@@ -288,6 +289,31 @@ public class AccountRepository {
                         where id = ? and display_name <> ?
                         """)
                 .params(displayName, id, displayName)
+                .update();
+    }
+
+    /**
+     * Refreshes the profile picture from the identity provider on each sign-in.
+     *
+     * <p>Guarded on the value actually differing, like
+     * {@link #updateDisplayName}: signing in should not write the row and move
+     * {@code updated_at} just to store the URL that was already there.
+     *
+     * <p>A null is written through rather than skipped. When someone removes
+     * their Google picture the claim stops arriving, and keeping the old URL
+     * would keep displaying an image that person deliberately took down —
+     * from a Google URL that will stop resolving anyway.
+     *
+     * <p>{@code is distinct from}, not {@code <>}: {@code <>} is never true
+     * when either side is null, which would make exactly that removal case a
+     * silent no-op.
+     */
+    public int updateAvatarUrl(UUID id, String avatarUrl) {
+        return jdbc.sql("""
+                        update account set avatar_url = ?, updated_at = now()
+                        where id = ? and avatar_url is distinct from ?
+                        """)
+                .params(avatarUrl, id, avatarUrl)
                 .update();
     }
 

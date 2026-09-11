@@ -1,0 +1,23 @@
+-- Coc Docs Platform -- the signed-in user's profile picture
+--
+-- Google returns a picture URL with the identity, and Keycloak passes it
+-- through as the `picture` claim (ADR-013). Storing the URL rather than the
+-- image keeps this a text column and keeps us out of the business of hosting,
+-- resizing and expiring someone else's photo.
+--
+-- WHAT THIS IS NOT
+-- Not an upload target. FR-CONT covers image uploads for content, which go to
+-- object storage; this column only ever holds a URL an identity provider gave
+-- us. A value that did not arrive in a verified ID token has no business here.
+--
+-- PII: this is personal data under ADR-005, on the same footing as email and
+-- display_name -- it goes out on /auth/me for the caller's own session only,
+-- and never for anyone else.
+--
+-- Null is the normal case, not an error: an account created by password
+-- registration has no identity provider to get a picture from, and Google does
+-- not guarantee the claim.
+--
+--   // req: FR-AUTH-001, NFR-SEC-PII, ADR-005, ADR-013
+
+alter table account add column avatar_url text;

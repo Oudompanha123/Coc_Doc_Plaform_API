@@ -115,6 +115,7 @@ public class AuthController {
                         issued.account().email(),
                         issued.account().displayName(),
                         issued.account().role().wire(),
+                        issued.account().avatarUrl(),
                         true));
     }
 
@@ -316,6 +317,7 @@ public class AuthController {
                         issued.account().email(),
                         issued.account().displayName(),
                         issued.account().role().wire(),
+                        issued.account().avatarUrl(),
                         true));
     }
 }

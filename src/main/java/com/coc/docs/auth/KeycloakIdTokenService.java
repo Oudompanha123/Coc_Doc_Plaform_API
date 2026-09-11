@@ -98,7 +98,20 @@ public class KeycloakIdTokenService {
         }
 
         String name = jwt.getClaimAsString("name");
-        return new VerifiedIdentity(email, (name == null || name.isBlank()) ? email : name);
+
+        // Optional, and trusted only as far as it goes: a URL the identity
+        // provider chose, stored as text and rendered as an image. It is never
+        // fetched server-side and never used in a decision, so a hostile value
+        // is a broken avatar rather than a request this backend was tricked
+        // into making. Anything that is not plain https is dropped —
+        // javascript: and data: URLs have no business reaching an img tag.
+        String picture = jwt.getClaimAsString("picture");
+        if (picture != null && !picture.startsWith("https://")) {
+            picture = null;
+        }
+
+        return new VerifiedIdentity(
+                email, (name == null || name.isBlank()) ? email : name, picture);
     }
 
     private static boolean constantTimeEquals(String a, String b) {

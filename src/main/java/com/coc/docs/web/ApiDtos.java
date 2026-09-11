@@ -73,11 +73,21 @@ public final class ApiDtos {
      * <p>// req: NFR-SEC-PII, FR-AUTH-005
      */
     public record MeResponse(
-            UUID id, String email, String displayName, String role, boolean authenticated) {
+            UUID id,
+            String email,
+            String displayName,
+            String role,
+            String avatarUrl,
+            boolean authenticated) {
 
         public static MeResponse of(CurrentUser user) {
             return new MeResponse(
-                    user.id(), user.email(), user.account().displayName(), user.role().wire(), true);
+                    user.id(),
+                    user.email(),
+                    user.account().displayName(),
+                    user.role().wire(),
+                    user.account().avatarUrl(),
+                    true);
         }
 
         /**
@@ -89,7 +99,7 @@ public final class ApiDtos {
          * satisfied here or not at all. // req: NFR-SEC-PII
          */
         public static MeResponse anonymous() {
-            return new MeResponse(null, null, null, null, false);
+            return new MeResponse(null, null, null, null, null, false);
         }
     }
 

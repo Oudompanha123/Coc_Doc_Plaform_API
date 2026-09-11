@@ -43,6 +43,7 @@ public record Account(
         String email,
         String displayName,
         Set<AppRole> roles,
+        String avatarUrl,
         AccountStatus status,
         Instant deactivatedAt,
         Instant createdAt,
@@ -100,11 +101,11 @@ public record Account(
 
     /** A copy with a different status, for a {@code super_admin}'s approve or reject. */
     public Account withStatus(AccountStatus newStatus) {
-        return new Account(id, email, displayName, roles, newStatus, deactivatedAt, createdAt, updatedAt);
+        return new Account(id, email, displayName, roles, avatarUrl, newStatus, deactivatedAt, createdAt, updatedAt);
     }
 
     /** A copy holding a different set of roles. */
     public Account withRoles(Set<AppRole> newRoles) {
-        return new Account(id, email, displayName, newRoles, status, deactivatedAt, createdAt, updatedAt);
+        return new Account(id, email, displayName, newRoles, avatarUrl, status, deactivatedAt, createdAt, updatedAt);
     }
 }

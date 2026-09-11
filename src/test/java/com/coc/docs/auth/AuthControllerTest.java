@@ -305,6 +305,7 @@ class AuthControllerTest {
                     "new.person@example.com",
                     "New Person",
                     java.util.EnumSet.of(AppRole.USER),
+                    null,
                     AccountStatus.ACTIVE,
                     null,
                     Instant.now(),

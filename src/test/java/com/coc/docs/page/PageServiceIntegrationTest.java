@@ -54,7 +54,7 @@ class PageServiceIntegrationTest extends PostgresTestBase {
                         + "section, account restart identity cascade")
                 .update();
 
-        Account account = accounts.insert("editor@example.com", "Editor", AppRole.ADMIN);
+        Account account = accounts.insert("editor@example.com", "Editor", AppRole.ADMIN, null);
         editor = new CurrentUser(account, accounts.findPermissions(account.id()), new byte[] {1});
 
         section = sections.insert("jex2.0", 2, true);
@@ -71,7 +71,7 @@ class PageServiceIntegrationTest extends PostgresTestBase {
 
     /** A caller of the given role, backed by a real account row. */
     private CurrentUser caller(AppRole role) {
-        Account account = accounts.insert(role.wire() + "@example.com", "Test", role);
+        Account account = accounts.insert(role.wire() + "@example.com", "Test", role, null);
         return new CurrentUser(account, accounts.findPermissions(account.id()), new byte[] {2});
     }
 

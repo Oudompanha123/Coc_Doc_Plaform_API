@@ -31,6 +31,7 @@ public final class TestCallers {
                 role.wire() + "@example.com",
                 "Test " + role.wire(),
                 java.util.EnumSet.of(role),
+                null,
                 AccountStatus.ACTIVE,
                 null,
                 Instant.now(),
