@@ -278,6 +278,57 @@ public class AccountService {
         return created;
     }
 
+    /**
+     * Creates an account on behalf of a {@code super_admin} — the "add account"
+     * path in the administration screen.
+     *
+     * <p>No password is set, and that is the point: the person signs in with
+     * Google, and the account they land on is this row, matched on email. It
+     * exists beforehand so that a role above {@code user} can be waiting for
+     * them, rather than an administrator having to catch them after their
+     * first sign-in.
+     *
+     * <p>Active immediately. There is nothing to approve — a
+     * {@code super_admin} creating it <em>is</em> the approval, unlike
+     * self-registration where the applicant is unknown.
+     *
+     * <p>The role comes from an authenticated {@code super_admin}, which is
+     * what separates this from {@link #register}: there, role is a literal
+     * because the caller is anonymous and could otherwise ask for
+     * {@code super_admin} (TM-025); here, the caller already holds it.
+     *
+     * <p>Display name is derived from the address rather than asked for. The
+     * real one arrives from the identity provider on first sign-in and
+     * overwrites this, so prompting for it would be asking for a value with a
+     * short life.
+     *
+     * <p>// req: FR-AUTH-003, FR-AUTH-005, FR-AUTH-008, UC-004
+     */
+    @Transactional
+    public Account create(String email, AppRole role, CurrentUser actor) {
+        // Checked here as well as by the unique index, so the API can answer
+        // 409 with an explanation instead of a raised constraint becoming a 500.
+        if (accounts.findByEmail(email).isPresent()) {
+            throw ApiException.conflict("that email address already has an account");
+        }
+
+        String displayName = email.contains("@") ? email.substring(0, email.indexOf('@')) : email;
+        Account created = accounts.insert(email, displayName, role, null);
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.ACCOUNT_CREATE,
+                AuditAction.TARGET_ACCOUNT,
+                created.id(),
+                json.createObjectNode()
+                        .put("subject", email)
+                        .put("role", role.wire())
+                        .put("via", "admin-invite"));
+
+        return created;
+    }
+
     /** Approves a pending registration. The account can sign in from the next request. */
     @Transactional
     public Account approve(UUID accountId, CurrentUser actor) {

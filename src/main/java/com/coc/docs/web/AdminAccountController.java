@@ -1,11 +1,18 @@
 package com.coc.docs.web;
 
+import com.coc.docs.account.Account;
 import com.coc.docs.account.AccountService;
 import com.coc.docs.account.dto.AccountSummary;
 import com.coc.docs.account.AppRole;
 import com.coc.docs.auth.CurrentUser;
+import com.coc.docs.auth.SessionRepository;
+import jakarta.validation.Valid;
+import java.net.URI;
+import java.time.Instant;
+import java.util.Map;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -30,14 +37,55 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminAccountController {
 
     private final AccountService accounts;
+    private final SessionRepository sessions;
 
-    public AdminAccountController(AccountService accounts) {
+    public AdminAccountController(AccountService accounts, SessionRepository sessions) {
         this.accounts = accounts;
+        this.sessions = sessions;
     }
 
+    /**
+     * Every account, with when each last signed in.
+     *
+     * <p>Two queries, not one per row: the sign-in times arrive as a single
+     * grouped lookup and are joined in memory. A per-account query here is the
+     * N+1 that stays invisible until the team is large enough to notice it.
+     */
     @GetMapping
     List<ApiDtos.AccountResponse> list() {
-        return accounts.list().stream().map(ApiDtos.AccountResponse::of).toList();
+        Map<UUID, Instant> lastSignIn = sessions.lastSignInByAccount();
+        return accounts.list().stream()
+                .map(account -> ApiDtos.AccountResponse.of(account, lastSignIn.get(account.id())))
+                .toList();
+    }
+
+    /**
+     * Creates an account ahead of the person's first sign-in.
+     *
+     * <p>No password is set: they sign in with Google and land on this row,
+     * matched on email. Creating it first is what allows a role above
+     * {@code user} to be waiting for them, instead of an administrator having
+     * to catch them afterwards.
+     *
+     * <p>201 with a {@code Location} header, because this makes a new thing at
+     * a new address — unlike the PATCH below, which changes one that exists.
+     *
+     * <p>// req: FR-AUTH-003, FR-AUTH-005, FR-AUTH-008, UC-004
+     */
+    @PostMapping
+    ResponseEntity<ApiDtos.AccountResponse> create(
+            @Valid @RequestBody ApiDtos.CreateAccountRequest request,
+            @AuthenticationPrincipal CurrentUser actor) {
+
+        // Parsed before anything is written, so an unknown role name is a 400
+        // rather than a half-applied change.
+        AppRole role = AppRole.parse(request.role())
+                .orElseThrow(() -> ApiException.badRequest("unknown role: " + request.role()));
+
+        Account created = accounts.create(request.email().trim(), role, actor);
+
+        return ResponseEntity.created(URI.create("/api/v1/admin/accounts/" + created.id()))
+                .body(ApiDtos.AccountResponse.of(created));
     }
 
     /**

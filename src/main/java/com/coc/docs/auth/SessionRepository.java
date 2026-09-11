@@ -4,6 +4,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -119,5 +121,34 @@ public class SessionRepository {
         return jdbc.sql("delete from app_session where expires_at < ?")
                 .param(OffsetDateTime.ofInstant(cutoff, java.time.ZoneOffset.UTC))
                 .update();
+    }
+
+    /**
+     * When each account last signed in, for the account administration screen.
+     *
+     * <p>One query covering every account rather than one per row. The accounts
+     * list is a single page render, and a lookup per account is the N+1 that
+     * only becomes visible once the team is big enough for it to hurt.
+     *
+     * <p>Read from {@code app_session} rather than the audit log: a session row
+     * exists <em>because</em> a sign-in issued it, so it is the fact rather
+     * than a record of the fact.
+     *
+     * <p>This is therefore "last sign-in we still hold a session row for".
+     * {@link #deleteExpiredBefore} keeps rows one TTL past expiry, so someone
+     * who has not signed in for weeks reports nothing at all rather than a
+     * misleading date. Absent rather than zero — the caller renders "Never".
+     */
+    public Map<UUID, Instant> lastSignInByAccount() {
+        Map<UUID, Instant> byAccount = new HashMap<>();
+        jdbc.sql("select account_id, max(issued_at) as last_sign_in from app_session group by account_id")
+                .query((ResultSet rs, int rowNum) -> {
+                    byAccount.put(
+                            rs.getObject("account_id", UUID.class),
+                            rs.getObject("last_sign_in", OffsetDateTime.class).toInstant());
+                    return null;
+                })
+                .list();
+        return byAccount;
     }
 }

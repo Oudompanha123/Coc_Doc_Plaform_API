@@ -9,6 +9,7 @@ import com.coc.docs.page.PageVersion;
 import com.coc.docs.page.PageVersionRepository;
 import com.coc.docs.section.Section;
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.Instant;
@@ -300,16 +301,22 @@ public final class ApiDtos {
             String displayName,
             String role,
             boolean active,
-            Instant createdAt) {
+            Instant createdAt,
+            Instant lastSignInAt) {
 
         public static AccountResponse of(Account account) {
+            return of(account, null);
+        }
+
+        public static AccountResponse of(Account account, Instant lastSignInAt) {
             return new AccountResponse(
                     account.id(),
                     account.email(),
                     account.displayName(),
                     account.role().wire(),
                     account.isActive(),
-                    account.createdAt());
+                    account.createdAt(),
+                    lastSignInAt);
         }
     }
 
@@ -321,4 +328,14 @@ public final class ApiDtos {
      * active and risk toggling it by omission.
      */
     public record UpdateAccountRequest(String role, Boolean active) {}
+
+    /**
+     * An account a {@code super_admin} creates before its owner first signs in.
+     *
+     * <p>Email and role only. No password — the person authenticates with
+     * Google — and no status, because a {@code super_admin} creating the
+     * account is itself the approval.
+     */
+    public record CreateAccountRequest(
+            @NotBlank @Email String email, @NotBlank String role) {}
 }

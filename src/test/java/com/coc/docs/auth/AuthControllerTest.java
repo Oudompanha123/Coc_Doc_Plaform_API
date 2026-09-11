@@ -76,6 +76,10 @@ class AuthControllerTest {
     @MockitoBean AccountService accountService;
     @MockitoBean BlockBodyValidator validator;
 
+    // AdminAccountController reads last sign-in times from it, so the context
+    // needs one to build. Untouched by these tests.
+    @MockitoBean com.coc.docs.auth.SessionRepository sessionRepository;
+
     @TestConfiguration
     static class Beans {
 
