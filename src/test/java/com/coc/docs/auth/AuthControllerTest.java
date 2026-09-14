@@ -443,7 +443,7 @@ class AuthControllerTest {
     }
 
     /**
-     * ADR-017. The controller's whole job here is to add nothing that would
+     * ADR-018. The controller's whole job here is to add nothing that would
      * let the caller tell "we emailed you" apart from "there was nothing to
      * email" — see {@code PasswordResetService.requestReset}'s javadoc for
      * where that distinction is actually made.
@@ -482,7 +482,7 @@ class AuthControllerTest {
     }
 
     /**
-     * ADR-017. Unlike {@code /forgot-password}, a rejected token here is
+     * ADR-018. Unlike {@code /forgot-password}, a rejected token here is
      * reported plainly — the caller already holds a value from their own
      * mailbox, so refusing it discloses nothing about anyone else's account.
      */

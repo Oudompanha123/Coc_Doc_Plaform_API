@@ -67,7 +67,7 @@ class SecurityRulesTest {
     @MockitoBean SessionService sessionService;
     @MockitoBean BlockBodyValidator validator;
 
-    // AuthController needs it to construct (ADR-017); mocked for the same
+    // AuthController needs it to construct (ADR-018); mocked for the same
     // reason as sessionService above — this test is about which routes the
     // filter chain admits, not what password reset actually does.
     @MockitoBean com.coc.docs.auth.PasswordResetService passwordResetService;
@@ -158,7 +158,7 @@ class SecurityRulesTest {
 
         @Test
         void forgot_password_is_reachable_without_a_session() throws Exception {
-            // ADR-017. Has to be: a visitor who forgot their password, by
+            // ADR-018. Has to be: a visitor who forgot their password, by
             // definition, has no session to present.
             mvc.perform(post("/api/v1/auth/forgot-password")
                             .contentType(MediaType.APPLICATION_JSON)

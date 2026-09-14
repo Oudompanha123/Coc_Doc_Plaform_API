@@ -26,13 +26,13 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
- * The reset flow against a real PostgreSQL (ADR-017). {@link
+ * The reset flow against a real PostgreSQL (ADR-018). {@link
  * PasswordResetMailer} is mocked deliberately — what is under test is
  * everything around it: which accounts are even eligible, that a redeemed
  * token cannot be redeemed twice, and that a reset revokes live sessions —
  * not SMTP delivery, which has no place in this suite.
  *
- * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-014, ADR-017
+ * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-014, ADR-018
  */
 class PasswordResetServiceIntegrationTest extends PostgresTestBase {
 
@@ -119,7 +119,7 @@ class PasswordResetServiceIntegrationTest extends PostgresTestBase {
     }
 
     @Test
-    @DisplayName("does nothing for a Google-only account (ADR-017 decision 2)")
+    @DisplayName("does nothing for a Google-only account (ADR-018 decision 2)")
     void ignoresAGoogleOnlyAccount() {
         accounts.insert("google.only@example.com", "Google Only", AppRole.USER, null, AccountStatus.ACTIVE);
 

@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
  * SessionMaintenance} exactly, for the same reason: not a security control —
  * an expired token is already refused by {@link PasswordResetToken#isUsable},
  * which checks the instant directly — this only keeps the table from growing
- * without bound (ADR-017, required follow-up 4).
+ * without bound (ADR-018, required follow-up 4).
  */
 @Component
 public class PasswordResetTokenMaintenance {

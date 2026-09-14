@@ -301,9 +301,9 @@ public class AccountRepository {
     }
 
     /**
-     * Sets a new password hash — the reset path (ADR-017) and nowhere else.
+     * Sets a new password hash — the reset path (ADR-018) and nowhere else.
      * Also usable to give a Google-only account its first password hash, but
-     * nothing in this codebase does that yet (ADR-017 decision 2 deliberately
+     * nothing in this codebase does that yet (ADR-018 decision 2 deliberately
      * does not go there).
      */
     public int updatePasswordHash(UUID id, String passwordHash) {

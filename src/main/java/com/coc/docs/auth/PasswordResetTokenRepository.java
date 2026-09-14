@@ -11,9 +11,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Reads and writes {@code password_reset_token} rows (ADR-017).
+ * Reads and writes {@code password_reset_token} rows (ADR-018).
  *
- * <p>// req: ADR-017
+ * <p>// req: ADR-018
  */
 @Repository
 public class PasswordResetTokenRepository {

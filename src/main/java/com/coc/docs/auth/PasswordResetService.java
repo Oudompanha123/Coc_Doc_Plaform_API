@@ -19,10 +19,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Mints and redeems password-reset tokens (ADR-017, revision of ADR-014's
+ * Mints and redeems password-reset tokens (ADR-018, revision of ADR-014's
  * "no password reset flow exists" gap).
  *
- * <p>// req: FR-AUTH-002, ADR-014, ADR-017
+ * <p>// req: FR-AUTH-002, ADR-014, ADR-018
  */
 @Service
 public class PasswordResetService {
@@ -30,7 +30,7 @@ public class PasswordResetService {
     /** Matches {@code NonceService}/{@code SessionService}: opaque, unguessable, no claims to verify. */
     private static final int TOKEN_BYTES = 32;
 
-    /** Fixed, system-wide, no per-deployment variant — see ADR-017 decision 1. */
+    /** Fixed, system-wide, no per-deployment variant — see ADR-018 decision 1. */
     public static final Duration TTL = Duration.ofMinutes(30);
 
     private final PasswordResetTokenRepository tokens;
@@ -64,20 +64,20 @@ public class PasswordResetService {
 
     /**
      * Starts a reset. Mints a token and emails it <b>only</b> when the address
-     * belongs to an account that already holds a password hash (ADR-017
+     * belongs to an account that already holds a password hash (ADR-018
      * decision 2) — a Google/Keycloak-only account is left untouched.
      *
      * <p>The caller of this method (the controller) must not let that
      * difference reach the response: every case here — unknown address, a
      * Google-only account, a genuinely emailed reset — is meant to look
-     * identical from the outside (ADR-017 decision 3, {@code UC-004} E-3).
+     * identical from the outside (ADR-018 decision 3, {@code UC-004} E-3).
      * What this method does <em>not</em> equalise is response time: sending a
      * real email takes measurably longer than the no-op path. That gap is
      * accepted rather than closed here — see {@code SessionService}'s
-     * dummy-hash comparison for the shape a real fix would take, and ADR-017's
+     * dummy-hash comparison for the shape a real fix would take, and ADR-018's
      * "no rate limiting yet" gap, which this shares.
      *
-     * <p>// req: ADR-017
+     * <p>// req: ADR-018
      */
     @Transactional
     public void requestReset(String email) {
@@ -111,14 +111,14 @@ public class PasswordResetService {
 
     /**
      * Redeems a token: sets the new password, spends the token, and revokes
-     * every live session for the account (ADR-017 decision 4).
+     * every live session for the account (ADR-018 decision 4).
      *
      * <p>Unlike {@link #requestReset}, a rejected token here is told plainly
      * why — the caller already holds a value that came from their own
      * mailbox, so refusing it discloses nothing about anyone else's account
-     * (ADR-017 decision 3).
+     * (ADR-018 decision 3).
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-018
      */
     @Transactional
     public void resetPassword(String rawToken, String newRawPassword) {

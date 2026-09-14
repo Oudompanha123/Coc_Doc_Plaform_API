@@ -4,7 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
  * Returned by {@code POST /api/v1/auth/forgot-password} — always the same
- * message, whatever actually happened server-side (ADR-017 decision 3, the
+ * message, whatever actually happened server-side (ADR-018 decision 3, the
  * {@code UC-004} E-3 anti-enumeration principle applied to this endpoint).
  */
 public record ForgotPasswordResponse(

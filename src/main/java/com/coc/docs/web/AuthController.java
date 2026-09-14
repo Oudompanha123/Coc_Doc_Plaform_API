@@ -410,7 +410,7 @@ public class AuthController {
     }
 
     // -----------------------------------------------------------------------
-    // Password reset (ADR-017, revision of ADR-014)
+    // Password reset (ADR-018, revision of ADR-014)
     // -----------------------------------------------------------------------
 
     /**
@@ -424,7 +424,7 @@ public class AuthController {
      * <p>Public, and it has to be — a signed-out visitor who forgot their
      * password is, by definition, not signed in yet.
      *
-     * <p>// req: FR-AUTH-002, ADR-017
+     * <p>// req: FR-AUTH-002, ADR-018
      */
     @PostMapping("/forgot-password")
     @ResponseStatus(HttpStatus.OK)
@@ -439,14 +439,14 @@ public class AuthController {
      * <p>Unlike {@link #forgotPassword}, a rejected token here is reported
      * plainly — the caller already holds a value that came from their own
      * mailbox, so refusing it discloses nothing about anyone else's account
-     * (ADR-017 decision 3; see {@code PasswordResetService.resetPassword}).
+     * (ADR-018 decision 3; see {@code PasswordResetService.resetPassword}).
      *
      * <p>Never sets a session cookie, matching {@code /register}'s "this
      * never signs the caller in" convention — and every session that
      * predated the reset is revoked server-side, so the caller signs in fresh
      * at {@code /login} either way.
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-018
      */
     @PostMapping("/reset-password")
     @ResponseStatus(HttpStatus.OK)

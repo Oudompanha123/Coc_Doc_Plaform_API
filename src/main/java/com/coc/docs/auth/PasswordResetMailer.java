@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Sends the password-reset email, or — where no SMTP is configured — says so
- * loudly instead (ADR-017 decision 5).
+ * loudly instead (ADR-018 decision 5).
  *
  * <p>{@code JavaMailSender} is taken through an {@link ObjectProvider}, the
  * identical shape {@code SessionService} already uses for {@code
@@ -29,7 +29,7 @@ import org.springframework.stereotype.Component;
  * wrote this class, per the project's own {@code SEC-001}/{@code SEC-003}
  * rules.
  *
- * <p>// req: ADR-017
+ * <p>// req: ADR-018
  */
 @Component
 public class PasswordResetMailer {
