@@ -11,7 +11,15 @@ spring:
   datasource:
     # Any PostgreSQL 15+ instance: managed, corporate, or on-prem. No usable
     # default for host/port/name/credentials.
-    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=cocdocs_dev
+    #
+    # DB_SCHEMA has no default either, and that is deliberate. The team shares
+    # one server and each developer owns one schema, so a default here is not
+    # a convenience — it is a name that belongs to somebody. This line read
+    # `currentSchema=cocdocs_dev` between 555a769 and now, which meant every
+    # developer connected to one person schema whatever DB_SCHEMA said, and
+    # an unpushed V8 was applied to it by someone who never intended to touch
+    # it. Failing to start beats migrating a colleague database.
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=${DB_SCHEMA}
     username: ${DB_USER}
     password: ${DB_PASSWORD}
     hikari:
@@ -26,17 +34,26 @@ spring:
     # the first run against it. Without this Flyway would follow the connection
     # default and could put flyway_schema_history somewhere other than the
     # tables it describes — which is the one pair that must never drift apart.
-    schemas: ${DB_SCHEMA:cocdocs_dev}
+    # Same name as currentSchema above, and for the same reason no default:
+    # Flyway must migrate the schema the connection actually uses.
+    schemas: ${DB_SCHEMA}
     create-schemas: true
 
-    # TEMPORARY — REMOVE WHEN V6__password_reset_token.sql REACHES dev.
+    # TEMPORARY — REMOVE WHEN EVERY MIGRATION APPLIED TO A DEVELOPER SCHEMA
+    # HAS ITS FILE ON dev. V6 has landed; V8__temp_password.sql has not.
     #
-    # On 2026-09-11 17:05 that migration was applied to the shared development
-    # database from a branch that was never pushed. The password_reset_token
-    # table is there; the file is on one developer's machine. Every other
-    # developer's application then refuses to start:
+    # The recurring shape: a migration is applied to a schema from a branch
+    # that was never pushed, so the table or column is there and the file is
+    # on one machine. Every other application then refuses to start:
     #
     #   Detected applied migration not resolved locally: 6.
+    #
+    # Note the two categories are different and this covers only one. An
+    # applied version BELOW your highest local migration is `missing`; one
+    # ABOVE it is `future`, and the message is identical. V8 against a
+    # checkout that stops at V7 is `future`, so it needs `*:future` — set it
+    # in your own .env.local rather than here, because it is one person
+    # schema being ahead, not a state the team shares.
     #
     # This makes Flyway tolerate an applied migration it cannot find, so the
     # team can work while that file is being pushed. It does NOT touch the
