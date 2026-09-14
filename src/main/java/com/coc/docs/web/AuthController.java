@@ -128,7 +128,8 @@ public class AuthController {
                         issued.account().role().wire(),
                         issued.account().avatarUrl(),
                         true,
-                        issued.account().createdAt()));
+                        issued.account().createdAt(),
+                        sessions.lastSignInForAccount(issued.account().id()).orElse(null)));
     }
 
     /**
@@ -141,7 +142,9 @@ public class AuthController {
      */
     @GetMapping("/me")
     ApiDtos.MeResponse me(@AuthenticationPrincipal CurrentUser caller) {
-        return caller == null ? ApiDtos.MeResponse.anonymous() : ApiDtos.MeResponse.of(caller);
+        if (caller == null) return ApiDtos.MeResponse.anonymous();
+        return ApiDtos.MeResponse.of(caller,
+                sessions.lastSignInForAccount(caller.id()).orElse(null));
     }
 
     /**
@@ -172,7 +175,8 @@ public class AuthController {
                 updated.role().wire(),
                 updated.avatarUrl(),
                 true,
-                updated.createdAt());
+                updated.createdAt(),
+                sessions.lastSignInForAccount(updated.id()).orElse(null));
     }
 
     /**
@@ -401,7 +405,8 @@ public class AuthController {
                         issued.account().role().wire(),
                         issued.account().avatarUrl(),
                         true,
-                        issued.account().createdAt()));
+                        issued.account().createdAt(),
+                        sessions.lastSignInForAccount(issued.account().id()).orElse(null)));
     }
 
     // -----------------------------------------------------------------------

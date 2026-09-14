@@ -153,6 +153,18 @@ public class SessionRepository {
         return byAccount;
     }
 
+    /** The most recent sign-in for one account (max issued_at across all its sessions). */
+    public Optional<Instant> lastSignInForAccount(UUID accountId) {
+        return jdbc.sql(
+                        "select max(issued_at) as last_sign_in from app_session where account_id = :id")
+                .param("id", accountId)
+                .query((rs, rowNum) -> {
+                    OffsetDateTime ts = rs.getObject("last_sign_in", OffsetDateTime.class);
+                    return ts != null ? ts.toInstant() : null;
+                })
+                .optional();
+    }
+
     /** One of the caller's own sessions, as the Security screen shows it. */
     public record SessionSummary(
             UUID id, String userAgent, String ipAddress, Instant issuedAt, Instant expiresAt, byte[] tokenHash) {}

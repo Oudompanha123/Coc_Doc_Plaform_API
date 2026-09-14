@@ -113,9 +113,11 @@ public final class ApiDtos {
             String avatarUrl,
             boolean authenticated,
             /** When the account was created — the profile screen's "Joined". */
-            Instant createdAt) {
+            Instant createdAt,
+            /** Most recent sign-in; null when no session row exists yet. */
+            Instant lastSignInAt) {
 
-        public static MeResponse of(CurrentUser user) {
+        public static MeResponse of(CurrentUser user, Instant lastSignInAt) {
             return new MeResponse(
                     user.id(),
                     user.email(),
@@ -123,7 +125,8 @@ public final class ApiDtos {
                     user.role().wire(),
                     user.account().avatarUrl(),
                     true,
-                    user.account().createdAt());
+                    user.account().createdAt(),
+                    lastSignInAt);
         }
 
         /**
@@ -135,7 +138,7 @@ public final class ApiDtos {
          * satisfied here or not at all. // req: NFR-SEC-PII
          */
         public static MeResponse anonymous() {
-            return new MeResponse(null, null, null, null, null, false, null);
+            return new MeResponse(null, null, null, null, null, false, null, null);
         }
     }
 
