@@ -28,6 +28,30 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: false
 
+    # TEMPORARY — REMOVE WHEN V6__password_reset_token.sql REACHES dev.
+    #
+    # On 2026-09-11 17:05 that migration was applied to the shared development
+    # database from a branch that was never pushed. The password_reset_token
+    # table is there; the file is on one developer's machine. Every other
+    # developer's application then refuses to start:
+    #
+    #   Detected applied migration not resolved locally: 6.
+    #
+    # This makes Flyway tolerate an applied migration it cannot find, so the
+    # team can work while that file is being pushed. It does NOT touch the
+    # database and does not mark anything deleted — when the file lands, it
+    # validates normally against the row already there and this line comes out.
+    #
+    # What it costs while it is here: a migration someone genuinely deletes
+    # stops being caught. That is the check this disables, and it is the reason
+    # this is temporary rather than a setting.
+    #
+    # Do NOT reach for `flyway repair` instead. Repair marks version 6 deleted
+    # while password_reset_token stays in the schema, so the day that branch
+    # merges Flyway tries to create a table that already exists — turning a
+    # clear error into a confusing one.
+    ignore-migration-patterns: "*:missing"
+
   jackson:
     default-property-inclusion: non_null
 
