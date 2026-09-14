@@ -8,9 +8,37 @@
 #
 # Active by default (application.yml's spring.profiles.active: dev). Only
 # the one setting below actually differs from the base config for local
-# development; everything else already has a safe, working default.
+# development; everything else already has a sagitfe, working default.
 app:
   # Local development is plain http; a browser discards a Secure cookie on an
   # http origin, so sign-in appears to succeed and then silently does
   # nothing. // req: NFR-SEC-SESSION, NFR-SEC-CHANNEL
   cookie-secure: false
+
+# Swagger UI at http://localhost:8081/swagger-ui.html, and the contract it
+# renders at /v3/api-docs. Both are disabled in application.yml and enabled
+# only here, so they exist on a developer machine and nowhere else.
+#
+# DevApiDocsSecurityConfig is the matching half: these paths sit outside
+# /api/**, so SecurityConfig's default-deny would answer 401 to the UI's own
+# HTML and JavaScript. That class is @Profile("dev") too — both halves appear
+# and disappear together, and neither can open a door in an environment the
+# other is absent from.
+#
+# try-it-out-enabled is off: the UI is served from the backend origin while a
+# session cookie is issued for the frontend origin, so "Try it out" on anything
+# but the public routes answers 401 and reads as the API being broken rather
+# than the request being unauthenticated. Use the contract here; drive real
+# calls from the frontend.
+#
+# // req: RISK-018, architecture-overview.md §11
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+    # Group and sort, so six controllers' worth of routes stay readable.
+    tags-sorter: alpha
+    operations-sorter: method
+    try-it-out-enabled: false
+
