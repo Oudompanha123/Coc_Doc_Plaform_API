@@ -2,9 +2,11 @@ package com.coc.docs.account;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.when;
 
 import com.coc.docs.PostgresTestBase;
 import com.coc.docs.auth.CurrentUser;
+import com.coc.docs.auth.GoogleIdTokenVerifier;
 import com.coc.docs.web.ApiException;
 import java.util.EnumSet;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +30,11 @@ class ApprovalGateTest extends PostgresTestBase {
     @Autowired AccountRepository accounts;
     @Autowired AccountService accountService;
     @Autowired JdbcClient jdbc;
+    @Autowired com.coc.docs.auth.SessionService sessions;
+
+    /** Stubbed so a sign-in can be driven without a real Google token. */
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    com.coc.docs.auth.GoogleIdTokenVerifier google;
 
     @BeforeEach
     void clear() {
@@ -147,5 +154,51 @@ class ApprovalGateTest extends PostgresTestBase {
         // in after a wave of unapproved applications would be bootstrapped
         // straight to super_admin.
         assertThat(accounts.isEmpty()).isFalse();
+    }
+
+    /**
+     * The bug this pins: sign-in is transactional and reports "awaiting
+     * approval" by throwing, so the application row it had just created was
+     * rolled back by the very exception announcing it. The applicant was told
+     * to wait for approval of a record that no longer existed, and the queue
+     * stayed empty however many people applied.
+     */
+    @Test
+    @DisplayName("a refused first sign-in still leaves the application behind")
+    void refusedSignInKeepsTheApplication() {
+        // An account already exists, so the bootstrap does not apply.
+        accounts.insert("boss@example.com", "Boss", AppRole.SUPER_ADMIN, null, AccountStatus.ACTIVE);
+
+        when(google.verify("token"))
+                .thenReturn(new GoogleIdTokenVerifier.GoogleIdentity(
+                        "sub-1", "applicant@example.com", "Applicant"));
+
+        assertThatThrownBy(() -> sessions.signIn("token", null, "agent", "127.0.0.1"))
+                .isInstanceOf(RuntimeException.class);
+
+        Account applied = accounts.findByEmail("applicant@example.com").orElseThrow();
+        assertThat(applied.status()).isEqualTo(AccountStatus.PENDING);
+        assertThat(accounts.findByStatus(AccountStatus.PENDING))
+                .extracting(Account::email)
+                .contains("applicant@example.com");
+    }
+
+    /**
+     * The same rollback swallowed every auth.rejected entry ever written —
+     * the audit log recorded sign-ins and sign-outs but no refusals at all.
+     */
+    @Test
+    @DisplayName("a refused sign-in is recorded in the audit log")
+    void refusalIsAudited() {
+        when(google.verify("bad"))
+                .thenThrow(new GoogleIdTokenVerifier.AuthenticationFailure("token_invalid"));
+
+        assertThatThrownBy(() -> sessions.signIn("bad", null, "agent", "127.0.0.1"))
+                .isInstanceOf(GoogleIdTokenVerifier.AuthenticationFailure.class);
+
+        Integer rejected = jdbc.sql("select count(*) from audit_log where action = 'auth.rejected'")
+                .query(Integer.class)
+                .single();
+        assertThat(rejected).isEqualTo(1);
     }
 }

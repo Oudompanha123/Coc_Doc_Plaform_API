@@ -115,9 +115,30 @@ public class SessionService {
      * <p>A deactivated account is refused. Deactivation has to end access
      * immediately, or it is a note in a table rather than a control.
      *
-     * <p>// req: FR-AUTH-001, FR-AUTH-003, FR-AUTH-005
+     * <p><b>Why noRollbackFor.</b> This method reports two of its outcomes by
+     * throwing, and both have to leave something behind.
+     *
+     * <p>An applicant is told they are awaiting approval — and the application
+     * row that makes the queue work is created moments earlier, in this same
+     * transaction. Rolling back deleted it, so the person was told to wait for
+     * approval of a record that no longer existed and the queue stayed empty.
+     *
+     * <p>A rejected sign-in is written to the audit log before the exception is
+     * rethrown. Rolling back deleted that too: auth.rejected had never once
+     * been persisted, across every refusal this system has ever issued.
+     *
+     * <p>The default is right for most services and wrong here, because these
+     * exceptions report a decision rather than a failure. A genuine failure —
+     * a broken query, a constraint violation — is not listed and still rolls
+     * back.
+     *
+     * <p>// req: FR-AUTH-001, FR-AUTH-003, FR-AUTH-005, FR-OPS-002, ADR-017
      */
-    @Transactional
+    @Transactional(
+            noRollbackFor = {
+                com.coc.docs.web.ApiException.class,
+                GoogleIdTokenVerifier.AuthenticationFailure.class
+            })
     public IssuedSession signIn(
             String idToken, String expectedNonce, String userAgent, String ipAddress) {
         VerifiedIdentity identity;
@@ -414,7 +435,9 @@ public class SessionService {
      *
      * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-014
      */
-    @Transactional
+    // Same reason as signIn: the refusal is audited and then thrown, and a
+    // rollback would erase the record of it. Nothing else here writes.
+    @Transactional(noRollbackFor = GoogleIdTokenVerifier.AuthenticationFailure.class)
     public IssuedSession signInWithPassword(
             String email, String rawPassword, String userAgent, String ipAddress) {
 
