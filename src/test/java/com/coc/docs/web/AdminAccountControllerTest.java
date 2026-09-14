@@ -2,10 +2,12 @@ package com.coc.docs.web;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -210,6 +212,146 @@ class AdminAccountControllerTest {
                     // The screen shows this wording directly, so it has to say
                     // what to do differently rather than just "failed".
                     .andExpect(jsonPath("$.detail").value("that email address already has an account"));
+        }
+    }
+
+    @Nested
+    @DisplayName("PATCH /api/v1/admin/accounts/{accountId}")
+    class UpdateAccount {
+
+        @Test
+        @DisplayName("assigns a new role and returns the updated account")
+        void assignsRole() throws Exception {
+            when(accountService.update(eq(ACCOUNT_ID), eq(AppRole.ADMIN), isNull(), isNull(), any()))
+                    .thenReturn(account("person@example.com", AppRole.ADMIN));
+
+            mvc.perform(patch("/api/v1/admin/accounts/" + ACCOUNT_ID)
+                            .with(superAdmin())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"role":"admin"}"""))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.id").value(ACCOUNT_ID.toString()))
+                    .andExpect(jsonPath("$.role").value("admin"));
+        }
+
+        @Test
+        @DisplayName("deactivates an account and returns it with active:false")
+        void deactivatesAccount() throws Exception {
+            Account deactivated = new Account(
+                    ACCOUNT_ID, "person@example.com", "Person",
+                    EnumSet.of(AppRole.USER), null, AccountStatus.ACTIVE,
+                    Instant.parse("2026-09-14T10:00:00Z"),
+                    Instant.parse("2026-09-01T09:00:00Z"),
+                    Instant.parse("2026-09-14T10:00:00Z"));
+
+            when(accountService.update(eq(ACCOUNT_ID), isNull(), eq(false), isNull(), any()))
+                    .thenReturn(deactivated);
+
+            mvc.perform(patch("/api/v1/admin/accounts/" + ACCOUNT_ID)
+                            .with(superAdmin())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"active":false}"""))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.active").value(false));
+        }
+
+        @Test
+        @DisplayName("answers 400 when the request carries no fields to change")
+        void rejectsEmptyPatch() throws Exception {
+            mvc.perform(patch("/api/v1/admin/accounts/" + ACCOUNT_ID)
+                            .with(superAdmin())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("answers 400 when the role name is unrecognised")
+        void rejectsUnknownRole() throws Exception {
+            mvc.perform(patch("/api/v1/admin/accounts/" + ACCOUNT_ID)
+                            .with(superAdmin())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"role":"owner"}"""))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("answers 409 when demoting or deactivating the last active super admin")
+        // req: UC-004 E-4, FR-AUTH-008
+        void refusesLastSuperAdmin() throws Exception {
+            when(accountService.update(eq(ACCOUNT_ID), any(), any(), any(), any()))
+                    .thenThrow(ApiException.conflict(
+                            "this is the only active super admin; promote someone else first"));
+
+            mvc.perform(patch("/api/v1/admin/accounts/" + ACCOUNT_ID)
+                            .with(superAdmin())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"role":"admin"}"""))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.detail").value(
+                            org.hamcrest.Matchers.containsString("only active super admin")));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // FR-AUTH-008 boundary — the test that proves it
+    // -----------------------------------------------------------------------
+    // An admin must NOT reach account management. Only super_admin. Hiding the
+    // menu in the UI is not the control; this is.
+    //
+    // req: FR-AUTH-008
+
+    @Nested
+    @DisplayName("FR-AUTH-008: admin is blocked from every account management endpoint")
+    class AdminIsBlocked {
+
+        private static RequestPostProcessor admin() {
+            return SecurityMockMvcRequestPostProcessors.authentication(
+                    com.coc.docs.auth.TestCallers.authentication(AppRole.ADMIN));
+        }
+
+        @Test
+        @DisplayName("GET /api/v1/admin/accounts is denied to admin")
+        void list_denied_to_admin() throws Exception {
+            mvc.perform(get("/api/v1/admin/accounts").with(admin()))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("POST /api/v1/admin/accounts is denied to admin")
+        void create_denied_to_admin() throws Exception {
+            mvc.perform(post("/api/v1/admin/accounts")
+                            .with(admin())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"email":"x@example.com","role":"user"}"""))
+                    .andExpect(status().isForbidden());
+
+            verify(accountService, never()).create(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("PATCH /api/v1/admin/accounts/{id} is denied to admin")
+        void update_denied_to_admin() throws Exception {
+            mvc.perform(patch("/api/v1/admin/accounts/" + ACCOUNT_ID)
+                            .with(admin())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"role":"super_admin"}"""))
+                    .andExpect(status().isForbidden());
+
+            verify(accountService, never()).update(any(), any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("GET /api/v1/admin/accounts/pending is denied to admin")
+        void pending_queue_denied_to_admin() throws Exception {
+            mvc.perform(get("/api/v1/admin/accounts/pending").with(admin()))
+                    .andExpect(status().isForbidden());
         }
     }
 }
