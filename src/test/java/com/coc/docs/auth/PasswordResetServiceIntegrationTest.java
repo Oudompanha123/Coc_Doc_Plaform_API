@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import com.coc.docs.PostgresTestBase;
 import com.coc.docs.account.Account;
 import com.coc.docs.account.AccountRepository;
+import com.coc.docs.account.AccountStatus;
 import com.coc.docs.account.AppRole;
 import com.coc.docs.web.ApiException;
 import java.time.Instant;
@@ -52,8 +53,8 @@ class PasswordResetServiceIntegrationTest extends PostgresTestBase {
                         + "page_slug_history, page, section, account restart identity cascade")
                 .update();
 
-        withPassword = accounts.insertSelfRegisteredAccount(
-                "reset.me@example.com", "Reset Me", passwordEncoder.encode("OldPassword123!"));
+        withPassword = accounts.insertApplication(
+                "reset.me@example.com", "Reset Me", null, passwordEncoder.encode("OldPassword123!"));
     }
 
     /** Captures the raw token {@code requestReset} mints, the only way to get it back for a test. */
@@ -87,7 +88,7 @@ class PasswordResetServiceIntegrationTest extends PostgresTestBase {
     @Test
     @DisplayName("does nothing for a Google-only account (ADR-017 decision 2)")
     void ignoresAGoogleOnlyAccount() {
-        accounts.insert("google.only@example.com", "Google Only", AppRole.USER, null);
+        accounts.insert("google.only@example.com", "Google Only", AppRole.USER, null, AccountStatus.ACTIVE);
 
         resets.requestReset("google.only@example.com");
         verify(mailer, never()).sendResetLink(any(), any());

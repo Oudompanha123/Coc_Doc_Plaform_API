@@ -197,6 +197,21 @@ public class AccountRepository {
     }
 
     /**
+     * Whether the account table holds no rows at all.
+     *
+     * <p>Backs the installation-bootstrap check in {@code SessionService}: the
+     * very first sign-in an installation ever sees is seated as an active
+     * {@code super_admin} rather than queued pending, because a table with
+     * zero accounts has nobody who could ever approve one. Narrow on purpose —
+     * this is "no accounts exist", not "no super admin exists"; see the caller
+     * for why the weaker test is the wrong one.
+     */
+    public boolean isEmpty() {
+        Integer count = jdbc.sql("select count(*) from account").query(Integer.class).single();
+        return count == null || count == 0;
+    }
+
+    /**
      * Whether removing {@code excluding} would leave no active super admin.
      *
      * <p>The database holds the same rule as a deferred constraint trigger, which
