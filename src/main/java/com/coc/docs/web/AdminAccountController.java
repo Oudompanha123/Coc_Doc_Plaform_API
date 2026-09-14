@@ -139,10 +139,27 @@ public class AdminAccountController {
         return accounts.listPending().stream().map(AccountSummary::of).toList();
     }
 
-    /** Lets a pending registration sign in, from the next request onward. */
+    /**
+     * Lets a pending applicant in, at a role chosen in the same request.
+     *
+     * <p>The role is optional and defaults to {@code user} — the common case,
+     * and the safest reading of an omitted field.
+     *
+     * <p>// req: FR-AUTH-003, FR-AUTH-005, FR-AUTH-008, ADR-017
+     */
     @PostMapping("/{accountId}/approve")
-    AccountSummary approve(@PathVariable UUID accountId, @AuthenticationPrincipal CurrentUser actor) {
-        return AccountSummary.of(accounts.approve(accountId, actor));
+    AccountSummary approve(
+            @PathVariable UUID accountId,
+            @RequestBody(required = false) ApiDtos.ApproveRequest request,
+            @AuthenticationPrincipal CurrentUser actor) {
+
+        String requested = request == null ? null : request.role();
+        AppRole role = requested == null || requested.isBlank()
+                ? AppRole.USER
+                : AppRole.parse(requested)
+                        .orElseThrow(() -> ApiException.badRequest("unknown role: " + requested));
+
+        return AccountSummary.of(accounts.approve(accountId, role, actor));
     }
 
     /** Refuses a pending registration. The row stays, so the decision stays auditable. */

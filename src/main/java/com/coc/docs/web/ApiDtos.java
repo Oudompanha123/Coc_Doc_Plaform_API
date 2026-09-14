@@ -406,6 +406,12 @@ public final class ApiDtos {
      * Google — and no status, because a {@code super_admin} creating the
      * account is itself the approval.
      */
+    /**
+     * The role to admit a pending applicant at. Optional — absent means
+     * {@code user}.
+     */
+    public record ApproveRequest(String role) {}
+
     public record CreateAccountRequest(
             @NotBlank @Email String email, @NotBlank String role) {}
 }

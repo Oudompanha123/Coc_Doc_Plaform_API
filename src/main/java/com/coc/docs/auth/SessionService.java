@@ -1,13 +1,14 @@
 package com.coc.docs.auth;
 
 import com.coc.docs.account.Account;
-import com.coc.docs.account.AccountStatus;
 import com.coc.docs.account.AccountCredential;
 import com.coc.docs.account.AccountRepository;
+import com.coc.docs.account.AccountStatus;
 import com.coc.docs.account.AppRole;
 import com.coc.docs.audit.AuditAction;
 import com.coc.docs.audit.AuditRepository;
 import com.coc.docs.config.AppProperties;
+import com.coc.docs.web.ApiException;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
@@ -103,9 +104,13 @@ public class SessionService {
     /**
      * Verifies a Google ID token and issues a session.
      *
-     * <p>A first-time signer-in gets an account at role {@code user} — read
-     * access and nothing else. The role is never taken from the sign-in, so
-     * signing in cannot be a route to privilege.
+     * <p>A first-time signer-in does not get in. They get an account row at
+     * status pending and role guest, and are turned away until a super admin
+     * approves them (ADR-017). Google vouches that the address is real, not
+     * that its owner belongs here.
+     *
+     * <p>The role is never taken from the sign-in, so signing in cannot be a
+     * route to privilege.
      *
      * <p>A deactivated account is refused. Deactivation has to end access
      * immediately, or it is a note in a table rather than a control.
@@ -132,20 +137,30 @@ public class SessionService {
                 .map(existing -> refreshProfile(existing, identity))
                 .orElseGet(() -> createAccount(identity));
 
-        // Note for the reader: the line above is where "register with Google"
-        // happens. There is no separate Google registration endpoint, and
-        // deliberately so — a first sign-in provisions the account at role
-        // `user` and nothing more (see createAccount). Two endpoints would mean
-        // two places that decide what a new account may do.
+        // The line above is where "apply with Google" happens. There is no
+        // separate registration endpoint for it: a first sign-in creates the
+        // application, and the check below then turns that person away until
+        // somebody approves them. Two endpoints would mean two places deciding
+        // what a new account may do.
 
         // canSignIn, not isActive: someone who self-registered and is still
         // awaiting approval must not get in through the Google door instead
         // (ADR-014). Same email, same account row, one gate.
         if (!account.canSignIn()) {
-            throw new GoogleIdTokenVerifier.AuthenticationFailure(
-                    account.status() == AccountStatus.PENDING
-                            ? "this registration is awaiting approval"
-                            : "this account cannot sign in");
+            // A pending applicant is told so, and this is the one sign-in
+            // failure in the system that is not deliberately opaque. They have
+            // just proved they own this Google address, so naming their own
+            // status discloses nothing to anyone else — and the alternative is
+            // a generic error after an action they took on purpose, which
+            // reads as the product being broken.
+            //
+            // The password path stays uniform: there, the caller has proved
+            // nothing, and a distinguishable answer would turn sign-in into a
+            // way to discover who has applied.
+            if (account.status() == AccountStatus.PENDING) {
+                throw ApiException.forbidden("this registration is awaiting approval");
+            }
+            throw new GoogleIdTokenVerifier.AuthenticationFailure("this account cannot sign in");
         }
 
         Instant now = clock.instant();
@@ -215,8 +230,29 @@ public class SessionService {
      * account creation off the privilege-escalation path (TM-025).
      */
     private Account createAccount(VerifiedIdentity identity) {
-        Account created =
-                accounts.insert(identity.email(), identity.displayName(), AppRole.USER, identity.avatarUrl());
+        // THE BOOTSTRAP. With every applicant starting pending, an installation
+        // holding no accounts is a locked door: nobody can be approved because
+        // nobody exists to approve them. The first person through is therefore
+        // admitted as an active super_admin.
+        //
+        // Narrow on purpose — `account` completely empty, not "no super admin
+        // exists". The weaker test would hand the role to whoever signed in
+        // next any time the last administrator was deactivated, which is
+        // precisely when it must not. This can be true only once in an
+        // installation's life, and it matters now because every developer gets
+        // their own empty schema (DB_SCHEMA).
+        boolean bootstrap = accounts.isEmpty();
+
+        Account created = bootstrap
+                ? accounts.insert(
+                        identity.email(),
+                        identity.displayName(),
+                        AppRole.SUPER_ADMIN,
+                        identity.avatarUrl(),
+                        AccountStatus.ACTIVE)
+                : accounts.insertApplication(
+                        identity.email(), identity.displayName(), identity.avatarUrl(), null);
+
         audit.append(
                 created.id(),
                 created.email(),
@@ -225,7 +261,8 @@ public class SessionService {
                 created.id(),
                 json.createObjectNode()
                         .put("role", created.role().wire())
-                        .put("via", "google-sign-in"));
+                        .put("status", created.status().wire())
+                        .put("via", bootstrap ? "google-sign-in-bootstrap" : "google-sign-in"));
         return created;
     }
 
