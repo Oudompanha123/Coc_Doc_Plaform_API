@@ -15,7 +15,20 @@ spring:
     # startup clearly instead of silently reaching whichever host used to be
     # hardcoded here. Set them in backend/env.local (copy backend/env.example) —
     # never committed, .gitignore already covers it.
-    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=cocdocs_dev
+    # DB_SCHEMA is how several developers share one PostgreSQL server without
+    # sharing a schema. Each person sets their own — cocdocs_sam, cocdocs_rayuth
+    # — and gets their own tables, their own migration history and their own
+    # data on the same host.
+    #
+    # This is not a preference. One shared schema means one Flyway lineage, so
+    # two branches that each add a V6 collide, and a rebuild to escape the
+    # collision destroys everyone's data at once. That happened twice on
+    # 2026-09-14 and cost nine accounts, the audit trail and a colleague's
+    # table.
+    #
+    # Defaults to cocdocs_dev, which is the shared schema. Leaving it unset is
+    # a deliberate choice to work in the common one, not an accident.
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=${DB_SCHEMA:cocdocs_dev}
     username: ${DB_USER}
     password: ${DB_PASSWORD}
     hikari:
@@ -27,6 +40,13 @@ spring:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: false
+
+    # Migrate the same schema the application reads, and create it if this is
+    # the first run against it. Without this Flyway would follow the connection
+    # default and could put flyway_schema_history somewhere other than the
+    # tables it describes — which is the one pair that must never drift apart.
+    schemas: ${DB_SCHEMA:cocdocs_dev}
+    create-schemas: true
 
     # TEMPORARY — REMOVE WHEN V6__password_reset_token.sql REACHES dev.
     #
