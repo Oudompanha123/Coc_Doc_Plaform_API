@@ -85,7 +85,7 @@ public class PasswordResetMailer {
             helper.setText(plainTextBody(resetUrl), htmlBody(resetUrl));
             sender.send(message);
         } catch (MessagingException e) {
-            // A malformed address or similar — not a caller-facing concern (ADR-017
+            // A malformed address or similar — not a caller-facing concern (ADR-018
             // decision 3 already means this failure must not change the response),
             // but it must not vanish silently either.
             log.error("failed to build password reset email for {}", toEmail, e);
