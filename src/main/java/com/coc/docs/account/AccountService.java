@@ -293,7 +293,12 @@ public class AccountService {
             throw ApiException.conflict("that email address is already registered");
         }
 
-        Account created = accounts.insertSelfRegisteredAccount(email, displayName, passwordHash);
+        // Pending, at role guest (ADR-017). Between 2026-09-11 and this change
+        // registration produced an active account immediately, which meant the
+        // Google gate would have had an open door beside it: anyone could
+        // self-issue a working account by choosing a password instead. Both
+        // doors now lead to the same queue.
+        Account created = accounts.insertApplication(email, displayName, null, passwordHash);
 
         audit.append(
                 null,
@@ -341,7 +346,10 @@ public class AccountService {
         }
 
         String displayName = email.contains("@") ? email.substring(0, email.indexOf('@')) : email;
-        Account created = accounts.insert(email, displayName, role, null);
+        // Active, not pending: a super_admin creating this account is the
+        // approval. Sending it to the queue would ask them to approve their own
+        // decision (ADR-017).
+        Account created = accounts.insert(email, displayName, role, null, AccountStatus.ACTIVE);
 
         audit.append(
                 actor.id(),
@@ -358,9 +366,27 @@ public class AccountService {
     }
 
     /** Approves a pending registration. The account can sign in from the next request. */
+    /**
+     * Lets a pending applicant in, at a role chosen now (ADR-017).
+     *
+     * <p>One decision, not two. "Should this person be let in, and as what" is
+     * a single thought; approve-then-promote splits it across two screens and
+     * two audit entries, and leaves a window in which someone is inside at a
+     * role nobody chose.
+     *
+     * <p>The granted role replaces {@code guest}, which an applicant holds
+     * while pending and which grants nothing. {@code guest} itself is refused:
+     * approving somebody into a role that opens nothing is not an approval,
+     * and the caller almost certainly meant to reject.
+     */
     @Transactional
-    public Account approve(UUID accountId, CurrentUser actor) {
-        return decide(accountId, AccountStatus.ACTIVE, AuditAction.ACCOUNT_APPROVE, actor);
+    public Account approve(UUID accountId, AppRole role, CurrentUser actor) {
+        if (role == AppRole.GUEST) {
+            throw ApiException.badRequest(
+                    "guest grants nothing; approve at user or above, or reject the application");
+        }
+        Account approved = decide(accountId, AccountStatus.ACTIVE, AuditAction.ACCOUNT_APPROVE, actor);
+        return setRoles(approved.id(), EnumSet.of(role), actor);
     }
 
     /**

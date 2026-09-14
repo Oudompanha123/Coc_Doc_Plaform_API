@@ -305,15 +305,15 @@ class AuthControllerTest {
     class Register {
 
         @Test
-        @DisplayName("creates the account active and reports that it can sign in immediately")
-        void createsActiveAccount() throws Exception {
+        @DisplayName("takes the application and says it is waiting, not that they can sign in")
+        void createsPendingApplication() throws Exception {
             Account created = new Account(
                     UUID.randomUUID(),
                     "new.person@example.com",
                     "New Person",
-                    java.util.EnumSet.of(AppRole.USER),
+                    java.util.EnumSet.of(AppRole.GUEST),
                     null,
-                    AccountStatus.ACTIVE,
+                    AccountStatus.PENDING,
                     null,
                     Instant.now(),
                     Instant.now());
@@ -325,9 +325,14 @@ class AuthControllerTest {
                             .content("""
                                     {"email":"new.person@example.com","displayName":"New Person","password":"hunter2222"}
                                     """))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.status").value("ACTIVE"))
-                    .andExpect(jsonPath("$.message").value("Your account has been created. You can now log in."));
+                    // 202: accepted, nothing usable yet. Until ADR-017 this
+                    // answered 200 with "You can now log in", which became a
+                    // promise the next request refused to keep.
+                    .andExpect(status().isAccepted())
+                    .andExpect(jsonPath("$.status").value("PENDING"))
+                    .andExpect(jsonPath("$.message")
+                            .value("Your registration has been received. An administrator has to "
+                                    + "approve it before you can sign in."));
         }
     }
 

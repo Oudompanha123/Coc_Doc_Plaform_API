@@ -345,31 +345,32 @@ public class AuthController {
     /**
      * Applies for an account.
      *
-     * <p>Creates an account that can sign in immediately: the row is
-     * {@code active} with role {@code user}. Role and status are literals in
+     * <p>Creates a {@code pending} row at role {@code guest} — an application,
+     * not an account that works (ADR-017). Role and status are literals in
      * the insert, never taken from this request — that is what keeps
      * registration off the privilege-escalation path (TM-025).
      *
-     * <p>As of 2026-09-11, product direction removed the {@code super_admin}
-     * approval gate ADR-014 originally put here — see
-     * {@code AccountService.register}'s javadoc and ADR-014's "Alternatives
-     * Considered" table, which explicitly rejected this for the security
-     * reason it reopens. Recorded here pending that ADR's own revision.
+     * <p>Between 2026-09-11 and ADR-017 this produced an active account
+     * immediately. Reversed, because gating Google sign-in while leaving this
+     * open would put a door beside the gate: anyone could self-issue a working
+     * account by choosing a password instead.
      *
-     * <p>200, not 202: the account is usable as soon as this call returns, so
-     * there is nothing left "accepted but pending".
+     * <p>202, not 200. The request was accepted and nothing is usable yet —
+     * saying 200 is how the old message came to promise a sign-in that would
+     * be refused.
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-003, ADR-014
+     * <p>// req: FR-AUTH-002, FR-AUTH-003, ADR-014, ADR-017
      */
     @PostMapping("/register")
-    @ResponseStatus(HttpStatus.OK)
+    @ResponseStatus(HttpStatus.ACCEPTED)
     RegisterResponse register(@Valid @RequestBody RegisterRequest request) {
         Account created = accounts.register(
                 request.email(), request.displayName(), passwordEncoder.encode(request.password()));
 
         return new RegisterResponse(
                 created.status().wire().toUpperCase(Locale.ROOT),
-                "Your account has been created. You can now log in.");
+                "Your registration has been received. An administrator has to approve it "
+                        + "before you can sign in.");
     }
 
     /**
