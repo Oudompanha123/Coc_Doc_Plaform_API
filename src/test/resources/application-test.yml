@@ -12,6 +12,23 @@ spring:
     enabled: true
     clean-disabled: false
 
+    # Migrate the schema the test connection actually uses.
+    #
+    # application.yml sets `schemas: ${DB_SCHEMA:cocdocs_dev}`, because on a
+    # real server each developer works in their own schema and the connection
+    # URL carries a matching `currentSchema=`. Here the URL comes from
+    # Testcontainers via @ServiceConnection and names no schema, so the
+    # connection's search_path is `public`.
+    #
+    # Inheriting the main value put the tables in cocdocs_dev while every query
+    # looked in public, and the suite failed on the first statement it ran:
+    #
+    #   bad SQL grammar [truncate audit_log, app_session, ...]
+    #
+    # Pinned rather than left unset: unset falls back to the main file and
+    # reintroduces exactly this.
+    schemas: public
+
 app:
   session-ttl: P1D
   frontend-origin: http://localhost:3000
