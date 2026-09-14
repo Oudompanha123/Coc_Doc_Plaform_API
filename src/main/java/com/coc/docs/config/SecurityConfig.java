@@ -92,6 +92,11 @@ public class SecurityConfig {
                         // ADR-014: applying for an account, and signing in with one. Public
                         // by necessity — nobody has a session before either succeeds.
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
+                        // ADR-021: the code-request/verify steps registration was split
+                        // into. Same necessity as /register itself — no account, and
+                        // therefore no session, exists until the last of these succeeds.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/register/resend").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/register/verify").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login-password").permitAll()
                         // ADR-018: starting or completing a password reset. Both public
                         // by the same necessity — a visitor who forgot their password,

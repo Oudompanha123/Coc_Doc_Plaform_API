@@ -2,18 +2,22 @@ package com.coc.docs.web;
 
 import com.coc.docs.account.Account;
 import com.coc.docs.auth.CurrentUser;
-import com.coc.docs.account.AccountService;
 import com.coc.docs.auth.PasswordResetService;
+import com.coc.docs.auth.RegistrationChallenge;
+import com.coc.docs.auth.RegistrationOtpService;
 import com.coc.docs.auth.SessionService;
 import com.coc.docs.auth.dto.ChangePasswordRequest;
 import com.coc.docs.auth.dto.ChangePasswordResponse;
 import com.coc.docs.auth.dto.ForgotPasswordRequest;
 import com.coc.docs.auth.dto.ForgotPasswordResponse;
 import com.coc.docs.auth.dto.PasswordLoginRequest;
+import com.coc.docs.auth.dto.RegisterChallengeResponse;
 import com.coc.docs.auth.dto.RegisterRequest;
 import com.coc.docs.auth.dto.RegisterResponse;
+import com.coc.docs.auth.dto.ResendRegistrationCodeRequest;
 import com.coc.docs.auth.dto.ResetPasswordRequest;
 import com.coc.docs.auth.dto.ResetPasswordResponse;
+import com.coc.docs.auth.dto.VerifyRegistrationCodeRequest;
 import com.coc.docs.config.AppProperties;
 import com.coc.docs.auth.NonceService;
 import jakarta.servlet.http.Cookie;
@@ -53,24 +57,24 @@ public class AuthController {
 
     private final SessionService sessions;
     private final AppProperties properties;
-    private final AccountService accounts;
     private final PasswordEncoder passwordEncoder;
     private final NonceService nonces;
     private final PasswordResetService passwordResets;
+    private final RegistrationOtpService registrationOtp;
 
     public AuthController(
             SessionService sessions,
             AppProperties properties,
-            AccountService accounts,
             PasswordEncoder passwordEncoder,
             NonceService nonces,
-            PasswordResetService passwordResets) {
+            PasswordResetService passwordResets,
+            RegistrationOtpService registrationOtp) {
         this.sessions = sessions;
         this.properties = properties;
-        this.accounts = accounts;
         this.passwordEncoder = passwordEncoder;
         this.nonces = nonces;
         this.passwordResets = passwordResets;
+        this.registrationOtp = registrationOtp;
     }
 
     /**
@@ -347,38 +351,84 @@ public class AuthController {
     }
 
     // -----------------------------------------------------------------------
-    // Password self-registration (ADR-014)
+    // Password self-registration (ADR-014, ADR-017), email OTP (ADR-021)
     // -----------------------------------------------------------------------
 
     /**
-     * Applies for an account.
+     * Step 1 of registration: mints a 6-digit code and emails it, rather than
+     * creating an account directly (ADR-021, revision of ADR-014/017).
      *
-     * <p>Creates a {@code pending} row at role {@code guest} — an application,
-     * not an account that works (ADR-017). Role and status are literals in
-     * the insert, never taken from this request — that is what keeps
-     * registration off the privilege-escalation path (TM-025).
+     * <p>No account row exists after this call — proving control of the
+     * inbox happens before the row is created, not after. {@link
+     * #verifyRegistration} is the step that actually creates it, via the
+     * same {@code AccountService.register} this endpoint used to call
+     * directly; that method's {@code pending}/{@code guest}, literal-role
+     * behaviour (ADR-017, TM-025) is completely unchanged.
      *
-     * <p>Between 2026-09-11 and ADR-017 this produced an active account
-     * immediately. Reversed, because gating Google sign-in while leaving this
-     * open would put a door beside the gate: anyone could self-issue a working
-     * account by choosing a password instead.
+     * <p>202: accepted, and there still isn't even a pending application to
+     * approve until the code is confirmed.
      *
-     * <p>202, not 200. The request was accepted and nothing is usable yet —
-     * saying 200 is how the old message came to promise a sign-in that would
-     * be refused.
-     *
-     * <p>// req: FR-AUTH-002, FR-AUTH-003, ADR-014, ADR-017
+     * <p>// req: FR-AUTH-002, FR-AUTH-003, ADR-014, ADR-017, ADR-021
      */
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.ACCEPTED)
-    RegisterResponse register(@Valid @RequestBody RegisterRequest request) {
-        Account created = accounts.register(
+    RegisterChallengeResponse register(@Valid @RequestBody RegisterRequest request) {
+        RegistrationChallenge challenge = registrationOtp.start(
                 request.email(), request.displayName(), passwordEncoder.encode(request.password()));
+        return challengeResponse(challenge);
+    }
+
+    /**
+     * Re-sends the registration code — the "I didn't get it" / "it expired"
+     * path. Subject to the same 60-second cooldown as resubmitting the form
+     * itself; see {@code RegistrationOtpService}.
+     *
+     * <p>Public, and it has to be — this runs before any account, and
+     * therefore any session, exists.
+     *
+     * <p>// req: ADR-021
+     */
+    @PostMapping("/register/resend")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    RegisterChallengeResponse resendRegistrationCode(@Valid @RequestBody ResendRegistrationCodeRequest request) {
+        RegistrationChallenge challenge = registrationOtp.resend(request.email());
+        return challengeResponse(challenge);
+    }
+
+    /**
+     * Step 3: confirms the emailed code — the step that used to be all of
+     * {@code /register} (ADR-021). Creates a {@code pending} row at role
+     * {@code guest} — an application, not an account that works (ADR-017).
+     *
+     * <p>201, not 202: unlike step 1, a resource now genuinely exists. It is
+     * still not usable — {@code pending} and {@code active} remain different
+     * claims, same as they always have been.
+     *
+     * <p>An expired or wrong code is reported plainly rather than folded
+     * into one generic failure — see {@code RegistrationOtpService.verify}'s
+     * javadoc for why the anti-enumeration reasoning behind {@link
+     * #signInWithPassword}'s genericism does not apply here.
+     *
+     * <p>// req: FR-AUTH-002, FR-AUTH-003, ADR-014, ADR-017, ADR-021
+     */
+    @PostMapping("/register/verify")
+    @ResponseStatus(HttpStatus.CREATED)
+    RegisterResponse verifyRegistration(@Valid @RequestBody VerifyRegistrationCodeRequest request) {
+        Account created = registrationOtp.verify(request.email(), request.code());
 
         return new RegisterResponse(
                 created.status().wire().toUpperCase(Locale.ROOT),
-                "Your registration has been received. An administrator has to approve it "
-                        + "before you can sign in.");
+                "Your email is verified and your registration has been received. An administrator "
+                        + "has to approve it before you can sign in.");
+    }
+
+    /** Shared by {@link #register} and {@link #resendRegistrationCode} — both hand back the same shape. */
+    private static RegisterChallengeResponse challengeResponse(RegistrationChallenge challenge) {
+        long ttlSeconds = RegistrationOtpService.TTL.toSeconds();
+        return new RegisterChallengeResponse(
+                "We've sent a 6-digit verification code to " + challenge.email() + ". It expires in "
+                        + (ttlSeconds / 60) + " minutes.",
+                ttlSeconds);
     }
 
     /**

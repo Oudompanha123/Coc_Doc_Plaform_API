@@ -32,6 +32,9 @@ public final class AuditAction {
     public static final String ACCOUNT_APPROVE = "account.approve";
     public static final String ACCOUNT_REJECT = "account.reject";
 
+    /** A registration code was minted and emailed — the first step of ADR-021, before any account row exists. */
+    public static final String ACCOUNT_REGISTER_OTP_REQUEST = "account.register_otp_request";
+
     public static final String AUTH_SIGN_IN = "auth.sign_in";
     public static final String AUTH_SIGN_OUT = "auth.sign_out";
     public static final String AUTH_REJECTED = "auth.rejected";
