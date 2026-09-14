@@ -59,6 +59,35 @@ public final class ApiDtos {
      */
     public record NonceResponse(String nonce) {}
 
+    /** A change to the caller's own profile. Name only — see SessionService.renameSelf. */
+    public record UpdateProfileRequest(@NotBlank String displayName) {}
+
+    /**
+     * One device the caller is signed in on.
+     *
+     * <p>{@code id} is the opaque surrogate from V6, never the token hash:
+     * the hash is what the server compares a presented token against, and it
+     * has no business travelling to the client that presents one.
+     */
+    public record SessionResponse(
+            UUID id,
+            String userAgent,
+            String ipAddress,
+            Instant issuedAt,
+            Instant expiresAt,
+            boolean current) {
+
+        public static SessionResponse of(com.coc.docs.auth.SessionService.OwnSession session) {
+            return new SessionResponse(
+                    session.id(),
+                    session.userAgent(),
+                    session.ipAddress(),
+                    session.issuedAt(),
+                    session.expiresAt(),
+                    session.current());
+        }
+    }
+
     /**
      * Who the caller is.
      *
@@ -82,7 +111,9 @@ public final class ApiDtos {
             String displayName,
             String role,
             String avatarUrl,
-            boolean authenticated) {
+            boolean authenticated,
+            /** When the account was created — the profile screen's "Joined". */
+            Instant createdAt) {
 
         public static MeResponse of(CurrentUser user) {
             return new MeResponse(
@@ -91,7 +122,8 @@ public final class ApiDtos {
                     user.account().displayName(),
                     user.role().wire(),
                     user.account().avatarUrl(),
-                    true);
+                    true,
+                    user.account().createdAt());
         }
 
         /**
@@ -103,7 +135,7 @@ public final class ApiDtos {
          * satisfied here or not at all. // req: NFR-SEC-PII
          */
         public static MeResponse anonymous() {
-            return new MeResponse(null, null, null, null, null, false);
+            return new MeResponse(null, null, null, null, null, false, null);
         }
     }
 

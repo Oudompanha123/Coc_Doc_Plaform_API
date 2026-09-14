@@ -17,7 +17,10 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -116,7 +119,8 @@ public class AuthController {
                         issued.account().displayName(),
                         issued.account().role().wire(),
                         issued.account().avatarUrl(),
-                        true));
+                        true,
+                        issued.account().createdAt()));
     }
 
     /**
@@ -130,6 +134,75 @@ public class AuthController {
     @GetMapping("/me")
     ApiDtos.MeResponse me(@AuthenticationPrincipal CurrentUser caller) {
         return caller == null ? ApiDtos.MeResponse.anonymous() : ApiDtos.MeResponse.of(caller);
+    }
+
+    /**
+     * Changes the caller's own display name.
+     *
+     * <p>Self-service: the account is the one that made the request, never one
+     * named in it. A profile screen that could name an account would be an
+     * administration screen with no floor under it.
+     *
+     * <p>Name only. Email identifies the account and comes from the identity
+     * provider; role and status are the system's to decide (TM-025).
+     *
+     * <p>// req: FR-AUTH-005, NFR-SEC-PII
+     */
+    @PatchMapping("/me")
+    ApiDtos.MeResponse updateProfile(
+            @Valid @RequestBody ApiDtos.UpdateProfileRequest request,
+            @AuthenticationPrincipal CurrentUser caller) {
+
+        if (caller == null) {
+            throw ApiException.forbidden("sign in first");
+        }
+        Account updated = sessions.renameSelf(caller, request.displayName());
+        return new ApiDtos.MeResponse(
+                updated.id(),
+                updated.email(),
+                updated.displayName(),
+                updated.role().wire(),
+                updated.avatarUrl(),
+                true,
+                updated.createdAt());
+    }
+
+    /**
+     * Where this account is signed in.
+     *
+     * <p>The caller's own sessions and no others: the account comes from the
+     * resolved session, so there is no parameter here that could point at
+     * anyone else (NFR-SEC-PII).
+     *
+     * <p>// req: FR-AUTH-004, FR-AUTH-007
+     */
+    @GetMapping("/sessions")
+    java.util.List<ApiDtos.SessionResponse> sessions(@AuthenticationPrincipal CurrentUser caller) {
+        if (caller == null) {
+            throw ApiException.forbidden("sign in first");
+        }
+        return sessions.listOwnSessions(caller).stream().map(ApiDtos.SessionResponse::of).toList();
+    }
+
+    /**
+     * Ends one of the caller's own sessions — "sign out this other device".
+     *
+     * <p>204 whether or not a row was revoked. An id that belongs to someone
+     * else and an id that does not exist answer identically, because telling
+     * them apart is only useful to someone enumerating other people's
+     * sessions.
+     *
+     * <p>// req: FR-AUTH-007, TM-003
+     */
+    @DeleteMapping("/sessions/{sessionId}")
+    ResponseEntity<Void> revokeSession(
+            @PathVariable java.util.UUID sessionId, @AuthenticationPrincipal CurrentUser caller) {
+
+        if (caller == null) {
+            throw ApiException.forbidden("sign in first");
+        }
+        sessions.revokeOwnSession(caller, sessionId);
+        return ResponseEntity.noContent().build();
     }
 
     /**
@@ -318,6 +391,7 @@ public class AuthController {
                         issued.account().displayName(),
                         issued.account().role().wire(),
                         issued.account().avatarUrl(),
-                        true));
+                        true,
+                        issued.account().createdAt()));
     }
 }

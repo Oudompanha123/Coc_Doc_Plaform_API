@@ -94,6 +94,25 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login-password").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/me").permitAll()
+
+
+                        // Self-service profile and session management. Any signed-in caller,
+
+                        // including a plain user: these act on the account that made the
+
+                        // request and cannot name another, so there is nothing here for a
+
+                        // higher floor to protect. Without these three lines they would fall
+
+                        // through to anyRequest(), which is super_admin.
+
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/auth/me").hasRole(AppRole.USER.name())
+
+                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/sessions").hasRole(AppRole.USER.name())
+
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/auth/sessions/**")
+
+                        .hasRole(AppRole.USER.name())
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
                         // Liveness only. Carries no version, no configuration and
                         // no dependency status, so it discloses nothing.

@@ -432,4 +432,96 @@ public class SessionService {
 
         return new IssuedSession(token, account, expiresAt);
     }
+
+    // -----------------------------------------------------------------------
+    // The caller's own sessions (Settings > Security)
+    // -----------------------------------------------------------------------
+
+    /** One of the caller's sessions, with the one making this request marked. */
+    public record OwnSession(
+            java.util.UUID id,
+            String userAgent,
+            String ipAddress,
+            Instant issuedAt,
+            Instant expiresAt,
+            boolean current) {}
+
+    /**
+     * Where this account is currently signed in.
+     *
+     * <p>Own sessions only — the account id comes from the resolved caller,
+     * never from the request, so there is no parameter here to point at
+     * somebody else (NFR-SEC-PII).
+     *
+     * <p>The current session is identified by comparing token hashes in
+     * memory. The hash itself is dropped here and never reaches the response:
+     * the API names a session by its opaque id instead.
+     *
+     * <p>// req: FR-AUTH-004, FR-AUTH-007, NFR-SEC-PII
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<OwnSession> listOwnSessions(CurrentUser caller) {
+        return sessions.findLiveForAccount(caller.account().id(), clock.instant()).stream()
+                .map(s -> new OwnSession(
+                        s.id(),
+                        s.userAgent(),
+                        s.ipAddress(),
+                        s.issuedAt(),
+                        s.expiresAt(),
+                        MessageDigest.isEqual(s.tokenHash(), caller.sessionTokenHash())))
+                .toList();
+    }
+
+    /**
+     * Ends one of the caller's own sessions — "sign out this other device".
+     *
+     * <p>Ending the current one is allowed. It is the same thing sign-out
+     * does, and refusing would mean explaining a distinction the person has no
+     * reason to care about.
+     *
+     * <p>Returns false when the id is unknown or belongs to someone else. The
+     * caller is not told which, because the difference is only useful to
+     * someone enumerating other people's sessions.
+     *
+     * <p>// req: FR-AUTH-007, TM-003
+     */
+    @Transactional
+    public boolean revokeOwnSession(CurrentUser caller, java.util.UUID sessionId) {
+        boolean revoked = sessions.revokeOwnedById(sessionId, caller.account().id()) > 0;
+        if (revoked) {
+            audit.append(
+                    caller.account().id(),
+                    caller.account().email(),
+                    AuditAction.AUTH_SIGN_OUT,
+                    AuditAction.TARGET_SESSION,
+                    caller.account().id(),
+                    json.createObjectNode().put("via", "settings").put("session", sessionId.toString()));
+        }
+        return revoked;
+    }
+
+    /**
+     * Changes the caller's own display name.
+     *
+     * <p>Self-service, unlike {@code AccountService.renameFor}, which is a
+     * {@code super_admin} acting on someone else. Same caveat: a Google
+     * sign-in refreshes the name from the provider, so this lasts until the
+     * next one.
+     *
+     * <p>Only the name. Email identifies the account and comes from the
+     * identity provider; role and status are this system's to decide. A
+     * profile screen that could change any of those would be a privilege path
+     * (TM-025).
+     *
+     * <p>// req: FR-AUTH-005, NFR-SEC-PII
+     */
+    @Transactional
+    public Account renameSelf(CurrentUser caller, String displayName) {
+        String trimmed = displayName == null ? "" : displayName.trim();
+        if (trimmed.isEmpty()) {
+            throw new IllegalArgumentException("a display name cannot be blank");
+        }
+        accounts.updateDisplayName(caller.account().id(), trimmed);
+        return accounts.findById(caller.account().id()).orElseThrow();
+    }
 }
