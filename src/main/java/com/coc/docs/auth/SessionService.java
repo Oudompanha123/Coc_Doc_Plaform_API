@@ -237,7 +237,8 @@ public class SessionService {
                 existing.status(),
                 existing.deactivatedAt(),
                 existing.createdAt(),
-                existing.updatedAt());
+                existing.updatedAt(),
+                existing.mustChangePassword());
     }
 
     /**
@@ -588,5 +589,57 @@ public class SessionService {
         }
         accounts.updateDisplayName(caller.account().id(), trimmed);
         return accounts.findById(caller.account().id()).orElseThrow();
+    }
+
+    // -----------------------------------------------------------------------
+    // Self-service password change (revision of ADR-017)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Replaces the caller's own password — the first-login completion of a
+     * {@code super_admin} temporary-password invite, and usable afterwards for
+     * any account that holds a password credential.
+     *
+     * <p>Self-service, the same shape as {@link #renameSelf}: the account acted
+     * on is the caller's own, resolved from the session, never a parameter that
+     * could name someone else.
+     *
+     * <p>Refuses a Google-only account (no {@code password_hash} to replace)
+     * and refuses reusing the current password — the one rule this endpoint
+     * exists to enforce for a just-invited account, since a temporary password
+     * that could be "changed" back to itself was never actually replaced.
+     *
+     * <p>Every other live session for this account is revoked, not this one:
+     * the caller is using this exact session to make the change, and ending it
+     * here would contradict "then redirect to normal application" immediately
+     * after success. See {@code PasswordResetService.resetPassword} for the
+     * reset path, which has no current session to spare and revokes all of
+     * them.
+     *
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017
+     */
+    @Transactional
+    public void changeOwnPassword(CurrentUser caller, String newRawPassword) {
+        AccountCredential credential = accounts.findCredentialById(caller.id()).orElseThrow();
+
+        if (credential.passwordHash() == null) {
+            throw ApiException.badRequest(
+                    "this account has no password set; sign in with Google instead");
+        }
+        if (passwordEncoder.matches(newRawPassword, credential.passwordHash())) {
+            throw ApiException.badRequest(
+                    "choose a password different from your current one");
+        }
+
+        accounts.updatePasswordHash(caller.id(), passwordEncoder.encode(newRawPassword));
+        int revoked = sessions.revokeAllForExcept(caller.id(), caller.sessionTokenHash());
+
+        audit.append(
+                caller.id(),
+                caller.email(),
+                AuditAction.PASSWORD_CHANGE_COMPLETE,
+                AuditAction.TARGET_ACCOUNT,
+                caller.id(),
+                json.createObjectNode().put("otherSessionsRevoked", revoked));
     }
 }

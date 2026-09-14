@@ -106,7 +106,8 @@ class AdminAccountControllerTest {
                 AccountStatus.ACTIVE,
                 null,
                 Instant.parse("2026-09-01T09:00:00Z"),
-                Instant.parse("2026-09-01T09:00:00Z"));
+                Instant.parse("2026-09-01T09:00:00Z"),
+                false);
     }
 
     /** A super admin, the only role that reaches any of this. */
@@ -243,7 +244,8 @@ class AdminAccountControllerTest {
                     EnumSet.of(AppRole.USER), null, AccountStatus.ACTIVE,
                     Instant.parse("2026-09-14T10:00:00Z"),
                     Instant.parse("2026-09-01T09:00:00Z"),
-                    Instant.parse("2026-09-14T10:00:00Z"));
+                    Instant.parse("2026-09-14T10:00:00Z"),
+                    false);
 
             when(accountService.update(eq(ACCOUNT_ID), isNull(), eq(false), isNull(), any()))
                     .thenReturn(deactivated);

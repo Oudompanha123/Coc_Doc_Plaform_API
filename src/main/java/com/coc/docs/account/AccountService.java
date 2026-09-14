@@ -2,14 +2,17 @@ package com.coc.docs.account;
 
 import com.coc.docs.audit.AuditAction;
 import com.coc.docs.audit.AuditRepository;
+import com.coc.docs.auth.AccountInviteMailer;
 import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.auth.SessionRepository;
 import com.coc.docs.web.ApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.security.SecureRandom;
 import java.util.List;
 import java.util.EnumSet;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,20 +25,38 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AccountService {
 
+    /** The temporary password's length. Long enough that entropy, not the character set, does the work. */
+    private static final int TEMP_PASSWORD_LENGTH = 14;
+
+    /**
+     * Unambiguous on purpose: no {@code 0/O} or {@code 1/l/I}, so a person
+     * retyping this from an email or a screen is not defeated by a font that
+     * renders them alike.
+     */
+    private static final String TEMP_PASSWORD_ALPHABET =
+            "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%";
+
     private final AccountRepository accounts;
     private final SessionRepository sessions;
     private final AuditRepository audit;
     private final ObjectMapper json;
+    private final PasswordEncoder passwordEncoder;
+    private final AccountInviteMailer inviteMailer;
+    private final SecureRandom random = new SecureRandom();
 
     public AccountService(
             AccountRepository accounts,
             SessionRepository sessions,
             AuditRepository audit,
-            ObjectMapper json) {
+            ObjectMapper json,
+            PasswordEncoder passwordEncoder,
+            AccountInviteMailer inviteMailer) {
         this.accounts = accounts;
         this.sessions = sessions;
         this.audit = audit;
         this.json = json;
+        this.passwordEncoder = passwordEncoder;
+        this.inviteMailer = inviteMailer;
     }
 
     @Transactional(readOnly = true)
@@ -315,11 +336,14 @@ public class AccountService {
      * Creates an account on behalf of a {@code super_admin} — the "add account"
      * path in the administration screen.
      *
-     * <p>No password is set, and that is the point: the person signs in with
-     * Google, and the account they land on is this row, matched on email. It
-     * exists beforehand so that a role above {@code user} can be waiting for
-     * them, rather than an administrator having to catch them after their
-     * first sign-in.
+     * <p>Issues a temporary password and emails it (revision of ADR-017): the
+     * account is usable immediately over the password sign-in path, and its
+     * owner is required to replace that password before doing anything else
+     * (see {@code SessionService.changeOwnPassword} and the
+     * {@code must_change_password} gate). Google sign-in remains available too
+     * — this does not replace that path, it adds a working credential for
+     * someone who has not signed in with Google yet, matched on the same
+     * email.
      *
      * <p>Active immediately. There is nothing to approve — a
      * {@code super_admin} creating it <em>is</em> the approval, unlike
@@ -331,11 +355,17 @@ public class AccountService {
      * {@code super_admin} (TM-025); here, the caller already holds it.
      *
      * <p>Display name is derived from the address rather than asked for. The
-     * real one arrives from the identity provider on first sign-in and
+     * real one arrives from the identity provider on first Google sign-in and
      * overwrites this, so prompting for it would be asking for a value with a
      * short life.
      *
-     * <p>// req: FR-AUTH-003, FR-AUTH-005, FR-AUTH-008, UC-004
+     * <p>The plaintext temporary password exists only in this method's local
+     * variable and inside {@link AccountInviteMailer}, which puts it in an
+     * email and nowhere else; it is never logged, never audited and never
+     * returned in the API response — only its bcrypt hash reaches the
+     * database.
+     *
+     * <p>// req: FR-AUTH-002, FR-AUTH-003, FR-AUTH-005, FR-AUTH-008, UC-004, ADR-017
      */
     @Transactional
     public Account create(String email, AppRole role, CurrentUser actor) {
@@ -346,10 +376,16 @@ public class AccountService {
         }
 
         String displayName = email.contains("@") ? email.substring(0, email.indexOf('@')) : email;
+        String temporaryPassword = generateTemporaryPassword();
+
         // Active, not pending: a super_admin creating this account is the
         // approval. Sending it to the queue would ask them to approve their own
         // decision (ADR-017).
-        Account created = accounts.insert(email, displayName, role, null, AccountStatus.ACTIVE);
+        Account created = accounts.insert(
+                email, displayName, role, null, AccountStatus.ACTIVE,
+                passwordEncoder.encode(temporaryPassword), true);
+
+        inviteMailer.sendTemporaryPassword(email, temporaryPassword);
 
         audit.append(
                 actor.id(),
@@ -360,9 +396,28 @@ public class AccountService {
                 json.createObjectNode()
                         .put("subject", email)
                         .put("role", role.wire())
-                        .put("via", "admin-invite"));
+                        .put("via", "admin-invite")
+                        .put("temporaryPasswordEmailed", true));
 
         return created;
+    }
+
+    /**
+     * A random temporary password for a {@code super_admin} invite.
+     *
+     * <p>{@link SecureRandom}, not {@link java.util.Random} — this value is a
+     * working credential until its owner replaces it, the same standard every
+     * other token in this codebase (session, nonce, reset) holds itself to.
+     * The alphabet excludes characters that are easy to mistype or confuse
+     * across fonts, because unlike those other tokens, a person has to
+     * actually retype this one.
+     */
+    private String generateTemporaryPassword() {
+        StringBuilder password = new StringBuilder(TEMP_PASSWORD_LENGTH);
+        for (int i = 0; i < TEMP_PASSWORD_LENGTH; i++) {
+            password.append(TEMP_PASSWORD_ALPHABET.charAt(random.nextInt(TEMP_PASSWORD_ALPHABET.length())));
+        }
+        return password.toString();
     }
 
     /** Approves a pending registration. The account can sign in from the next request. */

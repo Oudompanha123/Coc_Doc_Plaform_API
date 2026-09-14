@@ -5,6 +5,8 @@ import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.account.AccountService;
 import com.coc.docs.auth.PasswordResetService;
 import com.coc.docs.auth.SessionService;
+import com.coc.docs.auth.dto.ChangePasswordRequest;
+import com.coc.docs.auth.dto.ChangePasswordResponse;
 import com.coc.docs.auth.dto.ForgotPasswordRequest;
 import com.coc.docs.auth.dto.ForgotPasswordResponse;
 import com.coc.docs.auth.dto.PasswordLoginRequest;
@@ -129,7 +131,8 @@ public class AuthController {
                         issued.account().avatarUrl(),
                         true,
                         issued.account().createdAt(),
-                        sessions.lastSignInForAccount(issued.account().id()).orElse(null)));
+                        sessions.lastSignInForAccount(issued.account().id()).orElse(null),
+                        issued.account().mustChangePassword()));
     }
 
     /**
@@ -176,7 +179,8 @@ public class AuthController {
                 updated.avatarUrl(),
                 true,
                 updated.createdAt(),
-                sessions.lastSignInForAccount(updated.id()).orElse(null));
+                sessions.lastSignInForAccount(updated.id()).orElse(null),
+                updated.mustChangePassword());
     }
 
     /**
@@ -406,7 +410,44 @@ public class AuthController {
                         issued.account().avatarUrl(),
                         true,
                         issued.account().createdAt(),
-                        sessions.lastSignInForAccount(issued.account().id()).orElse(null)));
+                        sessions.lastSignInForAccount(issued.account().id()).orElse(null),
+                        issued.account().mustChangePassword()));
+    }
+
+    // -----------------------------------------------------------------------
+    // Self-service password change (revision of ADR-017)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Replaces the caller's own password.
+     *
+     * <p>This is the "Create New Password" step of the first-login flow: the
+     * caller already holds a session — issued by {@link #signInWithPassword}
+     * on the temporary password — and this is how {@code mustChangePassword}
+     * turns false. It is not restricted to that case; any account holding a
+     * password credential can use it.
+     *
+     * <p>Requires only {@code USER} rank because it acts on the caller's own
+     * account and cannot name another (see {@code SecurityConfig}'s
+     * self-service block). Both password fields are required here even though
+     * the frontend already checks they match — see {@code
+     * ChangePasswordRequest}'s javadoc.
+     *
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017
+     */
+    @PostMapping("/change-password")
+    ChangePasswordResponse changePassword(
+            @Valid @RequestBody ChangePasswordRequest request,
+            @AuthenticationPrincipal CurrentUser caller) {
+
+        if (caller == null) {
+            throw ApiException.forbidden("sign in first");
+        }
+        if (!request.newPassword().equals(request.confirmPassword())) {
+            throw ApiException.badRequest("newPassword and confirmPassword must match");
+        }
+        sessions.changeOwnPassword(caller, request.newPassword());
+        return new ChangePasswordResponse("Password created successfully. You can now access your account.");
     }
 
     // -----------------------------------------------------------------------
