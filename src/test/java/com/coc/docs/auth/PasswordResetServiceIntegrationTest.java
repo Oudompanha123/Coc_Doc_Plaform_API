@@ -112,9 +112,14 @@ class PasswordResetServiceIntegrationTest extends PostgresTestBase {
     }
 
     @Test
-    @DisplayName("does nothing for an address with no account at all")
-    void ignoresAnUnknownAddress() {
-        resets.requestReset("nobody@example.com");
+    @DisplayName("rejects an address with no account at all (ADR-019)")
+    void rejectsAnUnknownAddress() {
+        assertThatThrownBy(() -> resets.requestReset("nobody@example.com"))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> {
+                    assertThat(((ApiException) e).status()).isEqualTo(HttpStatus.NOT_FOUND);
+                    assertThat(e.getMessage()).isEqualTo("No account found with this email address.");
+                });
         verify(mailer, never()).sendResetLink(any(), any());
     }
 

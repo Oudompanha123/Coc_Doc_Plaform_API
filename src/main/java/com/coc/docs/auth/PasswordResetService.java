@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,7 +23,11 @@ import org.springframework.transaction.annotation.Transactional;
  * Mints and redeems password-reset tokens (ADR-018, revision of ADR-014's
  * "no password reset flow exists" gap).
  *
- * <p>// req: FR-AUTH-002, ADR-014, ADR-018
+ * <p>{@link #requestReset} no longer holds ADR-018's full anti-enumeration
+ * property — ADR-019 carved out "does an account exist at all" as a case
+ * the caller is now deliberately told, on explicit product instruction.
+ *
+ * <p>// req: FR-AUTH-002, ADR-014, ADR-018, ADR-019
  */
 @Service
 public class PasswordResetService {
@@ -67,30 +72,49 @@ public class PasswordResetService {
      * belongs to an account that already holds a password hash (ADR-018
      * decision 2) — a Google/Keycloak-only account is left untouched.
      *
-     * <p>The caller of this method (the controller) must not let that
-     * difference reach the response: every case here — unknown address, a
-     * Google-only account, a genuinely emailed reset — is meant to look
-     * identical from the outside (ADR-018 decision 3, {@code UC-004} E-3).
-     * What this method does <em>not</em> equalise is response time: sending a
-     * real email takes measurably longer than the no-op path. That gap is
-     * accepted rather than closed here — see {@code SessionService}'s
-     * dummy-hash comparison for the shape a real fix would take, and ADR-018's
-     * "no rate limiting yet" gap, which this shares.
+     * <p><b>Revised by ADR-019:</b> an address with no account at all is no
+     * longer folded into the same generic response — it now throws, and the
+     * exact message reaches the caller as a {@code 404}. A Google-only
+     * account is still folded into the generic 200, same as a genuinely
+     * emailed reset (ADR-018 decision 3 still holds for that one
+     * distinction; it no longer holds for "does an account exist at all").
+     * {@code /login-password} is unaffected by this — see ADR-019.
      *
-     * <p>// req: ADR-018
+     * <p>What this method does <em>not</em> equalise, on either side of the
+     * ADR-019 split, is response time: sending a real email takes measurably
+     * longer than the no-op path. That gap is accepted rather than closed
+     * here — see {@code SessionService}'s dummy-hash comparison for the shape
+     * a real fix would take, and ADR-018's "no rate limiting yet" gap, which
+     * this shares and — per ADR-019 — now matters more than it did.
+     *
+     * <p>// req: ADR-018, ADR-019
      */
     @Transactional
     public void requestReset(String email) {
         Optional<AccountCredential> found = accounts.findCredentialByEmailIgnoreCase(email);
 
-        if (found.isEmpty() || found.get().passwordHash() == null) {
+        if (found.isEmpty()) {
             audit.append(
                     null,
                     "unauthenticated",
                     AuditAction.PASSWORD_RESET_REQUEST,
                     AuditAction.TARGET_ACCOUNT,
                     null,
-                    json.createObjectNode().put("email", email).put("emailed", false));
+                    json.createObjectNode().put("email", email).put("emailed", false).put("reason", "no_account"));
+            // Exact wording is part of ADR-018's decision, not an
+            // implementation detail — the frontend keys off this same string.
+            throw new ApiException(HttpStatus.NOT_FOUND, "No account found with this email address.");
+        }
+
+        if (found.get().passwordHash() == null) {
+            Account googleOnly = found.get().account();
+            audit.append(
+                    googleOnly.id(),
+                    googleOnly.email(),
+                    AuditAction.PASSWORD_RESET_REQUEST,
+                    AuditAction.TARGET_ACCOUNT,
+                    googleOnly.id(),
+                    json.createObjectNode().put("emailed", false).put("reason", "no_password_credential"));
             return;
         }
 

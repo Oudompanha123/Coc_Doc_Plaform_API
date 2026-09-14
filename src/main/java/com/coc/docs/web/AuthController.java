@@ -416,15 +416,18 @@ public class AuthController {
     /**
      * Starts a password reset.
      *
-     * <p>Always 200 with the same message, whatever actually happened — see
-     * {@code PasswordResetService.requestReset}'s javadoc. This method adds
-     * nothing that would tell the cases apart; it exists only so the caller
-     * cannot distinguish "we emailed you" from "there was nothing to email".
+     * <p>200 with the same generic message for every case <em>except</em> "no
+     * account at all" — {@code PasswordResetService.requestReset} throws for
+     * that one (ADR-019), which {@code ApiExceptionHandler} turns into the
+     * {@code 404} the caller actually sees. This method adds nothing that
+     * would tell the remaining cases apart; a Google-only account and a
+     * genuinely emailed reset are still indistinguishable from here (ADR-018
+     * decision 3, narrowed by ADR-019).
      *
      * <p>Public, and it has to be — a signed-out visitor who forgot their
      * password is, by definition, not signed in yet.
      *
-     * <p>// req: FR-AUTH-002, ADR-018
+     * <p>// req: FR-AUTH-002, ADR-018, ADR-019
      */
     @PostMapping("/forgot-password")
     @ResponseStatus(HttpStatus.OK)
