@@ -36,7 +36,8 @@ public class AccountRepository {
      * drift into the other by accident.
      */
     private static final String ACCOUNT_COLUMNS =
-            "a.id, a.email, a.display_name, a.avatar_url, a.status, a.deactivated_at, a.created_at, a.updated_at";
+            "a.id, a.email, a.display_name, a.avatar_url, a.status, a.deactivated_at, a.created_at, "
+                    + "a.updated_at, a.must_change_password";
 
     /**
      * {@code filter (where ...)} rather than a plain {@code array_agg}: the
@@ -80,7 +81,8 @@ public class AccountRepository {
                 AccountStatus.fromDb(rs.getString("status")),
                 deactivated == null ? null : deactivated.toInstant(),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-                rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+                rs.getObject("updated_at", OffsetDateTime.class).toInstant(),
+                rs.getBoolean("must_change_password"));
     }
 
     /**
@@ -159,6 +161,18 @@ public class AccountRepository {
     public Optional<AccountCredential> findCredentialByEmailIgnoreCase(String email) {
         return jdbc.sql(SELECT_WITH_CREDENTIAL + " where lower(a.email) = lower(?)" + GROUP_BY)
                 .param(email)
+                .query(CREDENTIAL_MAPPER)
+                .optional();
+    }
+
+    /**
+     * The self-service password-change path only: the caller already holds a
+     * session for this exact id, so there is no enumeration risk here the way
+     * there is for {@link #findCredentialByEmailIgnoreCase}.
+     */
+    public Optional<AccountCredential> findCredentialById(UUID id) {
+        return jdbc.sql(SELECT_WITH_CREDENTIAL + " where a.id = ?" + GROUP_BY)
+                .param(id)
                 .query(CREDENTIAL_MAPPER)
                 .optional();
     }
@@ -256,12 +270,31 @@ public class AccountRepository {
      */
     public Account insert(
             String email, String displayName, AppRole role, String avatarUrl, AccountStatus status) {
+        return insert(email, displayName, role, avatarUrl, status, null, false);
+    }
+
+    /**
+     * Creates an account carrying a password credential from the moment it
+     * exists — the {@code super_admin} temporary-password invite path (revision
+     * of ADR-017). {@code passwordHash} is already a bcrypt digest; hashing
+     * belongs to the caller's {@code PasswordEncoder}, not here, for the same
+     * reason {@link #insertApplication} never hashes either.
+     */
+    public Account insert(
+            String email,
+            String displayName,
+            AppRole role,
+            String avatarUrl,
+            AccountStatus status,
+            String passwordHash,
+            boolean mustChangePassword) {
         UUID id = jdbc.sql("""
-                        insert into account (email, display_name, avatar_url, status)
-                        values (?, ?, ?, ?::account_status)
+                        insert into account
+                          (email, display_name, avatar_url, status, password_hash, must_change_password)
+                        values (?, ?, ?, ?::account_status, ?, ?)
                         returning id
                         """)
-                .params(email, displayName, avatarUrl, status.wire())
+                .params(email, displayName, avatarUrl, status.wire(), passwordHash, mustChangePassword)
                 .query(UUID.class)
                 .single();
         grantRole(id, role, null);
@@ -301,13 +334,22 @@ public class AccountRepository {
     }
 
     /**
-     * Sets a new password hash — the reset path (ADR-018) and nowhere else.
-     * Also usable to give a Google-only account its first password hash, but
-     * nothing in this codebase does that yet (ADR-018 decision 2 deliberately
-     * does not go there).
+     * Sets a new password hash — the reset path (ADR-018), the self-service
+     * change path (revision of ADR-017), and nowhere else. Also usable to give
+     * a Google-only account its first password hash, but nothing in this
+     * codebase does that yet (ADR-018 decision 2 deliberately does not go
+     * there).
+     *
+     * <p>Always clears {@code must_change_password}. Whichever path landed a
+     * new hash on this row, the temporary credential it was guarding against
+     * has just been replaced, so there is nothing left for the flag to gate.
      */
     public int updatePasswordHash(UUID id, String passwordHash) {
-        return jdbc.sql("update account set password_hash = ?, updated_at = now() where id = ?")
+        return jdbc.sql("""
+                        update account
+                        set password_hash = ?, must_change_password = false, updated_at = now()
+                        where id = ?
+                        """)
                 .params(passwordHash, id)
                 .update();
     }

@@ -8,6 +8,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -66,7 +67,13 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
  * ADR-011, TM-002
  */
 @WebMvcTest(controllers = com.coc.docs.web.AuthController.class)
-@Import({SecurityConfig.class, ProblemResponses.class, AuthControllerTest.Beans.class})
+@Import({
+    SecurityConfig.class,
+    ProblemResponses.class,
+    com.coc.docs.config.WebMvcConfig.class,
+    MustChangePasswordInterceptor.class,
+    AuthControllerTest.Beans.class
+})
 class AuthControllerTest {
 
     @Autowired MockMvc mvc;
@@ -316,7 +323,8 @@ class AuthControllerTest {
                     AccountStatus.PENDING,
                     null,
                     Instant.now(),
-                    Instant.now());
+                    Instant.now(),
+                    false);
             when(accountService.register(eq("new.person@example.com"), eq("New Person"), any()))
                     .thenReturn(created);
 
@@ -532,6 +540,144 @@ class AuthControllerTest {
                     .andExpect(status().isBadRequest());
 
             verify(passwordResets, never()).resetPassword(any(), any());
+        }
+    }
+
+    /**
+     * The first-login completion step (revision of ADR-017): the caller
+     * already holds a session — issued on the temporary password — and this
+     * is how {@code mustChangePassword} turns false.
+     */
+    @Nested
+    @DisplayName("POST /api/v1/auth/change-password")
+    class ChangePassword {
+
+        @Test
+        @DisplayName("changes the password and confirms")
+        void changesPassword() throws Exception {
+            mvc.perform(post("/api/v1/auth/change-password")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
+                                    """))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.message").value(
+                            "Password created successfully. You can now access your account."));
+
+            verify(sessions).changeOwnPassword(any(), eq("NewPassword123!"));
+        }
+
+        @Test
+        @DisplayName("rejects mismatched confirmation without reaching the session layer")
+        void rejectsMismatch() throws Exception {
+            mvc.perform(post("/api/v1/auth/change-password")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"newPassword":"NewPassword123!","confirmPassword":"Different123!"}
+                                    """))
+                    .andExpect(status().isBadRequest());
+
+            verify(sessions, never()).changeOwnPassword(any(), any());
+        }
+
+        @Test
+        @DisplayName("rejects a short password without reaching the session layer")
+        void rejectsShortPassword() throws Exception {
+            mvc.perform(post("/api/v1/auth/change-password")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"newPassword":"short","confirmPassword":"short"}
+                                    """))
+                    .andExpect(status().isBadRequest());
+
+            verify(sessions, never()).changeOwnPassword(any(), any());
+        }
+
+        @Test
+        @DisplayName("refuses an anonymous caller")
+        void refusesAnonymous() throws Exception {
+            mvc.perform(post("/api/v1/auth/change-password")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
+                                    """))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        @DisplayName("reports reusing the current password plainly, as 400")
+        void rejectsCurrentPasswordReuse() throws Exception {
+            doThrow(ApiException.badRequest("choose a password different from your current one"))
+                    .when(sessions)
+                    .changeOwnPassword(any(), any());
+
+            mvc.perform(post("/api/v1/auth/change-password")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"newPassword":"SamePassword123!","confirmPassword":"SamePassword123!"}
+                                    """))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.detail").value(
+                            "choose a password different from your current one"));
+        }
+    }
+
+    /**
+     * {@code MustChangePasswordInterceptor}, exercised through this
+     * controller's own routes rather than a synthetic one, since it is what
+     * an invited account actually hits on its first request after logging in
+     * with the temporary password.
+     */
+    @Nested
+    @DisplayName("the first-login gate (must-change-password)")
+    class MustChangePasswordGate {
+
+        private static RequestPostProcessor mustChangePassword() {
+            return SecurityMockMvcRequestPostProcessors.authentication(
+                    TestCallers.authentication(AppRole.USER, true));
+        }
+
+        @Test
+        @DisplayName("blocks PATCH /auth/me for a caller who must still change their password")
+        void blocksProfileUpdate() throws Exception {
+            mvc.perform(patch("/api/v1/auth/me")
+                            .with(mustChangePassword())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"displayName":"New Name"}
+                                    """))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("does not block GET /auth/me — the frontend needs it to learn mustChangePassword")
+        void doesNotBlockMe() throws Exception {
+            mvc.perform(get("/api/v1/auth/me").with(mustChangePassword()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.mustChangePassword").value(true));
+        }
+
+        @Test
+        @DisplayName("does not block POST /auth/change-password — it is the way out")
+        void doesNotBlockChangePassword() throws Exception {
+            mvc.perform(post("/api/v1/auth/change-password")
+                            .with(mustChangePassword())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
+                                    """))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("does not block POST /auth/logout")
+        void doesNotBlockLogout() throws Exception {
+            mvc.perform(post("/api/v1/auth/logout").with(mustChangePassword()))
+                    .andExpect(status().isNoContent());
         }
     }
 }

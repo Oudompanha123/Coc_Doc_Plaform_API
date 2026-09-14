@@ -112,6 +112,27 @@ public class SessionRepository {
     }
 
     /**
+     * Ends every other live session belonging to an account, keeping the one
+     * whose hash is passed in.
+     *
+     * <p>Used by a self-service password change: unlike a reset (which nobody
+     * could be using at the moment it lands, since it always follows an
+     * emailed link opened outside any session), a change made from within an
+     * active session must not end the very request that made it. Every other
+     * device is still logged in on the credential just replaced, which is
+     * exactly the exposure {@link #revokeAllFor} closes when there is no
+     * session left to protect.
+     */
+    public int revokeAllForExcept(UUID accountId, byte[] exceptTokenHash) {
+        return jdbc.sql("""
+                        update app_session set revoked_at = now()
+                        where account_id = ? and revoked_at is null and token_hash <> ?
+                        """)
+                .params(accountId, exceptTokenHash)
+                .update();
+    }
+
+    /**
      * Removes sessions that expired more than {@code retention} ago.
      *
      * <p>Expired rows are kept for a while on purpose: "was this session already
