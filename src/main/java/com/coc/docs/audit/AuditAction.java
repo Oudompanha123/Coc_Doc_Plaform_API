@@ -39,6 +39,9 @@ public final class AuditAction {
     public static final String PASSWORD_RESET_REQUEST = "auth.password_reset_request";
     public static final String PASSWORD_RESET_COMPLETE = "auth.password_reset_complete";
 
+    /** A self-service password change — first-login (temporary password) or otherwise. */
+    public static final String PASSWORD_CHANGE_COMPLETE = "auth.password_change_complete";
+
     /** Target types, for the {@code target_type} column. */
     public static final String TARGET_PAGE = "page";
 

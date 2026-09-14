@@ -113,6 +113,12 @@ public class SecurityConfig {
 
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/auth/me").hasRole(AppRole.USER.name())
 
+                        // Self-service password change (revision of ADR-017): acts on
+                        // the caller's own account, resolved from the session, and
+                        // cannot name another — same floor as PATCH /auth/me above.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/change-password")
+                        .hasRole(AppRole.USER.name())
+
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/sessions").hasRole(AppRole.USER.name())
 
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/auth/sessions/**")
