@@ -497,6 +497,11 @@ public class SessionService {
      * <p>// req: FR-AUTH-004, FR-AUTH-007, NFR-SEC-PII
      */
     @Transactional(readOnly = true)
+    public Optional<Instant> lastSignInForAccount(java.util.UUID accountId) {
+        return sessions.lastSignInForAccount(accountId);
+    }
+
+    @Transactional(readOnly = true)
     public java.util.List<OwnSession> listOwnSessions(CurrentUser caller) {
         return sessions.findLiveForAccount(caller.account().id(), clock.instant()).stream()
                 .map(s -> new OwnSession(
