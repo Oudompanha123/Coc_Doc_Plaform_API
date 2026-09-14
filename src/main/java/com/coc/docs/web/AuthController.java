@@ -3,10 +3,15 @@ package com.coc.docs.web;
 import com.coc.docs.account.Account;
 import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.account.AccountService;
+import com.coc.docs.auth.PasswordResetService;
 import com.coc.docs.auth.SessionService;
+import com.coc.docs.auth.dto.ForgotPasswordRequest;
+import com.coc.docs.auth.dto.ForgotPasswordResponse;
 import com.coc.docs.auth.dto.PasswordLoginRequest;
 import com.coc.docs.auth.dto.RegisterRequest;
 import com.coc.docs.auth.dto.RegisterResponse;
+import com.coc.docs.auth.dto.ResetPasswordRequest;
+import com.coc.docs.auth.dto.ResetPasswordResponse;
 import com.coc.docs.config.AppProperties;
 import com.coc.docs.auth.NonceService;
 import jakarta.servlet.http.Cookie;
@@ -49,18 +54,21 @@ public class AuthController {
     private final AccountService accounts;
     private final PasswordEncoder passwordEncoder;
     private final NonceService nonces;
+    private final PasswordResetService passwordResets;
 
     public AuthController(
             SessionService sessions,
             AppProperties properties,
             AccountService accounts,
             PasswordEncoder passwordEncoder,
-            NonceService nonces) {
+            NonceService nonces,
+            PasswordResetService passwordResets) {
         this.sessions = sessions;
         this.properties = properties;
         this.accounts = accounts;
         this.passwordEncoder = passwordEncoder;
         this.nonces = nonces;
+        this.passwordResets = passwordResets;
     }
 
     /**
@@ -393,5 +401,51 @@ public class AuthController {
                         issued.account().avatarUrl(),
                         true,
                         issued.account().createdAt()));
+    }
+
+    // -----------------------------------------------------------------------
+    // Password reset (ADR-017, revision of ADR-014)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Starts a password reset.
+     *
+     * <p>Always 200 with the same message, whatever actually happened — see
+     * {@code PasswordResetService.requestReset}'s javadoc. This method adds
+     * nothing that would tell the cases apart; it exists only so the caller
+     * cannot distinguish "we emailed you" from "there was nothing to email".
+     *
+     * <p>Public, and it has to be — a signed-out visitor who forgot their
+     * password is, by definition, not signed in yet.
+     *
+     * <p>// req: FR-AUTH-002, ADR-017
+     */
+    @PostMapping("/forgot-password")
+    @ResponseStatus(HttpStatus.OK)
+    ForgotPasswordResponse forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        passwordResets.requestReset(request.email());
+        return ForgotPasswordResponse.generic();
+    }
+
+    /**
+     * Completes a password reset: sets the new password and spends the token.
+     *
+     * <p>Unlike {@link #forgotPassword}, a rejected token here is reported
+     * plainly — the caller already holds a value that came from their own
+     * mailbox, so refusing it discloses nothing about anyone else's account
+     * (ADR-017 decision 3; see {@code PasswordResetService.resetPassword}).
+     *
+     * <p>Never sets a session cookie, matching {@code /register}'s "this
+     * never signs the caller in" convention — and every session that
+     * predated the reset is revoked server-side, so the caller signs in fresh
+     * at {@code /login} either way.
+     *
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017
+     */
+    @PostMapping("/reset-password")
+    @ResponseStatus(HttpStatus.OK)
+    ResetPasswordResponse resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        passwordResets.resetPassword(request.token(), request.newPassword());
+        return new ResetPasswordResponse("Your password has been reset. You can now log in.");
     }
 }

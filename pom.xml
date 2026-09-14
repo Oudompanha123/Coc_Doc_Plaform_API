@@ -74,6 +74,16 @@
       <artifactId>spring-boot-starter-validation</artifactId>
     </dependency>
 
+    <!-- Password-reset link delivery (ADR-017). Autoconfigures a
+         JavaMailSender bean only when spring.mail.host is set; where it is
+         not, PasswordResetMailer falls back to logging the link instead of
+         failing the boot, the same optional-bean shape as the Keycloak
+         broker (KeycloakAuthConfig). -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-mail</artifactId>
+    </dependency>
+
     <!-- The OpenAPI contract is generated from the annotated controllers
          themselves (served at /v3/api-docs), not hand-maintained separately,
          so the frontend's generated client cannot silently drift from the

@@ -67,6 +67,11 @@ class SecurityRulesTest {
     @MockitoBean SessionService sessionService;
     @MockitoBean BlockBodyValidator validator;
 
+    // AuthController needs it to construct (ADR-017); mocked for the same
+    // reason as sessionService above — this test is about which routes the
+    // filter chain admits, not what password reset actually does.
+    @MockitoBean com.coc.docs.auth.PasswordResetService passwordResetService;
+
     // Mocked: this test is about which routes the filter chain admits, not
     // about what a nonce contains. AuthController needs it to construct, so
     // without it the whole context fails before a single rule is exercised.
@@ -146,6 +151,27 @@ class SecurityRulesTest {
             // 400 because the body is empty, which is the point: the route was
             // reached rather than refused at the security layer.
             mvc.perform(post("/api/v1/auth/google")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void forgot_password_is_reachable_without_a_session() throws Exception {
+            // ADR-017. Has to be: a visitor who forgot their password, by
+            // definition, has no session to present.
+            mvc.perform(post("/api/v1/auth/forgot-password")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"email\":\"someone@example.com\"}"))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void reset_password_is_reachable_without_a_session() throws Exception {
+            // 400 because the body is empty — the route was reached rather
+            // than refused at the security layer, same reasoning as
+            // sign_in_is_reachable_without_a_session above.
+            mvc.perform(post("/api/v1/auth/reset-password")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{}"))
                     .andExpect(status().isBadRequest());

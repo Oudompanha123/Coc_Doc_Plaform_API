@@ -93,6 +93,11 @@ public class SecurityConfig {
                         // by necessity — nobody has a session before either succeeds.
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login-password").permitAll()
+                        // ADR-017: starting or completing a password reset. Both public
+                        // by the same necessity — a visitor who forgot their password,
+                        // by definition, has no session to present.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/forgot-password").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/reset-password").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/me").permitAll()
 
 

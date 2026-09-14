@@ -10,31 +10,12 @@ spring:
 
   datasource:
     # Any PostgreSQL 15+ instance: managed, corporate, or on-prem. No usable
-    # default for host/port/name/credentials, matching this file's own rule
-    # above — a missing DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD fails
-    # startup clearly instead of silently reaching whichever host used to be
-    # hardcoded here. Set them in backend/env.local (copy backend/env.example) —
-    # never committed, .gitignore already covers it.
-    # DB_SCHEMA is how several developers share one PostgreSQL server without
-    # sharing a schema. Each person sets their own — cocdocs_sam, cocdocs_rayuth
-    # — and gets their own tables, their own migration history and their own
-    # data on the same host.
-    #
-    # This is not a preference. One shared schema means one Flyway lineage, so
-    # two branches that each add a V6 collide, and a rebuild to escape the
-    # collision destroys everyone's data at once. That happened twice on
-    # 2026-09-14 and cost nine accounts, the audit trail and a colleague's
-    # table.
-    #
-    # Defaults to cocdocs_dev, which is the shared schema. Leaving it unset is
-    # a deliberate choice to work in the common one, not an accident.
-    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=${DB_SCHEMA:cocdocs_dev}
+    # default for host/port/name/credentials.
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=cocdocs_dev
     username: ${DB_USER}
     password: ${DB_PASSWORD}
     hikari:
       maximum-pool-size: ${DB_POOL_MAX:10}
-      # NFR-SCALE-01 sizing: 200 pages, 10 concurrent editors. A large pool
-      # would be waste, not headroom.
 
   flyway:
     enabled: true
@@ -75,8 +56,23 @@ spring:
   jackson:
     default-property-inclusion: non_null
 
+  # Gmail SMTP configuration for password reset emails.
+  # Credentials must be supplied through environment variables.
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
 server:
   port: ${PORT:8080}
+
   # Content includes Khmer and Korean; encoding is never left to a platform
   # default on this project.  // req: CONST-OPS-01
   servlet:
@@ -85,55 +81,31 @@ server:
       force: true
 
 app:
-  # Session TTL. AMB-006 resolved 2026-09-08: 1 day. lib/auth.ts:9 in the legacy
-  # site was authoritative; CLAUDE.md:172's "30 days" was stale.
+  # Session TTL. AMB-006 resolved 2026-09-08: 1 day.
   # // req: NFR-SEC-SESSION
   session-ttl: P1D
 
-  # The frontend origin, for CORS. Two services on different origins is a new
-  # attack surface that did not exist in the single-service design. Exactly one
-  # origin, never a wildcard: allowCredentials and a wildcard are mutually
-  # exclusive, and a pattern would let a lookalike host through.
+  # The frontend origin, for CORS.
   # // req: ADR-012 §4, NFR-SEC-CHANNEL
   frontend-origin: ${FRONTEND_ORIGIN:http://localhost:3000}
 
-  # Whether the session cookie carries `Secure`. Defaults to true so a
-  # deployment is safe unless it deliberately opts out; local development over
-  # plain http must set it false, or the browser discards the cookie and
-  # sign-in appears to succeed and then does nothing.
+  # Whether the session cookie carries `Secure`.
   # // req: NFR-SEC-SESSION, NFR-SEC-CHANNEL
   cookie-secure: ${COOKIE_SECURE:true}
 
-  # The Google OAuth client id that ID tokens must be addressed to. Absent by
-  # default so the reader path, migrations and the test suite need no Google
-  # credentials; sign-in then refuses with a clear message rather than the
-  # application failing to start.  // req: FR-AUTH-001
+  # Google OAuth client id.
+  # // req: FR-AUTH-001
   google-client-id: ${GOOGLE_CLIENT_ID:}
 
-  # Keycloak, which brokers Google upstream (ADR-013). Optional: blank means
-  # this deployment has no broker and the application boots exactly as it does
-  # without one — every developer machine is in that state until the container
-  # is up, and the reader path must not depend on it.
-  #
-  # Both or neither. An issuer with no audience refuses to start on purpose:
-  # Spring's audience validator only activates when the value is non-empty, so
-  # leaving it blank skips audience verification silently rather than
-  # permissively, and a token Keycloak minted for any other client in the same
-  # realm would then verify here.
-  #
-  # Not spring.security.oauth2.resourceserver.jwt.*: that key makes Spring
-  # fetch the issuer's discovery document during startup, so the application
-  # could not boot unless Keycloak were reachable — including for tests and a
-  # Flyway-only run. KeycloakAuthConfig builds the decoder from the JWK set URI
-  # instead, which it derives from the issuer.
+  # Keycloak configuration.
   # // req: FR-AUTH-001, NFR-SEC-AUTH, ADR-013
   keycloak:
     issuer-uri: ${KEYCLOAK_ISSUER_URI:}
     audience: ${KEYCLOAK_AUDIENCE:}
 
   storage:
-    # S3 API, whichever provider ends up behind it: Supabase Storage, AWS S3,
-    # Azure via gateway, or on-prem MinIO.  // req: CONST-TECH-08
+    # S3-compatible storage.
+    # // req: CONST-TECH-08
     endpoint: ${S3_ENDPOINT:}
     bucket: ${S3_BUCKET:coc-docs-media}
     region: ${S3_REGION:us-east-1}

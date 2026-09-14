@@ -36,6 +36,9 @@ public final class AuditAction {
     public static final String AUTH_SIGN_OUT = "auth.sign_out";
     public static final String AUTH_REJECTED = "auth.rejected";
 
+    public static final String PASSWORD_RESET_REQUEST = "auth.password_reset_request";
+    public static final String PASSWORD_RESET_COMPLETE = "auth.password_reset_complete";
+
     /** Target types, for the {@code target_type} column. */
     public static final String TARGET_PAGE = "page";
 

@@ -275,6 +275,18 @@ public class AccountRepository {
         return findById(id).orElseThrow();
     }
 
+    /**
+     * Sets a new password hash — the reset path (ADR-017) and nowhere else.
+     * Also usable to give a Google-only account its first password hash, but
+     * nothing in this codebase does that yet (ADR-017 decision 2 deliberately
+     * does not go there).
+     */
+    public int updatePasswordHash(UUID id, String passwordHash) {
+        return jdbc.sql("update account set password_hash = ?, updated_at = now() where id = ?")
+                .params(passwordHash, id)
+                .update();
+    }
+
     /** A {@code super_admin}'s approve or reject on a pending registration (ADR-014). */
     public int updateStatus(UUID id, AccountStatus status) {
         return jdbc.sql("update account set status = ?::account_status, updated_at = now() where id = ?")
