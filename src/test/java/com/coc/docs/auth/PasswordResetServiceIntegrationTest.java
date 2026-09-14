@@ -14,8 +14,7 @@ import com.coc.docs.account.AccountStatus;
 import com.coc.docs.account.AppRole;
 import com.coc.docs.web.ApiException;
 import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -53,6 +52,18 @@ class PasswordResetServiceIntegrationTest extends PostgresTestBase {
                         + "page_slug_history, page, section, account restart identity cascade")
                 .update();
 
+        // account carries a deferred constraint trigger (V4): every UPDATE
+        // re-asserts that an active super_admin still exists, and it fires at
+        // COMMIT rather than at the statement. Resetting a password updates
+        // account.password_hash, so without this row the commit fails with
+        // "at least one active super_admin must remain" — a failure that
+        // surfaces as "JDBC commit failed" and points at the transaction
+        // rather than at the missing fixture.
+        //
+        // Production can never be in that state: the bootstrap makes the very
+        // first account a super_admin. Only a truncated test schema can.
+        accounts.insert("boss@example.com", "Boss", AppRole.SUPER_ADMIN, null, AccountStatus.ACTIVE);
+
         withPassword = accounts.insertApplication(
                 "reset.me@example.com", "Reset Me", null, passwordEncoder.encode("OldPassword123!"));
     }
@@ -61,8 +72,30 @@ class PasswordResetServiceIntegrationTest extends PostgresTestBase {
     private String mintedToken(String email) {
         ArgumentCaptor<String> token = ArgumentCaptor.forClass(String.class);
         resets.requestReset(email);
-        verify(mailer).sendResetLink(eq(email), token.capture());
+        // The link goes to the address of record, not to whatever casing the
+        // requester typed. Asserting the input back would have pinned the
+        // opposite behaviour — mail addressed to an unnormalised string.
+        verify(mailer).sendResetLink(eq(withPassword.email()), token.capture());
         return token.getValue();
+    }
+
+    /**
+     * Back-dates a token out of its window.
+     *
+     * <p>Both columns move. Moving {@code expires_at} alone lands it before
+     * {@code issued_at} and trips the table's own check constraint, so the row
+     * is rejected before any expiry logic is reached — the test then fails on
+     * a write it only meant to set up.
+     */
+    private void expire(UUID accountId) {
+        jdbc.sql("""
+                        update password_reset_token
+                           set issued_at  = now() - interval '2 hours',
+                               expires_at = now() - interval '90 minutes'
+                         where account_id = ?
+                        """)
+                .param(accountId)
+                .update();
     }
 
     @Test
@@ -149,9 +182,7 @@ class PasswordResetServiceIntegrationTest extends PostgresTestBase {
 
         // Back-date the row directly -- waiting out a real 30-minute TTL has
         // no place in a test suite.
-        jdbc.sql("update password_reset_token set expires_at = ? where account_id = ?")
-                .params(OffsetDateTime.ofInstant(Instant.now().minusSeconds(60), ZoneOffset.UTC), withPassword.id())
-                .update();
+        expire(withPassword.id());
 
         assertThatThrownBy(() -> resets.resetPassword(token, "NewPassword456!"))
                 .isInstanceOf(ApiException.class)
@@ -162,9 +193,7 @@ class PasswordResetServiceIntegrationTest extends PostgresTestBase {
     @DisplayName("purgeExpired removes only rows past their expiry")
     void purgeExpiredRemovesOnlyExpiredRows() {
         mintedToken("reset.me@example.com");
-        jdbc.sql("update password_reset_token set expires_at = ? where account_id = ?")
-                .params(OffsetDateTime.ofInstant(Instant.now().minusSeconds(60), ZoneOffset.UTC), withPassword.id())
-                .update();
+        expire(withPassword.id());
 
         int purged = resets.purgeExpired();
 
