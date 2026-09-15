@@ -22,11 +22,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 /**
  * {@code SessionService.changeOwnPassword} against a real PostgreSQL —
  * specifically the current-password rule ADR-022 added (revision of
- * ADR-020). {@code AuthControllerTest.ChangePassword} covers the HTTP/DTO
- * layer with a mocked {@code SessionService}; this is where the actual
- * business rule is exercised.
+ * ADR-020) and ADR-024 made unconditional. {@code AuthControllerTest.ChangePassword}
+ * covers the HTTP/DTO layer with a mocked {@code SessionService}; this is
+ * where the actual business rule is exercised.
  *
- * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-020, ADR-022
+ * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-020, ADR-022, ADR-024
  */
 class ChangeOwnPasswordIntegrationTest extends PostgresTestBase {
 
@@ -107,18 +107,35 @@ class ChangeOwnPasswordIntegrationTest extends PostgresTestBase {
     }
 
     @Test
-    @DisplayName("the forced first-login completion skips the current-password check entirely")
-    void forcedFirstLoginSkipsTheCheck() {
+    @DisplayName("the forced first-login completion also verifies the temporary password (ADR-024)")
+    void forcedFirstLoginVerifiesTheTemporaryPassword() {
         accounts.insert(
                 "invited@example.com", "Invited", AppRole.USER, null, AccountStatus.ACTIVE,
                 passwordEncoder.encode("TempPassword123!"), true);
         CurrentUser caller = signInAndResolve("invited@example.com", "TempPassword123!");
         assertThat(caller.account().mustChangePassword()).isTrue();
 
-        // No current password offered at all -- exactly what /create-password sends.
-        sessions.changeOwnPassword(caller, null, "NewPassword456!");
+        sessions.changeOwnPassword(caller, "TempPassword123!", "NewPassword456!");
 
         assertThat(passwordEncoder.matches("NewPassword456!", hashOf("invited@example.com"))).isTrue();
+    }
+
+    @Test
+    @DisplayName("the forced first-login completion is refused when the temporary password is wrong (ADR-024)")
+    void forcedFirstLoginRefusesWrongTemporaryPassword() {
+        accounts.insert(
+                "invited2@example.com", "Invited", AppRole.USER, null, AccountStatus.ACTIVE,
+                passwordEncoder.encode("TempPassword123!"), true);
+        CurrentUser caller = signInAndResolve("invited2@example.com", "TempPassword123!");
+
+        assertThatThrownBy(() -> sessions.changeOwnPassword(caller, "WrongTemp123!", "NewPassword456!"))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> {
+                    assertThat(((ApiException) e).status()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(e.getMessage()).isEqualTo("your current password is incorrect");
+                });
+
+        assertThat(passwordEncoder.matches("TempPassword123!", hashOf("invited2@example.com"))).isTrue();
     }
 
     @Test

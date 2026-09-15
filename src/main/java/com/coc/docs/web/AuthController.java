@@ -475,10 +475,12 @@ public class AuthController {
      * step of the first-login flow — the caller already holds a session,
      * issued by {@link #signInWithPassword} on the temporary password — and,
      * since ADR-022, the voluntary "My Profile &rarr; Change Password"
-     * self-service screen. {@code SessionService.changeOwnPassword} tells
-     * the two apart by {@code caller.account().mustChangePassword()} and
-     * requires {@code currentPassword} for the voluntary case only; see its
-     * javadoc for why.
+     * self-service screen. {@code SessionService.changeOwnPassword} verifies
+     * {@code currentPassword} for both — since ADR-024, the forced flow also
+     * re-proves the temporary password it signed in with rather than being
+     * exempt; see that method's javadoc for why. {@code
+     * caller.account().mustChangePassword()} still tells the two entry
+     * points apart, now only to pick the confirmation message below.
      *
      * <p>Requires only {@code USER} rank because it acts on the caller's own
      * account and cannot name another (see {@code SecurityConfig}'s
@@ -490,7 +492,7 @@ public class AuthController {
      * forced flow says the account is now usable, which would be a false
      * promise for someone who already had full access before this call.
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-022
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-022, ADR-024
      */
     @PostMapping("/change-password")
     ChangePasswordResponse changePassword(

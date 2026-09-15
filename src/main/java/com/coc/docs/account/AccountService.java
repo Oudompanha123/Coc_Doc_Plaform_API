@@ -59,9 +59,23 @@ public class AccountService {
         this.inviteMailer = inviteMailer;
     }
 
+    /**
+     * The Users screen: every account a {@code super_admin} has actually
+     * decided on.
+     *
+     * <p>A self-registration sits in {@link AccountStatus#PENDING} until it is
+     * approved or rejected (ADR-014); listing it here too would show an
+     * undecided application as if it were already a user, on a row that offers
+     * Deactivate and Delete for a decision nobody has made yet. It moves into
+     * this list the moment {@link #approve} takes it out of the queue.
+     *
+     * <p>// req: FR-AUTH-003, ADR-014
+     */
     @Transactional(readOnly = true)
     public List<Account> list() {
-        return accounts.findAll();
+        return accounts.findAll().stream()
+                .filter(account -> account.status() != AccountStatus.PENDING)
+                .toList();
     }
 
     @Transactional(readOnly = true)
