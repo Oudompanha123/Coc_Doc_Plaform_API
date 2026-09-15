@@ -281,6 +281,69 @@ public class AccountService {
         return accounts.findById(account.id()).orElseThrow();
     }
 
+    /**
+     * Removes an account outright (ADR-023).
+     *
+     * <p>The irreversible sibling of {@link #setActive}. Deactivation is the
+     * right tool almost always — it keeps the person's name against their
+     * work and lets them back in later. Deletion exists for the cases
+     * deactivation cannot answer: a typo'd invite, a duplicate row, a
+     * contractor whose record should not persist past the engagement.
+     *
+     * <p>What survives on purpose: every {@code audit_log} entry, including
+     * the ones this account wrote. Its {@code actor_id} goes null and
+     * {@code actor_email} — denormalised in V1 for exactly this — keeps
+     * answering "who did this" a year later (NFR-OPS-AUDIT). Published content
+     * survives too, with {@code page_version.created_by} nulled.
+     *
+     * <p>What goes with it: sessions, role grants and any unspent reset token,
+     * all by cascade. A deleted account cannot finish a request it had already
+     * started.
+     *
+     * <p>Audited <b>before</b> the delete, and the entry carries the subject's
+     * email and roles inline. Afterwards there is no row to join to, so an
+     * entry naming only a UUID would be a record of nothing.
+     *
+     * <p>// req: FR-AUTH-003, FR-AUTH-008, ADR-023
+     */
+    @Transactional
+    public void delete(UUID accountId, CurrentUser actor) {
+        Account account = accounts
+                .findById(accountId)
+                .orElseThrow(() -> ApiException.notFound("account " + accountId));
+
+        if (account.id().equals(actor.id())) {
+            // Refused for a stronger reason than self-deactivation is. That
+            // one is recoverable by a colleague; this one removes the account
+            // making the request, mid-request, and there is nothing to undo.
+            throw ApiException.badRequest("you cannot delete your own account");
+        }
+
+        if (account.roles().contains(AppRole.SUPER_ADMIN)
+                && accounts.isLastActiveSuperAdmin(account.id())) {
+            // V4's deferred trigger would catch this at COMMIT regardless, but
+            // as a constraint violation naming a trigger. Checked here so the
+            // answer is a sentence that says what to do about it.
+            throw ApiException.conflict(
+                    "this is the only active super admin; promote someone else before "
+                            + "deleting " + account.email());
+        }
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.ACCOUNT_DELETE,
+                AuditAction.TARGET_ACCOUNT,
+                account.id(),
+                json.createObjectNode()
+                        .put("subject", account.email())
+                        .put("displayName", account.displayName())
+                        .put("status", account.status().wire())
+                        .put("roles", account.roles().stream().map(AppRole::wire).sorted().toList().toString()));
+
+        accounts.delete(account.id());
+    }
+
     // -----------------------------------------------------------------------
     // Self-registration and approval (ADR-014)
     // -----------------------------------------------------------------------

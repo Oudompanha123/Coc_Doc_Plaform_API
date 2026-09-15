@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -166,5 +167,26 @@ public class AdminAccountController {
     @PostMapping("/{accountId}/reject")
     AccountSummary reject(@PathVariable UUID accountId, @AuthenticationPrincipal CurrentUser actor) {
         return AccountSummary.of(accounts.reject(accountId, actor));
+    }
+
+    /**
+     * Removes an account outright (ADR-023).
+     *
+     * <p>{@code DELETE} rather than another PATCH flag, because this is not a
+     * state the account can be in — afterwards there is no account. 204, for
+     * the same reason: there is nothing left to return.
+     *
+     * <p>Under the same {@code super_admin} floor as everything else here. An
+     * {@code admin} cannot grant a role or approve a registration
+     * (FR-AUTH-008), and removing the person outright is plainly not the
+     * lesser authority.
+     *
+     * <p>// req: FR-AUTH-003, FR-AUTH-008, ADR-023
+     */
+    @DeleteMapping("/{accountId}")
+    ResponseEntity<Void> delete(
+            @PathVariable UUID accountId, @AuthenticationPrincipal CurrentUser actor) {
+        accounts.delete(accountId, actor);
+        return ResponseEntity.noContent().build();
     }
 }
