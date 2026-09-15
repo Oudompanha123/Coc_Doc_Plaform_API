@@ -28,6 +28,14 @@ public final class AuditAction {
     public static final String ACCOUNT_DEACTIVATE = "account.deactivate";
     public static final String ACCOUNT_REACTIVATE = "account.reactivate";
 
+    /**
+     * The account row is gone (ADR-023). The only account action whose target
+     * cannot be looked up afterwards, so the entry carries the subject email
+     * and roles in {@code detail} — the trail has to answer "who was removed"
+     * without a row left to join to.
+     */
+    public static final String ACCOUNT_DELETE = "account.delete";
+
     public static final String ACCOUNT_REGISTER = "account.register";
     public static final String ACCOUNT_APPROVE = "account.approve";
     public static final String ACCOUNT_REJECT = "account.reject";

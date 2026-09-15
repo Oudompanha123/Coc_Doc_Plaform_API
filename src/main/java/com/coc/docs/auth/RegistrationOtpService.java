@@ -127,8 +127,24 @@ public class RegistrationOtpService {
      * attempts-exhausted row is left in place on purpose — a follow-up
      * {@link #resend} still works on it, exactly as it would on a fresh one
      * (ADR-021 Key Choice 3).
+     *
+     * <p>{@code noRollbackFor}: a wrong guess is refused by throwing {@link
+     * ApiException} — Spring's default is to roll back the whole
+     * transaction on any unchecked exception, which would silently undo the
+     * {@code incrementAttempts} write this method just made and erase the
+     * record of the guess ever happening. Without this, the 5-attempt cap
+     * never actually caps anything: {@code attempts} would forever read 0,
+     * and every wrong guess would report "incorrect" instead of eventually
+     * "too many attempts" (caught by {@code
+     * RegistrationOtpServiceIntegrationTest.rejectsAWrongCode} and {@code
+     * .locksOutAfterMaxAttempts} against a real database — no Docker in
+     * this environment meant this bug shipped once already before CI
+     * caught it). Same precedent as {@code
+     * SessionService.signInWithPassword}'s identical
+     * {@code noRollbackFor(GoogleIdTokenVerifier.AuthenticationFailure.class)},
+     * for the same reason.
      */
-    @Transactional
+    @Transactional(noRollbackFor = ApiException.class)
     public Account verify(String email, String rawCode) {
         RegistrationChallenge found = challenges
                 .find(email)

@@ -435,7 +435,11 @@ public class AccountRepository {
         }
     }
 
-    /** Deactivate, never delete: authored content keeps its attribution. */
+    /**
+     * Deactivates without removing: authored content keeps its attribution and
+     * the person can be let back in. The reversible half of the pair — see
+     * {@link #delete} for the other.
+     */
     public int setDeactivated(UUID id, boolean deactivated) {
         return jdbc.sql("""
                         update account
@@ -445,5 +449,27 @@ public class AccountRepository {
                         """)
                 .params(deactivated, id)
                 .update();
+    }
+
+    /**
+     * Removes the account row outright (ADR-023).
+     *
+     * <p>One statement, because the schema already says what everything else
+     * should do: sessions, role grants and reset tokens cascade away, while
+     * {@code audit_log.actor_id} and {@code page_version.created_by} go null so
+     * the trail and the content outlive the person. V10 fixed the one column
+     * that did not say — {@code account_role.granted_by} had no ON DELETE
+     * action, so PostgreSQL refused the delete for anyone who had ever granted
+     * a role, which is every super_admin who ever approved a colleague.
+     *
+     * <p>The super_admin floor is not enforced here. V4's deferred trigger
+     * fires on this DELETE and raises at COMMIT if the floor would be emptied;
+     * {@link AccountService} checks first so the caller gets a sentence rather
+     * than a constraint violation.
+     *
+     * <p>Returns rows removed — 0 when the id was already gone.
+     */
+    public int delete(UUID id) {
+        return jdbc.sql("delete from account where id = ?").param(id).update();
     }
 }

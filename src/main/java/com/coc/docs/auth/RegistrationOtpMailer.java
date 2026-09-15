@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.mail.MailException;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Component;
@@ -83,6 +84,19 @@ public class RegistrationOtpMailer {
             // (the response has already been decided by the time this runs),
             // but it must not vanish silently either.
             log.error("failed to build registration verification email for {}", toEmail, e);
+        } catch (MailException e) {
+            // The transport itself refused it -- wrong host, auth failure
+            // (Gmail's own SMTP refuses a plain account password; it requires
+            // an App Password), connection refused, the sender address
+            // rejected by the relay. Unlike MessagingException (thrown while
+            // building the message), this is thrown by sender.send() itself
+            // and is unchecked -- left uncaught, it would escape this method
+            // and fail the whole /register (or /register/resend) request
+            // with a raw 500 instead of the caller ever seeing the "check
+            // your email" response. See AccountInviteMailer's identical
+            // catch, added for the same reason; this one was missing it
+            // until a real SMTP failure surfaced it (2026-09-15).
+            log.error("could not send the registration verification email to {} — SMTP send failed", toEmail, e);
         }
     }
 
