@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
@@ -15,6 +16,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  */
 @Configuration
 @EnableScheduling
+// Push notifications are delivered off the request thread (ADR-025). Without
+// this, @Async on RegistrationNotifier is silently ignored and a slow FCM
+// holds up the response to somebody who has just registered.
+@EnableAsync
 @EnableConfigurationProperties(AppProperties.class)
 public class AppConfig {
 

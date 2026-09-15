@@ -84,6 +84,16 @@
       <artifactId>spring-boot-starter-mail</artifactId>
     </dependency>
 
+    <!-- Push notifications (ADR-024). Optional at runtime: FirebaseConfig only
+         creates a FirebaseMessaging when app.firebase.credentials is set, and
+         PushSender takes it through an ObjectProvider, so a developer without
+         a service account gets a log line instead of a broken application. -->
+    <dependency>
+      <groupId>com.google.firebase</groupId>
+      <artifactId>firebase-admin</artifactId>
+      <version>9.4.1</version>
+    </dependency>
+
     <!-- The OpenAPI contract is generated from the annotated controllers
          themselves (served at /v3/api-docs), not hand-maintained separately,
          so the frontend's generated client cannot silently drift from the
