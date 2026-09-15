@@ -188,6 +188,64 @@ public class AuthController {
     }
 
     /**
+     * Uploads the caller's own profile photo (ADR-026).
+     *
+     * <p>Self-service, the same floor as {@link #updateProfile}: acts on the
+     * caller's own account, never one a parameter could name. Multipart
+     * because this is a binary file, not a JSON field — everything else
+     * about it (validation, storage, precedence over the identity provider's
+     * picture) belongs to {@code SessionService.uploadOwnAvatar}.
+     *
+     * <p>// req: FR-AUTH-005, NFR-SEC-PII, ADR-026
+     */
+    @PostMapping(value = "/me/avatar", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    ApiDtos.MeResponse uploadAvatar(
+            @org.springframework.web.bind.annotation.RequestParam("file")
+                    org.springframework.web.multipart.MultipartFile file,
+            @AuthenticationPrincipal CurrentUser caller) {
+
+        if (caller == null) {
+            throw ApiException.forbidden("sign in first");
+        }
+        Account updated = sessions.uploadOwnAvatar(caller, file);
+        return new ApiDtos.MeResponse(
+                updated.id(),
+                updated.email(),
+                updated.displayName(),
+                updated.role().wire(),
+                updated.avatarUrl(),
+                true,
+                updated.createdAt(),
+                sessions.lastSignInForAccount(updated.id()).orElse(null),
+                updated.mustChangePassword());
+    }
+
+    /**
+     * Removes the caller's own uploaded photo, reverting to the identity
+     * provider's picture (or initials) — see
+     * {@code SessionService.removeOwnAvatar} (ADR-026).
+     *
+     * <p>// req: FR-AUTH-005, NFR-SEC-PII, ADR-026
+     */
+    @DeleteMapping("/me/avatar")
+    ApiDtos.MeResponse removeAvatar(@AuthenticationPrincipal CurrentUser caller) {
+        if (caller == null) {
+            throw ApiException.forbidden("sign in first");
+        }
+        Account updated = sessions.removeOwnAvatar(caller);
+        return new ApiDtos.MeResponse(
+                updated.id(),
+                updated.email(),
+                updated.displayName(),
+                updated.role().wire(),
+                updated.avatarUrl(),
+                true,
+                updated.createdAt(),
+                sessions.lastSignInForAccount(updated.id()).orElse(null),
+                updated.mustChangePassword());
+    }
+
+    /**
      * Where this account is signed in.
      *
      * <p>The caller's own sessions and no others: the account comes from the

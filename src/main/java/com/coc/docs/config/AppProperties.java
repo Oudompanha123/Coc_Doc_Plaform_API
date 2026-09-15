@@ -50,8 +50,27 @@ public record AppProperties(
      * @param bucket bucket name
      * @param region region, which some S3 implementations require even when it
      *     is meaningless to them
+     * @param accessKeyId S3-compatible access key; blank until hosting is
+     *     chosen, same convention as {@link #googleClientId}
+     * @param secretAccessKey the matching secret. Never logged, never
+     *     returned in any response — same handling as {@code DB_PASSWORD}.
      */
-    public record Storage(String endpoint, String bucket, String region) {}
+    public record Storage(
+            String endpoint, String bucket, String region, String accessKeyId, String secretAccessKey) {
+
+        /**
+         * Whether manual avatar upload (ADR-026) can actually work on this
+         * deployment. {@code AvatarStorageConfig} registers no {@code
+         * AvatarStorage} bean at all when this is false, so the feature is
+         * cleanly absent rather than failing at the moment someone tries it.
+         */
+        public boolean configured() {
+            return endpoint != null && !endpoint.isBlank()
+                    && bucket != null && !bucket.isBlank()
+                    && accessKeyId != null && !accessKeyId.isBlank()
+                    && secretAccessKey != null && !secretAccessKey.isBlank();
+        }
+    }
 
     /**
      * Whether Google sign-in is configured.

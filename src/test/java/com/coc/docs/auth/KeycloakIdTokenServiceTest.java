@@ -29,6 +29,34 @@ class KeycloakIdTokenServiceTest {
 
         assertThat(identity.email()).isEqualTo("person@example.com");
         assertThat(identity.displayName()).isEqualTo("Person Example");
+        assertThat(identity.avatarUrl()).isNull();
+    }
+
+    /**
+     * The claim Google itself returns, once a realm's Google identity
+     * provider is configured to forward it (ADR-013). This test only proves
+     * this class's own parsing is correct; it says nothing about whether a
+     * given Keycloak realm is actually configured to forward the claim.
+     */
+    @Test
+    void capturesTheAvatarUrlWhenThePictureClaimIsPresent() {
+        Map<String, Object> claims = tokens.defaultClaims();
+        claims.put("picture", "https://lh3.googleusercontent.com/a/example");
+
+        VerifiedIdentity identity = service().verify(tokens.sign(claims), "expected-nonce");
+
+        assertThat(identity.avatarUrl()).isEqualTo("https://lh3.googleusercontent.com/a/example");
+    }
+
+    /** javascript:/data: have no business reaching an <img src>; only a fetchable https URL is trusted. */
+    @Test
+    void dropsANonHttpsPictureClaim() {
+        Map<String, Object> claims = tokens.defaultClaims();
+        claims.put("picture", "javascript:alert(1)");
+
+        VerifiedIdentity identity = service().verify(tokens.sign(claims), "expected-nonce");
+
+        assertThat(identity.avatarUrl()).isNull();
     }
 
     @Test

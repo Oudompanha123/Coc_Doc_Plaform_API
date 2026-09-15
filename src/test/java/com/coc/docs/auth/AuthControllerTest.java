@@ -7,7 +7,9 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -117,7 +119,7 @@ class AuthControllerTest {
                     "http://localhost:3000",
                     false,
                     "test-client-id",
-                    new AppProperties.Storage("", "test", "us-east-1"));
+                    new AppProperties.Storage("", "test", "us-east-1", "", ""));
         }
 
         @Bean
@@ -433,6 +435,7 @@ class AuthControllerTest {
                     "new.person@example.com",
                     "New Person",
                     java.util.EnumSet.of(AppRole.GUEST),
+                    null,
                     null,
                     AccountStatus.PENDING,
                     null,
@@ -821,6 +824,96 @@ class AuthControllerTest {
                                     """))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.detail").value("your current password is incorrect"));
+        }
+    }
+
+    /**
+     * ADR-026. {@link SessionService} is mocked, so these cover the HTTP/DTO
+     * layer only — validation and storage belong to {@code S3AvatarStorageTest}.
+     */
+    @Nested
+    @DisplayName("POST /api/v1/auth/me/avatar")
+    class UploadAvatar {
+
+        @Test
+        @DisplayName("uploads and returns the caller's updated profile")
+        void uploadsAndReturnsUpdatedProfile() throws Exception {
+            var caller = TestCallers.user(AppRole.USER);
+            Account updated = caller.account().withUploadedAvatar(
+                    "https://s3.test/bucket/avatars/" + caller.id() + "/photo.png", Instant.now());
+            when(sessions.uploadOwnAvatar(any(), any())).thenReturn(updated);
+
+            org.springframework.mock.web.MockMultipartFile file =
+                    new org.springframework.mock.web.MockMultipartFile(
+                            "file", "photo.png", "image/png", new byte[] {1, 2, 3});
+
+            mvc.perform(multipart("/api/v1/auth/me/avatar").file(file).with(as(AppRole.USER)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.avatarUrl").value(updated.avatarUrl()));
+        }
+
+        @Test
+        @DisplayName("reports a rejected file plainly, as 400")
+        void reportsRejectedFilePlainly() throws Exception {
+            when(sessions.uploadOwnAvatar(any(), any()))
+                    .thenThrow(ApiException.badRequest("photos must be PNG, JPEG, or WebP"));
+
+            org.springframework.mock.web.MockMultipartFile file =
+                    new org.springframework.mock.web.MockMultipartFile(
+                            "file", "photo.txt", "text/plain", new byte[] {1, 2, 3});
+
+            mvc.perform(multipart("/api/v1/auth/me/avatar").file(file).with(as(AppRole.USER)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.detail").value("photos must be PNG, JPEG, or WebP"));
+        }
+
+        @Test
+        @DisplayName("refuses an anonymous caller")
+        void refusesAnonymous() throws Exception {
+            org.springframework.mock.web.MockMultipartFile file =
+                    new org.springframework.mock.web.MockMultipartFile(
+                            "file", "photo.png", "image/png", new byte[] {1, 2, 3});
+
+            mvc.perform(multipart("/api/v1/auth/me/avatar").file(file))
+                    .andExpect(status().isUnauthorized());
+
+            verify(sessions, never()).uploadOwnAvatar(any(), any());
+        }
+    }
+
+    /** ADR-026. */
+    @Nested
+    @DisplayName("DELETE /api/v1/auth/me/avatar")
+    class RemoveAvatar {
+
+        @Test
+        @DisplayName("removes the uploaded photo and returns the caller's updated profile")
+        void removesAndReturnsUpdatedProfile() throws Exception {
+            var caller = TestCallers.user(AppRole.USER);
+            when(sessions.removeOwnAvatar(any())).thenReturn(caller.account());
+
+            mvc.perform(delete("/api/v1/auth/me/avatar").with(as(AppRole.USER)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("reports there being nothing to remove plainly, as 400")
+        void reportsNothingToRemovePlainly() throws Exception {
+            when(sessions.removeOwnAvatar(any()))
+                    .thenThrow(ApiException.badRequest("there is no uploaded photo to remove"));
+
+            mvc.perform(delete("/api/v1/auth/me/avatar").with(as(AppRole.USER)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.detail").value("there is no uploaded photo to remove"));
+        }
+
+        @Test
+        @DisplayName("refuses an anonymous caller")
+        void refusesAnonymous() throws Exception {
+            mvc.perform(delete("/api/v1/auth/me/avatar"))
+                    .andExpect(status().isUnauthorized());
+
+            verify(sessions, never()).removeOwnAvatar(any());
         }
     }
 

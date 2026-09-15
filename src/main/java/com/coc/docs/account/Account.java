@@ -49,6 +49,14 @@ public record Account(
         String displayName,
         Set<AppRole> roles,
         String avatarUrl,
+        /**
+         * Non-null from the moment this account's owner uploads their own
+         * photo (ADR-026) until they remove it. Marks {@code avatarUrl} as
+         * theirs to control: {@code SessionService.refreshProfile} must not
+         * overwrite it with the identity provider's {@code picture} claim on
+         * a later Google/Keycloak sign-in while this is set.
+         */
+        Instant avatarUploadedAt,
         AccountStatus status,
         Instant deactivatedAt,
         Instant createdAt,
@@ -113,14 +121,21 @@ public record Account(
     /** A copy with a different status, for a {@code super_admin}'s approve or reject. */
     public Account withStatus(AccountStatus newStatus) {
         return new Account(
-                id, email, displayName, roles, avatarUrl, newStatus, deactivatedAt, createdAt, updatedAt,
-                mustChangePassword);
+                id, email, displayName, roles, avatarUrl, avatarUploadedAt, newStatus, deactivatedAt, createdAt,
+                updatedAt, mustChangePassword);
     }
 
     /** A copy holding a different set of roles. */
     public Account withRoles(Set<AppRole> newRoles) {
         return new Account(
-                id, email, displayName, newRoles, avatarUrl, status, deactivatedAt, createdAt, updatedAt,
-                mustChangePassword);
+                id, email, displayName, newRoles, avatarUrl, avatarUploadedAt, status, deactivatedAt, createdAt,
+                updatedAt, mustChangePassword);
+    }
+
+    /** A copy with a self-uploaded photo (ADR-026) — {@code avatarUploadedAt} marks it as owner-controlled. */
+    public Account withUploadedAvatar(String newAvatarUrl, Instant uploadedAt) {
+        return new Account(
+                id, email, displayName, roles, newAvatarUrl, uploadedAt, status, deactivatedAt, createdAt,
+                updatedAt, mustChangePassword);
     }
 }

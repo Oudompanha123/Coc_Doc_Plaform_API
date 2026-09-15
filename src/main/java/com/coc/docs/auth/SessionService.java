@@ -5,6 +5,7 @@ import com.coc.docs.account.AccountCredential;
 import com.coc.docs.account.AccountRepository;
 import com.coc.docs.account.AccountStatus;
 import com.coc.docs.account.AppRole;
+import com.coc.docs.account.AvatarStorage;
 import com.coc.docs.audit.AuditAction;
 import com.coc.docs.audit.AuditRepository;
 import com.coc.docs.config.AppProperties;
@@ -57,6 +58,14 @@ public class SessionService {
      * deployment without Keycloak must still boot and serve the reader path.
      */
     private final ObjectProvider<KeycloakIdTokenService> keycloak;
+
+    /**
+     * Present only when object storage is actually configured
+     * (CONST-TECH-08, ADR-012 §2 — still {@code [DEFERRED]}). The same
+     * optional-bean shape as {@link #keycloak}: a deployment that has not
+     * chosen a provider yet must still boot and serve every other route.
+     */
+    private final ObjectProvider<AvatarStorage> avatarStorage;
     private final AppProperties properties;
     private final ObjectMapper json;
     private final Clock clock;
@@ -79,6 +88,7 @@ public class SessionService {
             AuditRepository audit,
             GoogleIdTokenVerifier google,
             ObjectProvider<KeycloakIdTokenService> keycloak,
+            ObjectProvider<AvatarStorage> avatarStorage,
             AppProperties properties,
             ObjectMapper json,
             Clock clock,
@@ -88,6 +98,7 @@ public class SessionService {
         this.audit = audit;
         this.google = google;
         this.keycloak = keycloak;
+        this.avatarStorage = avatarStorage;
         this.properties = properties;
         this.json = json;
         this.clock = clock;
@@ -210,13 +221,23 @@ public class SessionService {
      * <p>Only what the provider owns. Role, status and deactivation belong to
      * this system and are never touched here — signing in must not be able to
      * change what someone may do.
+     *
+     * <p><b>Except the picture, once its owner has uploaded one of their own
+     * (ADR-026).</b> {@code avatarUploadedAt} being set means a person made a
+     * deliberate choice through "My Profile"; a sign-in — an action about
+     * proving identity, not about editing a profile — must not silently
+     * undo it. They stay in control of it until they remove it themselves
+     * ({@link #removeOwnAvatar}), at which point the provider's picture is
+     * free to fill back in on the next sign-in, same as before this existed.
      */
     private Account refreshProfile(Account existing, VerifiedIdentity identity) {
         String displayName = identity.displayName();
-        String avatarUrl = identity.avatarUrl();
-
         boolean nameChanged = !existing.displayName().equals(displayName);
-        boolean avatarChanged = !java.util.Objects.equals(existing.avatarUrl(), avatarUrl);
+
+        boolean avatarOwnerControlled = existing.avatarUploadedAt() != null;
+        String avatarUrl = avatarOwnerControlled ? existing.avatarUrl() : identity.avatarUrl();
+        boolean avatarChanged = !avatarOwnerControlled
+                && !java.util.Objects.equals(existing.avatarUrl(), avatarUrl);
 
         if (!nameChanged && !avatarChanged) {
             return existing;
@@ -234,6 +255,7 @@ public class SessionService {
                 displayName,
                 existing.roles(),
                 avatarUrl,
+                existing.avatarUploadedAt(),
                 existing.status(),
                 existing.deactivatedAt(),
                 existing.createdAt(),
@@ -589,6 +611,69 @@ public class SessionService {
         }
         accounts.updateDisplayName(caller.account().id(), trimmed);
         return accounts.findById(caller.account().id()).orElseThrow();
+    }
+
+    // -----------------------------------------------------------------------
+    // Self-service avatar upload (ADR-026)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Uploads and sets the caller's own profile photo.
+     *
+     * <p>Self-service, the same shape as {@link #renameSelf}: acts on the
+     * caller's own account, resolved from the session, never a parameter that
+     * could name someone else.
+     *
+     * <p>The previous object is deleted only after the new one is stored — a
+     * failed upload must leave the old photo in place, not a blank one.
+     * {@link AvatarStorage#delete} is itself a no-op for a URL it did not
+     * create, so an account whose current picture is still the identity
+     * provider's is left untouched.
+     *
+     * <p>// req: FR-AUTH-005, NFR-SEC-PII, ADR-026
+     */
+    @Transactional
+    public Account uploadOwnAvatar(CurrentUser caller, org.springframework.web.multipart.MultipartFile file) {
+        AvatarStorage storage = avatarStorage.getIfAvailable();
+        if (storage == null) {
+            throw ApiException.badRequest(
+                    "Photo upload is not available on this deployment yet.");
+        }
+
+        Account existing = caller.account();
+        String newUrl = storage.upload(existing.id(), file);
+        Instant uploadedAt = clock.instant();
+
+        accounts.updateUploadedAvatar(existing.id(), newUrl, uploadedAt);
+
+        if (existing.avatarUploadedAt() != null && existing.avatarUrl() != null) {
+            storage.delete(existing.avatarUrl());
+        }
+
+        return accounts.findById(existing.id()).orElseThrow();
+    }
+
+    /**
+     * Removes the caller's own uploaded photo, reverting to initials until
+     * the next Google/Keycloak sign-in supplies the identity provider's
+     * picture again — the same fallback as an account that never uploaded
+     * one at all.
+     *
+     * <p>// req: FR-AUTH-005, NFR-SEC-PII, ADR-026
+     */
+    @Transactional
+    public Account removeOwnAvatar(CurrentUser caller) {
+        Account existing = caller.account();
+        if (existing.avatarUploadedAt() == null) {
+            throw ApiException.badRequest("there is no uploaded photo to remove");
+        }
+
+        AvatarStorage storage = avatarStorage.getIfAvailable();
+        if (storage != null && existing.avatarUrl() != null) {
+            storage.delete(existing.avatarUrl());
+        }
+        accounts.clearUploadedAvatar(existing.id());
+        return accounts.findById(existing.id()).orElseThrow();
     }
 
     // -----------------------------------------------------------------------
