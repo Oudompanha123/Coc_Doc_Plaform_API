@@ -367,7 +367,8 @@ public class AccountRepository {
         //
         // Delivery is deferred to after commit by the listener, so a rolled
         // back registration announces nobody (ADR-025 decision 1).
-        events.publishEvent(new AccountRegisteredEvent(created.id(), created.email()));
+        events.publishEvent(
+                new AccountRegisteredEvent(created.id(), created.email(), created.avatarUrl()));
         return created;
     }
 

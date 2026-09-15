@@ -49,7 +49,9 @@ public class RegistrationNotifier {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onAccountRegistered(AccountRegisteredEvent event) {
         try {
-            notifications.notifyApprovers(NotificationType.NEW_REGISTRATION);
+            notifications.notifyApprovers(
+                    NotificationType.NEW_REGISTRATION,
+                    new NotificationTarget(event.accountId().toString(), event.avatarUrl()));
         } catch (RuntimeException e) {
             log.error("could not notify approvers about account {}", event.accountId(), e);
         }

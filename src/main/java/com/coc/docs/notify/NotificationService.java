@@ -48,7 +48,7 @@ public class NotificationService {
      * is the only place that changes.
      */
     @Transactional
-    public void notifyApprovers(NotificationType type) {
+    public void notifyApprovers(NotificationType type, NotificationTarget target) {
         Set<UUID> recipients = accounts.findActiveByRole(AppRole.SUPER_ADMIN).stream()
                 .map(Account::id)
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
@@ -70,7 +70,7 @@ public class NotificationService {
             return;
         }
 
-        List<String> dead = push.send(tokens, type);
+        List<String> dead = push.send(tokens, type, target);
         if (!dead.isEmpty()) {
             devices.deleteAll(dead);
         }

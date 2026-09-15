@@ -19,4 +19,4 @@ import java.util.UUID;
  *
  * <p>// req: ADR-017, ADR-025
  */
-public record AccountRegisteredEvent(UUID accountId, String email) {}
+public record AccountRegisteredEvent(UUID accountId, String email, String avatarUrl) {}

@@ -71,14 +71,14 @@ class NotificationServiceTest {
                         device(first.id(), "token-laptop"),
                         device(first.id(), "token-home"),
                         device(second.id(), "token-phone")));
-        when(push.send(anyCollection(), any())).thenReturn(List.of());
+        when(push.send(anyCollection(), any(), any())).thenReturn(List.of());
 
-        service.notifyApprovers(NotificationType.NEW_REGISTRATION);
+        service.notifyApprovers(NotificationType.NEW_REGISTRATION, NotificationTarget.none());
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<java.util.Collection<String>> tokens =
                 ArgumentCaptor.forClass(java.util.Collection.class);
-        verify(push).send(tokens.capture(), any());
+        verify(push).send(tokens.capture(), any(), any());
         // One person, several devices: notifying the account is not the same as
         // notifying one browser.
         assertThat(tokens.getValue())
@@ -91,9 +91,9 @@ class NotificationServiceTest {
         Account only = approver("boss@example.com");
         when(accounts.findActiveByRole(AppRole.SUPER_ADMIN)).thenReturn(List.of(only));
         when(devices.findByAccountIds(any())).thenReturn(List.of(device(only.id(), "t")));
-        when(push.send(anyCollection(), any())).thenReturn(List.of());
+        when(push.send(anyCollection(), any(), any())).thenReturn(List.of());
 
-        service.notifyApprovers(NotificationType.NEW_REGISTRATION);
+        service.notifyApprovers(NotificationType.NEW_REGISTRATION, NotificationTarget.none());
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Set<UUID>> ids = ArgumentCaptor.forClass(Set.class);
@@ -115,9 +115,9 @@ class NotificationServiceTest {
         when(accounts.findActiveByRole(AppRole.SUPER_ADMIN)).thenReturn(List.of(boss));
         when(devices.findByAccountIds(any()))
                 .thenReturn(List.of(device(boss.id(), "alive"), device(boss.id(), "retired")));
-        when(push.send(anyCollection(), any())).thenReturn(List.of("retired"));
+        when(push.send(anyCollection(), any(), any())).thenReturn(List.of("retired"));
 
-        service.notifyApprovers(NotificationType.NEW_REGISTRATION);
+        service.notifyApprovers(NotificationType.NEW_REGISTRATION, NotificationTarget.none());
 
         verify(devices).deleteAll(List.of("retired"));
     }
@@ -128,9 +128,9 @@ class NotificationServiceTest {
         Account boss = approver("boss@example.com");
         when(accounts.findActiveByRole(AppRole.SUPER_ADMIN)).thenReturn(List.of(boss));
         when(devices.findByAccountIds(any())).thenReturn(List.of(device(boss.id(), "alive")));
-        when(push.send(anyCollection(), any())).thenReturn(List.of());
+        when(push.send(anyCollection(), any(), any())).thenReturn(List.of());
 
-        service.notifyApprovers(NotificationType.NEW_REGISTRATION);
+        service.notifyApprovers(NotificationType.NEW_REGISTRATION, NotificationTarget.none());
 
         // A transport failure returns no dead tokens precisely so that a blip
         // in the network cannot unsubscribe people.
@@ -144,7 +144,7 @@ class NotificationServiceTest {
                 .thenReturn(List.of(approver("boss@example.com")));
         when(devices.findByAccountIds(any())).thenReturn(List.of());
 
-        service.notifyApprovers(NotificationType.NEW_REGISTRATION);
+        service.notifyApprovers(NotificationType.NEW_REGISTRATION, NotificationTarget.none());
 
         // Normal, not a fault: nobody has granted notification permission yet.
         verifyNoInteractions(push);
@@ -155,7 +155,7 @@ class NotificationServiceTest {
     void noApproversMeansNoLookup() {
         when(accounts.findActiveByRole(AppRole.SUPER_ADMIN)).thenReturn(List.of());
 
-        service.notifyApprovers(NotificationType.NEW_REGISTRATION);
+        service.notifyApprovers(NotificationType.NEW_REGISTRATION, NotificationTarget.none());
 
         verifyNoInteractions(devices);
         verifyNoInteractions(push);

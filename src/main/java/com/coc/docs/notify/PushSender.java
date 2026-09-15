@@ -64,7 +64,7 @@ public class PushSender {
      *     shown to be invalid, and deleting on a transport failure would
      *     unsubscribe people because the network blinked.
      */
-    public List<String> send(Collection<String> tokens, NotificationType type) {
+    public List<String> send(Collection<String> tokens, NotificationType type, NotificationTarget target) {
         if (tokens.isEmpty()) {
             return List.of();
         }
@@ -82,13 +82,13 @@ public class PushSender {
         List<String> dead = new ArrayList<>();
         for (int start = 0; start < all.size(); start += BATCH_LIMIT) {
             List<String> batch = all.subList(start, Math.min(start + BATCH_LIMIT, all.size()));
-            dead.addAll(sendBatch(fcm, batch, type));
+            dead.addAll(sendBatch(fcm, batch, type, target));
         }
         return dead;
     }
 
     private List<String> sendBatch(
-            FirebaseMessaging fcm, List<String> batch, NotificationType type) {
+            FirebaseMessaging fcm, List<String> batch, NotificationType type, NotificationTarget target) {
         MulticastMessage message = MulticastMessage.builder()
                 .addAllTokens(batch)
                 .setNotification(Notification.builder()
@@ -100,7 +100,18 @@ public class PushSender {
                 // what to do with it — a phone and a browser want different
                 // things from the same event.
                 .putData("type", type.key())
-                .putData("link", frontendOrigin + type.path())
+                // The exact thing to act on, so a click opens the approval
+                // dialog rather than dropping the reader on a list to search.
+                // An id, not a name — the banner text stays free of identity
+                // (ADR-025 decision 6) and a UUID discloses nothing on a lock
+                // screen.
+                .putData("link", frontendOrigin + type.path()
+                        + (target.id() == null ? "" : "&approve=" + target.id()))
+                // The subject picture, shown in the banner. Absent for a
+                // password registration; the client draws initials rather than
+                // falling back to an app logo, which says nothing about who
+                // this is.
+                .putData("icon", target.iconUrl() == null ? "" : target.iconUrl())
                 .build();
 
         try {
