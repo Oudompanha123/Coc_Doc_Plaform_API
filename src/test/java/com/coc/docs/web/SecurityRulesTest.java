@@ -83,6 +83,11 @@ class SecurityRulesTest {
     // reason as passwordResetService above.
     @MockitoBean com.coc.docs.auth.RegistrationOtpService registrationOtpService;
 
+    // DeviceTokenController is in this slice, so its dependency has to be too
+    // (ADR-025). Mocked rather than real: this test is about which routes the
+    // filter chain admits, not about what registering a device does.
+    @MockitoBean com.coc.docs.notify.DeviceTokenRepository deviceTokenRepository;
+
     @TestConfiguration
     static class Beans {
 

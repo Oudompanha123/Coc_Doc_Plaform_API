@@ -146,6 +146,19 @@ server:
       force: true
 
 app:
+  # Push notifications (ADR-025). The Firebase service-account JSON itself,
+  # not a path to it: a path needs the same file placed identically on every
+  # machine and in every deployment, while an environment variable is the same
+  # mechanism as every other secret here (ADR-007).
+  #
+  # Blank is a supported state, not a misconfiguration. FirebaseConfig is
+  # conditional on this being non-empty, so with no value there is no
+  # FirebaseMessaging bean, PushSender logs what it would have sent, and
+  # everything else runs normally. Six developers share one server and only
+  # some of them will ever hold a service account.
+  firebase:
+    credentials: ${FIREBASE_CREDENTIALS:}
+
   # Session TTL. AMB-006 resolved 2026-09-08: 1 day.
   # // req: NFR-SEC-SESSION
   session-ttl: P1D

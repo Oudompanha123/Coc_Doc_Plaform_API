@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -65,9 +66,11 @@ public class AccountRepository {
             (rs, rowNum) -> new AccountCredential(map(rs, rowNum), rs.getString("password_hash"));
 
     private final JdbcClient jdbc;
+    private final ApplicationEventPublisher events;
 
-    public AccountRepository(JdbcClient jdbc) {
+    public AccountRepository(JdbcClient jdbc, ApplicationEventPublisher events) {
         this.jdbc = jdbc;
+        this.events = events;
     }
 
     private static Account map(ResultSet rs, int rowNum) throws SQLException {
@@ -226,6 +229,28 @@ public class AccountRepository {
     }
 
     /**
+     * Every account holding a role and still able to act.
+     *
+     * <p>{@code status = 'active'} as well as {@code deactivated_at is null}:
+     * a pending applicant who somehow held a role is not someone to notify, and
+     * neither is a rejected one.
+     *
+     * <p>// req: FR-AUTH-008, ADR-025
+     */
+    public List<Account> findActiveByRole(AppRole role) {
+        return jdbc.sql(SELECT
+                        + " where a.id in (select ar.account_id from account_role ar"
+                        + "                 where ar.role_key = ?::app_role)"
+                        + "   and a.deactivated_at is null"
+                        + "   and a.status = 'active'::account_status"
+                        + GROUP_BY
+                        + " order by a.created_at")
+                .param(role.wire())
+                .query(MAPPER)
+                .list();
+    }
+
+    /**
      * Whether removing {@code excluding} would leave no active super admin.
      *
      * <p>The database holds the same rule as a deferred constraint trigger, which
@@ -330,7 +355,20 @@ public class AccountRepository {
                 .query(UUID.class)
                 .single();
         grantRole(id, AppRole.GUEST, null);
-        return findById(id).orElseThrow();
+        Account created = findById(id).orElseThrow();
+
+        // Published here rather than from the two callers, because this INSERT
+        // is the one statement both registration doors pass through: the
+        // password path via AccountService.register once the emailed code is
+        // confirmed (ADR-021), the Google path via SessionService on a first
+        // sign-in. Publishing from the call sites would leave a third door free
+        // to forget, which is a mistake this project has already made once —
+        // the approval gate had to be fixed in both doors for that reason.
+        //
+        // Delivery is deferred to after commit by the listener, so a rolled
+        // back registration announces nobody (ADR-025 decision 1).
+        events.publishEvent(new AccountRegisteredEvent(created.id(), created.email()));
+        return created;
     }
 
     /**

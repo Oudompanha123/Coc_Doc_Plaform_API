@@ -129,6 +129,17 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/auth/sessions/**")
 
                         .hasRole(AppRole.USER.name())
+                        // Registering a device to be notified on (ADR-025). Any signed-in
+                        // caller, not just an approver: only super admins receive
+                        // anything today, but registering a destination is not the same
+                        // act as being sent to, and gating it by role would both need
+                        // changing the moment another notification exists and make the
+                        // endpoint itself disclose who the approvers are. The account is
+                        // taken from the session, never from the body, so a caller can
+                        // only ever address their own.
+                        .requestMatchers("/api/v1/notifications/devices/**")
+                        .hasRole(AppRole.USER.name())
+
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
                         // Liveness only. Carries no version, no configuration and
                         // no dependency status, so it discloses nothing.
