@@ -48,6 +48,7 @@ class NotificationServiceTest {
                 "Approver",
                 EnumSet.of(AppRole.SUPER_ADMIN),
                 null,
+                null,
                 AccountStatus.ACTIVE,
                 null,
                 Instant.now(),

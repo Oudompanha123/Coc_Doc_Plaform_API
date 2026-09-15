@@ -118,6 +118,12 @@ public class SecurityConfig {
 
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/auth/me").hasRole(AppRole.USER.name())
 
+                        // Self-service avatar upload/removal (ADR-026): same floor and
+                        // the same reasoning as PATCH /auth/me above — acts on the
+                        // caller's own account only.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/me/avatar").hasRole(AppRole.USER.name())
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/auth/me/avatar").hasRole(AppRole.USER.name())
+
                         // Self-service password change (revision of ADR-017): acts on
                         // the caller's own account, resolved from the session, and
                         // cannot name another — same floor as PATCH /auth/me above.
@@ -129,7 +135,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/auth/sessions/**")
 
                         .hasRole(AppRole.USER.name())
-                        // Registering a device to be notified on (ADR-025). Any signed-in
+                        // Registering a device to be notified on (ADR-026). Any signed-in
                         // caller, not just an approver: only super admins receive
                         // anything today, but registering a destination is not the same
                         // act as being sent to, and gating it by role would both need

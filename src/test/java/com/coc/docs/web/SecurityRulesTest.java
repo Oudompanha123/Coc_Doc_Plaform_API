@@ -105,7 +105,7 @@ class SecurityRulesTest {
                     "http://localhost:3000",
                     false,
                     "",
-                    new AppProperties.Storage("", "test", "us-east-1"));
+                    new AppProperties.Storage("", "test", "us-east-1", "", ""));
         }
 
         /**

@@ -43,7 +43,25 @@
 
          Remove when the managed version supports the JDK in use. -->
     <byte-buddy.version>1.18.13</byte-buddy.version>
+
+    <!-- AWS SDK v2's S3 client, used only as a generic client for the
+         S3-compatible API (CONST-TECH-08): MinIO locally, whichever
+         provider is chosen once backend hosting is decided (ADR-012 §2,
+         still [DEFERRED]). Nothing in this project depends on AWS itself. -->
+    <aws-sdk.version>2.54.14</aws-sdk.version>
   </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>software.amazon.awssdk</groupId>
+        <artifactId>bom</artifactId>
+        <version>${aws-sdk.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
 
   <dependencies>
     <dependency>
@@ -125,6 +143,19 @@
     <dependency>
       <groupId>org.flywaydb</groupId>
       <artifactId>flyway-database-postgresql</artifactId>
+    </dependency>
+
+    <!-- Object storage behind the S3 API (CONST-TECH-08): self-uploaded
+         profile photos (ADR-025). Path-style requests only
+         (AvatarStorageConfig), the one addressing scheme every S3-compatible
+         provider is guaranteed to support. -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>s3</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>apache-client</artifactId>
     </dependency>
 
     <!-- ===================== test ===================== -->

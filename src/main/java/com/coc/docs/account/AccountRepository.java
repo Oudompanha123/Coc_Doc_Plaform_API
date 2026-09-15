@@ -3,6 +3,7 @@ package com.coc.docs.account;
 import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
@@ -37,8 +38,8 @@ public class AccountRepository {
      * drift into the other by accident.
      */
     private static final String ACCOUNT_COLUMNS =
-            "a.id, a.email, a.display_name, a.avatar_url, a.status, a.deactivated_at, a.created_at, "
-                    + "a.updated_at, a.must_change_password";
+            "a.id, a.email, a.display_name, a.avatar_url, a.avatar_uploaded_at, a.status, a.deactivated_at, "
+                    + "a.created_at, a.updated_at, a.must_change_password";
 
     /**
      * {@code filter (where ...)} rather than a plain {@code array_agg}: the
@@ -75,12 +76,14 @@ public class AccountRepository {
 
     private static Account map(ResultSet rs, int rowNum) throws SQLException {
         OffsetDateTime deactivated = rs.getObject("deactivated_at", OffsetDateTime.class);
+        OffsetDateTime avatarUploadedAt = rs.getObject("avatar_uploaded_at", OffsetDateTime.class);
         return new Account(
                 rs.getObject("id", UUID.class),
                 rs.getString("email"),
                 rs.getString("display_name"),
                 readRoles(rs),
                 rs.getString("avatar_url"),
+                avatarUploadedAt == null ? null : avatarUploadedAt.toInstant(),
                 AccountStatus.fromDb(rs.getString("status")),
                 deactivated == null ? null : deactivated.toInstant(),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
@@ -235,7 +238,7 @@ public class AccountRepository {
      * a pending applicant who somehow held a role is not someone to notify, and
      * neither is a rejected one.
      *
-     * <p>// req: FR-AUTH-008, ADR-025
+     * <p>// req: FR-AUTH-008, ADR-026
      */
     public List<Account> findActiveByRole(AppRole role) {
         return jdbc.sql(SELECT
@@ -366,7 +369,7 @@ public class AccountRepository {
         // the approval gate had to be fixed in both doors for that reason.
         //
         // Delivery is deferred to after commit by the listener, so a rolled
-        // back registration announces nobody (ADR-025 decision 1).
+        // back registration announces nobody (ADR-026 decision 1).
         events.publishEvent(
                 new AccountRegisteredEvent(created.id(), created.email(), created.avatarUrl()));
         return created;
@@ -432,6 +435,34 @@ public class AccountRepository {
                         where id = ? and avatar_url is distinct from ?
                         """)
                 .params(avatarUrl, id, avatarUrl)
+                .update();
+    }
+
+    /**
+     * Records a self-uploaded photo (ADR-026). Setting {@code avatar_uploaded_at}
+     * is what makes this an owner-controlled value from now on — see
+     * {@code SessionService.refreshProfile}, which checks it before writing
+     * the identity provider's picture over this on a later sign-in.
+     */
+    public int updateUploadedAvatar(UUID id, String avatarUrl, Instant uploadedAt) {
+        return jdbc.sql("""
+                        update account set avatar_url = ?, avatar_uploaded_at = ?, updated_at = now()
+                        where id = ?
+                        """)
+                .params(avatarUrl, uploadedAt, id)
+                .update();
+    }
+
+    /**
+     * Removes a self-uploaded photo, reverting to initials until the next
+     * Google/Keycloak sign-in supplies a provider picture again (ADR-026).
+     */
+    public int clearUploadedAvatar(UUID id) {
+        return jdbc.sql("""
+                        update account set avatar_url = null, avatar_uploaded_at = null, updated_at = now()
+                        where id = ?
+                        """)
+                .param(id)
                 .update();
     }
 

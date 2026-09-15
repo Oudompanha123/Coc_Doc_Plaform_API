@@ -362,7 +362,15 @@ public final class ApiDtos {
              * screen show "invited, awaiting first login" rather than looking
              * identical to an account that has never needed one.
              */
-            boolean mustChangePassword) {
+            boolean mustChangePassword,
+            /**
+             * The {@code picture} claim captured at this account's own last
+             * Google/Keycloak sign-in (ADR-013), or null. Null is ordinary for
+             * an account invited but not yet signed in, or one that only ever
+             * uses the password path — same meaning as on {@link MeResponse},
+             * just for someone else's account rather than the caller's own.
+             */
+            String avatarUrl) {
 
         public static AccountResponse of(Account account) {
             return of(account, null);
@@ -381,7 +389,8 @@ public final class ApiDtos {
                             .sorted(java.util.Comparator.comparingInt(Enum::ordinal))
                             .map(AppRole::wire)
                             .toList(),
-                    account.mustChangePassword());
+                    account.mustChangePassword(),
+                    account.avatarUrl());
         }
     }
 
