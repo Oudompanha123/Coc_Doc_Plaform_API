@@ -421,19 +421,26 @@ public class AuthController {
     /**
      * Replaces the caller's own password.
      *
-     * <p>This is the "Create New Password" step of the first-login flow: the
-     * caller already holds a session — issued by {@link #signInWithPassword}
-     * on the temporary password — and this is how {@code mustChangePassword}
-     * turns false. It is not restricted to that case; any account holding a
-     * password credential can use it.
+     * <p>Two entry points share this one route: the "Create New Password"
+     * step of the first-login flow — the caller already holds a session,
+     * issued by {@link #signInWithPassword} on the temporary password — and,
+     * since ADR-022, the voluntary "My Profile &rarr; Change Password"
+     * self-service screen. {@code SessionService.changeOwnPassword} tells
+     * the two apart by {@code caller.account().mustChangePassword()} and
+     * requires {@code currentPassword} for the voluntary case only; see its
+     * javadoc for why.
      *
      * <p>Requires only {@code USER} rank because it acts on the caller's own
      * account and cannot name another (see {@code SecurityConfig}'s
-     * self-service block). Both password fields are required here even though
-     * the frontend already checks they match — see {@code
+     * self-service block). Both new-password fields are required here even
+     * though the frontend already checks they match — see {@code
      * ChangePasswordRequest}'s javadoc.
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017
+     * <p>The confirmation message differs by which entry point this was: the
+     * forced flow says the account is now usable, which would be a false
+     * promise for someone who already had full access before this call.
+     *
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-022
      */
     @PostMapping("/change-password")
     ChangePasswordResponse changePassword(
@@ -446,8 +453,14 @@ public class AuthController {
         if (!request.newPassword().equals(request.confirmPassword())) {
             throw ApiException.badRequest("newPassword and confirmPassword must match");
         }
-        sessions.changeOwnPassword(caller, request.newPassword());
-        return new ChangePasswordResponse("Password created successfully. You can now access your account.");
+
+        boolean wasForcedFirstLogin = caller.account().mustChangePassword();
+        sessions.changeOwnPassword(caller, request.currentPassword(), request.newPassword());
+
+        return new ChangePasswordResponse(
+                wasForcedFirstLogin
+                        ? "Password created successfully. You can now access your account."
+                        : "Your password has been changed.");
     }
 
     // -----------------------------------------------------------------------

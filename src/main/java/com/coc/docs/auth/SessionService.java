@@ -604,6 +604,20 @@ public class SessionService {
      * on is the caller's own, resolved from the session, never a parameter that
      * could name someone else.
      *
+     * <p><b>Current-password check (ADR-022, revision of ADR-020).</b> A
+     * voluntary change — {@code caller.account().mustChangePassword()} is
+     * {@code false}, meaning this is not the first-login completion — must
+     * prove {@code currentRawPassword} against the stored hash first. Without
+     * this, a session alone (left open on a shared machine, or lifted by an
+     * XSS the {@code httpOnly} cookie doesn't fully close off, ADR-011) would
+     * be enough to lock the real owner out by silently setting a new
+     * password — a materially worse gap once this is reachable from a
+     * discoverable "My Profile" entry point rather than only the narrow
+     * forced flow. The check is skipped only for the forced case: {@code
+     * /login-password} just verified the equivalent proof, on this exact
+     * session, moments earlier, and asking again would be asking twice for
+     * a credential the caller is about to replace anyway.
+     *
      * <p>Refuses a Google-only account (no {@code password_hash} to replace)
      * and refuses reusing the current password — the one rule this endpoint
      * exists to enforce for a just-invited account, since a temporary password
@@ -616,16 +630,28 @@ public class SessionService {
      * reset path, which has no current session to spare and revokes all of
      * them.
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-022
      */
     @Transactional
-    public void changeOwnPassword(CurrentUser caller, String newRawPassword) {
+    public void changeOwnPassword(CurrentUser caller, String currentRawPassword, String newRawPassword) {
         AccountCredential credential = accounts.findCredentialById(caller.id()).orElseThrow();
 
         if (credential.passwordHash() == null) {
             throw ApiException.badRequest(
                     "this account has no password set; sign in with Google instead");
         }
+
+        if (!caller.account().mustChangePassword()
+                && (currentRawPassword == null
+                        || currentRawPassword.isBlank()
+                        || !passwordEncoder.matches(currentRawPassword, credential.passwordHash()))) {
+            // Reported plainly, not folded into a generic failure: the caller
+            // already holds a live session as themselves, so there is no third
+            // party here for a generic message to protect from enumeration —
+            // same reasoning ADR-018 decision 3 applies to /reset-password.
+            throw ApiException.badRequest("your current password is incorrect");
+        }
+
         if (passwordEncoder.matches(newRawPassword, credential.passwordHash())) {
             throw ApiException.badRequest(
                     "choose a password different from your current one");

@@ -3,6 +3,7 @@ package com.coc.docs.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -544,19 +545,39 @@ class AuthControllerTest {
     }
 
     /**
-     * The first-login completion step (revision of ADR-017): the caller
-     * already holds a session — issued on the temporary password — and this
-     * is how {@code mustChangePassword} turns false.
+     * Two entry points, one route (ADR-022, revision of ADR-020/017): the
+     * first-login completion — the caller already holds a session issued on
+     * the temporary password — and the voluntary "My Profile &rarr; Change
+     * Password" self-service screen. {@code SessionService} is mocked, so
+     * these tests cover the HTTP/DTO layer and the message branch only; the
+     * real current-password rule lives in {@code
+     * ChangeOwnPasswordIntegrationTest}.
      */
     @Nested
     @DisplayName("POST /api/v1/auth/change-password")
     class ChangePassword {
 
         @Test
-        @DisplayName("changes the password and confirms")
-        void changesPassword() throws Exception {
+        @DisplayName("voluntary change: confirms with the 'changed' message, not the first-login one")
+        void changesPasswordVoluntarily() throws Exception {
             mvc.perform(post("/api/v1/auth/change-password")
                             .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"currentPassword":"OldPassword123!","newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
+                                    """))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.message").value("Your password has been changed."));
+
+            verify(sessions).changeOwnPassword(any(), eq("OldPassword123!"), eq("NewPassword123!"));
+        }
+
+        @Test
+        @DisplayName("forced first-login: confirms with the 'you can now access your account' message")
+        void changesPasswordDuringForcedFirstLogin() throws Exception {
+            mvc.perform(post("/api/v1/auth/change-password")
+                            .with(SecurityMockMvcRequestPostProcessors.authentication(
+                                    TestCallers.authentication(AppRole.USER, true)))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {"newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
@@ -565,7 +586,9 @@ class AuthControllerTest {
                     .andExpect(jsonPath("$.message").value(
                             "Password created successfully. You can now access your account."));
 
-            verify(sessions).changeOwnPassword(any(), eq("NewPassword123!"));
+            // No currentPassword sent — the forced flow's frontend has none to
+            // give, and the null reaches the service exactly as the request left it.
+            verify(sessions).changeOwnPassword(any(), isNull(), eq("NewPassword123!"));
         }
 
         @Test
@@ -575,11 +598,11 @@ class AuthControllerTest {
                             .with(as(AppRole.USER))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"newPassword":"NewPassword123!","confirmPassword":"Different123!"}
+                                    {"currentPassword":"OldPassword123!","newPassword":"NewPassword123!","confirmPassword":"Different123!"}
                                     """))
                     .andExpect(status().isBadRequest());
 
-            verify(sessions, never()).changeOwnPassword(any(), any());
+            verify(sessions, never()).changeOwnPassword(any(), any(), any());
         }
 
         @Test
@@ -589,11 +612,11 @@ class AuthControllerTest {
                             .with(as(AppRole.USER))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"newPassword":"short","confirmPassword":"short"}
+                                    {"currentPassword":"OldPassword123!","newPassword":"short","confirmPassword":"short"}
                                     """))
                     .andExpect(status().isBadRequest());
 
-            verify(sessions, never()).changeOwnPassword(any(), any());
+            verify(sessions, never()).changeOwnPassword(any(), any(), any());
         }
 
         @Test
@@ -602,7 +625,7 @@ class AuthControllerTest {
             mvc.perform(post("/api/v1/auth/change-password")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
+                                    {"currentPassword":"OldPassword123!","newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
                                     """))
                     .andExpect(status().isUnauthorized());
         }
@@ -612,17 +635,34 @@ class AuthControllerTest {
         void rejectsCurrentPasswordReuse() throws Exception {
             doThrow(ApiException.badRequest("choose a password different from your current one"))
                     .when(sessions)
-                    .changeOwnPassword(any(), any());
+                    .changeOwnPassword(any(), any(), any());
 
             mvc.perform(post("/api/v1/auth/change-password")
                             .with(as(AppRole.USER))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"newPassword":"SamePassword123!","confirmPassword":"SamePassword123!"}
+                                    {"currentPassword":"SamePassword123!","newPassword":"SamePassword123!","confirmPassword":"SamePassword123!"}
                                     """))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.detail").value(
                             "choose a password different from your current one"));
+        }
+
+        @Test
+        @DisplayName("reports an incorrect current password plainly, as 400 (ADR-022)")
+        void rejectsWrongCurrentPassword() throws Exception {
+            doThrow(ApiException.badRequest("your current password is incorrect"))
+                    .when(sessions)
+                    .changeOwnPassword(any(), any(), any());
+
+            mvc.perform(post("/api/v1/auth/change-password")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"currentPassword":"WrongPassword123!","newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
+                                    """))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.detail").value("your current password is incorrect"));
         }
     }
 
