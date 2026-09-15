@@ -3,7 +3,6 @@ package com.coc.docs.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -726,15 +725,28 @@ class AuthControllerTest {
                                     TestCallers.authentication(AppRole.USER, true)))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
+                                    {"currentPassword":"TempPassword123!","newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
                                     """))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.message").value(
                             "Password created successfully. You can now access your account."));
 
-            // No currentPassword sent — the forced flow's frontend has none to
-            // give, and the null reaches the service exactly as the request left it.
-            verify(sessions).changeOwnPassword(any(), isNull(), eq("NewPassword123!"));
+            verify(sessions).changeOwnPassword(any(), eq("TempPassword123!"), eq("NewPassword123!"));
+        }
+
+        @Test
+        @DisplayName("forced first-login: rejects a missing temporary password without reaching the session layer (ADR-024)")
+        void rejectsMissingCurrentPasswordDuringForcedFirstLogin() throws Exception {
+            mvc.perform(post("/api/v1/auth/change-password")
+                            .with(SecurityMockMvcRequestPostProcessors.authentication(
+                                    TestCallers.authentication(AppRole.USER, true)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
+                                    """))
+                    .andExpect(status().isBadRequest());
+
+            verify(sessions, never()).changeOwnPassword(any(), any(), any());
         }
 
         @Test
@@ -854,7 +866,7 @@ class AuthControllerTest {
                             .with(mustChangePassword())
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
+                                    {"currentPassword":"TempPassword123!","newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
                                     """))
                     .andExpect(status().isOk());
         }

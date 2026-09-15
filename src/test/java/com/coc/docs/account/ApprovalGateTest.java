@@ -131,6 +131,19 @@ class ApprovalGateTest extends PostgresTestBase {
     }
 
     @Test
+    @DisplayName("the Users list excludes a pending application, and includes it once approved")
+    void listExcludesPendingUntilDecided() {
+        CurrentUser actor = superAdmin();
+        Account applied = accounts.insertApplication("applicant@example.com", "Applicant", null, null);
+
+        assertThat(accountService.list()).extracting(Account::email).doesNotContain("applicant@example.com");
+
+        accountService.approve(applied.id(), AppRole.USER, actor);
+
+        assertThat(accountService.list()).extracting(Account::email).contains("applicant@example.com");
+    }
+
+    @Test
     @DisplayName("an account created by a super admin skips the queue")
     void adminCreatedAccountsAreActive() {
         CurrentUser actor = superAdmin();

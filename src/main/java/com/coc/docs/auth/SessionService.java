@@ -604,19 +604,18 @@ public class SessionService {
      * on is the caller's own, resolved from the session, never a parameter that
      * could name someone else.
      *
-     * <p><b>Current-password check (ADR-022, revision of ADR-020).</b> A
-     * voluntary change — {@code caller.account().mustChangePassword()} is
-     * {@code false}, meaning this is not the first-login completion — must
-     * prove {@code currentRawPassword} against the stored hash first. Without
-     * this, a session alone (left open on a shared machine, or lifted by an
-     * XSS the {@code httpOnly} cookie doesn't fully close off, ADR-011) would
-     * be enough to lock the real owner out by silently setting a new
-     * password — a materially worse gap once this is reachable from a
-     * discoverable "My Profile" entry point rather than only the narrow
-     * forced flow. The check is skipped only for the forced case: {@code
-     * /login-password} just verified the equivalent proof, on this exact
-     * session, moments earlier, and asking again would be asking twice for
-     * a credential the caller is about to replace anyway.
+     * <p><b>Current-password check (ADR-022, revision of ADR-020; made
+     * unconditional by ADR-024).</b> Every caller — voluntary change and
+     * forced first-login completion alike — must prove {@code
+     * currentRawPassword} against the stored hash first. Without this, a
+     * session alone (left open on a shared machine, or lifted by an XSS the
+     * {@code httpOnly} cookie doesn't fully close off, ADR-011) would be
+     * enough to lock the real owner out by silently setting a new password.
+     * The forced flow re-proves the same temporary password {@code
+     * /login-password} just verified moments earlier on this exact session —
+     * ADR-022 originally exempted this case for that reason, but ADR-024
+     * removes the exemption on direct PM request for an old-password field
+     * on {@code /create-password}.
      *
      * <p>Refuses a Google-only account (no {@code password_hash} to replace)
      * and refuses reusing the current password — the one rule this endpoint
@@ -630,7 +629,7 @@ public class SessionService {
      * reset path, which has no current session to spare and revokes all of
      * them.
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-022
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-022, ADR-024
      */
     @Transactional
     public void changeOwnPassword(CurrentUser caller, String currentRawPassword, String newRawPassword) {
@@ -641,10 +640,9 @@ public class SessionService {
                     "this account has no password set; sign in with Google instead");
         }
 
-        if (!caller.account().mustChangePassword()
-                && (currentRawPassword == null
-                        || currentRawPassword.isBlank()
-                        || !passwordEncoder.matches(currentRawPassword, credential.passwordHash()))) {
+        if (currentRawPassword == null
+                || currentRawPassword.isBlank()
+                || !passwordEncoder.matches(currentRawPassword, credential.passwordHash())) {
             // Reported plainly, not folded into a generic failure: the caller
             // already holds a live session as themselves, so there is no third
             // party here for a generic message to protect from enumeration —
