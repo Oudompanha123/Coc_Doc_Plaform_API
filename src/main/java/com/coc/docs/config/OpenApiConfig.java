@@ -34,7 +34,13 @@ public class OpenApiConfig {
                                 .type(SecurityScheme.Type.APIKEY)
                                 .in(SecurityScheme.In.COOKIE)
                                 .name("coc_session")
-                                .description("Backend-issued session cookie. Obtained from POST /api/auth/login.")))
+                                .description(
+                                        "Backend-issued session cookie, set by POST /api/v1/auth/google "
+                                                + "(Keycloak-brokered Google sign-in, ADR-013) or POST "
+                                                + "/api/v1/auth/login-password (ADR-014). httpOnly, so it is "
+                                                + "never readable from JavaScript and never appears in a "
+                                                + "response body. Role is read from the account row on every "
+                                                + "request and is not carried in this value.")))
                 .addSecurityItem(new SecurityRequirement().addList(COOKIE_AUTH));
     }
 }

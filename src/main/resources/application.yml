@@ -3,8 +3,54 @@
 # Every environment-specific value is supplied by environment variables with no
 # usable default. Backend hosting is [DEFERRED] (PM, 2026-09-08), so this file
 # must not assume a provider.  // req: CONST-TECH-08, ADR-012 §2
+#
+# For a personal local setup (your own Postgres, your own Google OAuth client
+# id) use one of the two gitignored paths rather than editing a default below:
+# copy backend/.env.example to backend/.env.local and export it, or write an
+# application-local.yml and run with SPRING_PROFILES_ACTIVE=local. Neither can
+# reach a commit; a real value edited into this file can, and has.
 
 spring:
+  # Load backend/.env.local directly, so a developer's values reach the
+  # application whatever launches it — IDE Run, IDE Debug, `mvn
+  # spring-boot:run`, a test — with nothing to install first.
+  #
+  # This used to be the EnvFile IntelliJ plugin's job, declared in
+  # .idea/runConfigurations/Backend__dev_.xml. When that plugin is not
+  # installed IntelliJ ignores the <extension> block silently: the run
+  # configuration still looks correct, loads nothing, and the application dies
+  # on `Driver org.postgresql.Driver claims to not accept jdbcUrl,
+  # jdbc:postgresql://${DB_HOST}:${DB_PORT}/...` — the placeholders reaching
+  # the driver as literal text. A setup step that fails silently is worse than
+  # no setup step, so the loading now lives here, where it cannot be missed.
+  #
+  # `optional:` means an absent file is not an error, which is the normal case
+  # everywhere but a developer machine. Both paths are listed because the
+  # working directory is backend/ under the IDE and spring-boot:run, but the
+  # repository root under some shells. .env.local is KEY=VALUE, hence
+  # [.properties] — the extension hint Spring needs to parse a file whose name
+  # does not end in one.
+  #
+  # This cannot weaken a deployment: OS environment variables outrank imported
+  # config data in Spring Boot's precedence, so anything the environment sets
+  # still wins, and .env.local is gitignored and never shipped.
+  config:
+    import:
+      - optional:file:./.env.local[.properties]
+      - optional:file:./backend/.env.local[.properties]
+
+  # Default active profile — deliberately NOT "no profile", so `mvn
+  # spring-boot:run`/an IDE run configuration works with zero setup beyond
+  # application-dev.yml (committed alongside this file; see its own header).
+  # Personal secrets (a real DB_PASSWORD, GOOGLE_CLIENT_ID, etc.) are supplied
+  # as environment variables, never a file. An OS environment variable outranks
+  # this property in Spring Boot's precedence, so any real deployment overrides
+  # it simply by setting SPRING_PROFILES_ACTIVE (to "prod", or to nothing) —
+  # nothing here can leak into an environment that sets that variable, which
+  # every non-local deployment must.
+  profiles:
+    active: dev
+
   application:
     name: docs-platform-backend
 
@@ -88,8 +134,10 @@ spring:
             enable: true
 
 server:
-  port: ${PORT:8080}
-
+  # 8081, not 8080: frontend/lib/auth/api.ts defaults NEXT_PUBLIC_BACKEND_URL to
+  # http://localhost:8081, so a zero-config `mvn spring-boot:run` is reachable
+  # from a zero-config `next dev`.
+  port: ${PORT:8081}
   # Content includes Khmer and Korean; encoding is never left to a platform
   # default on this project.  // req: CONST-OPS-01
   servlet:
@@ -106,15 +154,41 @@ app:
   # // req: ADR-012 §4, NFR-SEC-CHANNEL
   frontend-origin: ${FRONTEND_ORIGIN:http://localhost:3000}
 
-  # Whether the session cookie carries `Secure`.
-  # // req: NFR-SEC-SESSION, NFR-SEC-CHANNEL
+  # Whether the session cookie carries `Secure`. Defaults to true so a
+  # deployment is safe unless it deliberately opts out; local development over
+  # plain http must set it false (application-dev.yml does exactly that), or the
+  # browser discards the cookie and sign-in appears to succeed and then does
+  # nothing.
+  #
+  # Flat key, not a nested `app.cookie.secure`: AppProperties binds
+  # `cookieSecure` as a primitive boolean, so a nested block would leave it
+  # unbound and default to FALSE — Secure silently dropped in production, the
+  # one failure this flag exists to prevent. SameSite and cookie domain are not
+  # configurable at all today; AuthController sets SameSite=Lax directly and
+  # issues host-only cookies.  // req: NFR-SEC-SESSION, NFR-SEC-CHANNEL
   cookie-secure: ${COOKIE_SECURE:true}
 
   # Google OAuth client id.
   # // req: FR-AUTH-001
   google-client-id: ${GOOGLE_CLIENT_ID:}
 
-  # Keycloak configuration.
+  # Keycloak, which brokers Google upstream (ADR-013). Optional: blank means
+  # this deployment has no broker and the application boots exactly as it does
+  # without one — every developer machine is in that state until the container
+  # is up, and the reader path must not depend on it.
+  #
+  # Both or neither. An issuer with no audience refuses to start on purpose:
+  # KeycloakAuthConfig's audience validator would have nothing to compare
+  # against, so leaving it blank skips audience verification silently rather
+  # than permissively, and a token Keycloak minted for any other client in the
+  # same realm would then verify here.
+  #
+  # Not spring.security.oauth2.resourceserver.jwt.*: that key makes Spring
+  # fetch the issuer's discovery document during startup, so the application
+  # could not boot unless Keycloak were reachable — including for tests and a
+  # Flyway-only run — and it would autoconfigure a second JwtDecoder competing
+  # with the one KeycloakAuthConfig declares. KeycloakAuthConfig builds the
+  # decoder from the JWK set URI instead, which it derives from the issuer.
   # // req: FR-AUTH-001, NFR-SEC-AUTH, ADR-013
   keycloak:
     issuer-uri: ${KEYCLOAK_ISSUER_URI:}
@@ -126,6 +200,35 @@ app:
     endpoint: ${S3_ENDPOINT:}
     bucket: ${S3_BUCKET:coc-docs-media}
     region: ${S3_REGION:us-east-1}
+
+# The generated API contract, and the Swagger UI that renders it.
+#
+# Off here, on in application-dev.yml. This is the base file, so it is what a
+# deployment with no dev profile gets: the endpoints are not merely protected,
+# they are not mapped at all.
+#
+# Probing them then returns 401, not 404 — Spring Security's default-deny runs
+# before dispatch, so nothing ever reaches the handler that would answer "no
+# such route". That is the desired outcome rather than a compromise: the reply
+# is byte-for-byte the reply any nonexistent path gives, so it confirms
+# nothing. Verified against a prod-profile run — /v3/api-docs, /swagger-ui.html
+# and /nonsense-abcxyz are indistinguishable.
+#
+# That matters because the contract describes every route, including
+# /api/v1/admin/accounts/** — the whole of NFR-SEC-PII's surface. Publishing a
+# map of it to unauthenticated callers is a disclosure decision, not a
+# convenience one, so the default is off and turning it on is per-environment.
+#
+# Reading the contract outside dev does not need this: docs/api/openapi.yaml is
+# the committed snapshot, regenerated by scripts/export-openapi.sh against a
+# locally running instance.
+#
+# // req: NFR-SEC-PII, ADR-011, RISK-018, architecture-overview.md §11
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
 
 logging:
   level:
