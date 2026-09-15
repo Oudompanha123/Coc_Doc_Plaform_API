@@ -10,7 +10,7 @@ import org.springframework.stereotype.Repository;
 /**
  * Reads and writes {@code docs_content} rows — one current body per
  * {@code (product_key, slug)}, overwritten on save rather than versioned
- * (see {@code V12__docs_content.sql} for why this table skips
+ * (see {@code V13__docs_content.sql} for why this table skips
  * draft/publish, unlike {@code page_version}).
  *
  * <p>// req: ADR-012 investigation, 2026-09-15
