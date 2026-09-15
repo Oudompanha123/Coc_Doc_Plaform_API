@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -179,6 +180,12 @@ class RegistrationOtpServiceIntegrationTest extends PostgresTestBase {
                         + "where lower(email) = lower(?)")
                 .param("new.person@example.com")
                 .update();
+
+        // mintedCode() already recorded one sendCode invocation; verify()
+        // counts matching invocations cumulatively since the mock's last
+        // reset, not "new calls since I last checked" -- without clearing,
+        // the check below sees both calls and fails as "wanted 1, was 2".
+        clearInvocations(mailer);
 
         ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
         registrations.resend("new.person@example.com");
