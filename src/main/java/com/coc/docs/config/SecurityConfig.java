@@ -187,6 +187,18 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/sections/**").hasRole(AppRole.USER.name())
                         .requestMatchers(HttpMethod.GET, "/api/v1/pages/**").hasRole(AppRole.USER.name())
 
+                        // Product docs pages (/docs/**, /jex3-0/**, ...) carry no
+                        // auth gate on the frontend and are meant to be public —
+                        // a deliberate, separate decision from the `user` floor
+                        // above, not an oversight of it. Write access still sits
+                        // behind the admin floor via /api/v1/admin/** below.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/docs-content/**").permitAll()
+
+                        // The nav structure (product/sub-item list) drives the
+                        // same public sidebar/docs pages as docs-content above,
+                        // so it carries the same public-read exception.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/nav/**").permitAll()
+
                         // --- default deny ------------------------------------
                         // Deliberately the strictest role, not authenticated().
                         // See the class comment: this line is the control.
