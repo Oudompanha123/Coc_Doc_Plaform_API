@@ -291,13 +291,19 @@ public class AccountService {
     }
 
     /**
-     * Records a self-registration. Creates the account {@code active}
-     * immediately — no {@code super_admin} approval gate — per explicit
-     * product direction (2026-09-11), reversing the auto-activation
-     * ADR-014 explicitly rejected in its "Alternatives Considered" table.
-     * See that ADR for the security tradeoff this reopens: anyone reaching
-     * this endpoint can grant themselves a working account. Recorded here
-     * pending an ADR revision.
+     * Records a self-registration. Creates the account {@code pending} at
+     * role {@code guest} (ADR-017) — an application, not an account that
+     * works, restoring the approval gate ADR-014 specified and a brief
+     * 2026-09-11 product direction had removed.
+     *
+     * <p>Called from two places, both after the caller's control of the
+     * email address is already established: directly, when an
+     * administrator is not the one creating the account (see {@link
+     * #create} for that path instead); and — since ADR-021 — from {@code
+     * RegistrationOtpService.verify}, which is now the only caller in
+     * practice, once the emailed 6-digit code has been confirmed. This
+     * method itself is unchanged by ADR-021; it has no idea a code was ever
+     * involved.
      *
      * <p>The caller passes an already-hashed password. Hashing belongs to the
      * web layer's encoder, not here, so no plaintext ever reaches a class that

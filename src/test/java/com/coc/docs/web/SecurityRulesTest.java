@@ -79,6 +79,10 @@ class SecurityRulesTest {
     @MockitoBean com.coc.docs.auth.SessionRepository sessionRepository;
     @MockitoBean com.coc.docs.account.RoleRepository roleRepository;
 
+    // AuthController needs it to construct (ADR-021); mocked for the same
+    // reason as passwordResetService above.
+    @MockitoBean com.coc.docs.auth.RegistrationOtpService registrationOtpService;
+
     @TestConfiguration
     static class Beans {
 
@@ -172,6 +176,26 @@ class SecurityRulesTest {
             // than refused at the security layer, same reasoning as
             // sign_in_is_reachable_without_a_session above.
             mvc.perform(post("/api/v1/auth/reset-password")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void register_resend_is_reachable_without_a_session() throws Exception {
+            // ADR-021. Has to be: this runs before any account, and
+            // therefore any session, exists. 400 because the body is empty —
+            // the route was reached rather than refused at the security layer.
+            mvc.perform(post("/api/v1/auth/register/resend")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void register_verify_is_reachable_without_a_session() throws Exception {
+            // ADR-021. Same necessity as register/resend above.
+            mvc.perform(post("/api/v1/auth/register/verify")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{}"))
                     .andExpect(status().isBadRequest());

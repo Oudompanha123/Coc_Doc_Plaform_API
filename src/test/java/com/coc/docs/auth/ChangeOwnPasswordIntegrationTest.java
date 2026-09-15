@@ -1,0 +1,173 @@
+package com.coc.docs.auth;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.coc.docs.PostgresTestBase;
+import com.coc.docs.account.Account;
+import com.coc.docs.account.AccountRepository;
+import com.coc.docs.account.AccountStatus;
+import com.coc.docs.account.AppRole;
+import com.coc.docs.account.Permission;
+import com.coc.docs.web.ApiException;
+import java.util.Set;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.security.crypto.password.PasswordEncoder;
+
+/**
+ * {@code SessionService.changeOwnPassword} against a real PostgreSQL —
+ * specifically the current-password rule ADR-022 added (revision of
+ * ADR-020). {@code AuthControllerTest.ChangePassword} covers the HTTP/DTO
+ * layer with a mocked {@code SessionService}; this is where the actual
+ * business rule is exercised.
+ *
+ * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-020, ADR-022
+ */
+class ChangeOwnPasswordIntegrationTest extends PostgresTestBase {
+
+    @Autowired SessionService sessions;
+    @Autowired AccountRepository accounts;
+    @Autowired PasswordEncoder passwordEncoder;
+    @Autowired JdbcClient jdbc;
+
+    @BeforeEach
+    void setUp() {
+        jdbc.sql("truncate audit_log, app_session, account restart identity cascade").update();
+
+        // Deferred constraint trigger (V4): a bootstrap super_admin keeps every
+        // commit in this suite from tripping the "at least one active
+        // super_admin must remain" guard, same fixture every other
+        // integration test in this package sets up and for the same reason.
+        accounts.insert("boss@example.com", "Boss", AppRole.SUPER_ADMIN, null, AccountStatus.ACTIVE);
+    }
+
+    /** Signs in with a real password and resolves the resulting token back into a real {@code CurrentUser}. */
+    private CurrentUser signInAndResolve(String email, String rawPassword) {
+        SessionService.IssuedSession issued =
+                sessions.signInWithPassword(email, rawPassword, "test-agent", "127.0.0.1");
+        return sessions.resolve(issued.token()).orElseThrow();
+    }
+
+    private String hashOf(String email) {
+        return accounts.findCredentialByEmailIgnoreCase(email).orElseThrow().passwordHash();
+    }
+
+    @Test
+    @DisplayName("voluntary change succeeds when the current password is right")
+    void voluntaryChangeSucceeds() {
+        accounts.insert(
+                "voluntary@example.com", "Voluntary", AppRole.USER, null, AccountStatus.ACTIVE,
+                passwordEncoder.encode("OldPassword123!"), false);
+        CurrentUser caller = signInAndResolve("voluntary@example.com", "OldPassword123!");
+
+        sessions.changeOwnPassword(caller, "OldPassword123!", "NewPassword456!");
+
+        String newHash = hashOf("voluntary@example.com");
+        assertThat(passwordEncoder.matches("NewPassword456!", newHash)).isTrue();
+        assertThat(passwordEncoder.matches("OldPassword123!", newHash)).isFalse();
+    }
+
+    @Test
+    @DisplayName("voluntary change is refused when the current password is wrong, and nothing changes")
+    void voluntaryChangeRefusesWrongCurrentPassword() {
+        accounts.insert(
+                "voluntary2@example.com", "Voluntary", AppRole.USER, null, AccountStatus.ACTIVE,
+                passwordEncoder.encode("OldPassword123!"), false);
+        CurrentUser caller = signInAndResolve("voluntary2@example.com", "OldPassword123!");
+
+        assertThatThrownBy(() -> sessions.changeOwnPassword(caller, "WrongPassword!!!", "NewPassword456!"))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> {
+                    assertThat(((ApiException) e).status()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(e.getMessage()).isEqualTo("your current password is incorrect");
+                });
+
+        assertThat(passwordEncoder.matches("OldPassword123!", hashOf("voluntary2@example.com"))).isTrue();
+    }
+
+    @Test
+    @DisplayName("voluntary change is refused when no current password is given at all")
+    void voluntaryChangeRefusesMissingCurrentPassword() {
+        accounts.insert(
+                "voluntary3@example.com", "Voluntary", AppRole.USER, null, AccountStatus.ACTIVE,
+                passwordEncoder.encode("OldPassword123!"), false);
+        CurrentUser caller = signInAndResolve("voluntary3@example.com", "OldPassword123!");
+
+        assertThatThrownBy(() -> sessions.changeOwnPassword(caller, null, "NewPassword456!"))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> assertThat(((ApiException) e).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+        assertThatThrownBy(() -> sessions.changeOwnPassword(caller, "   ", "NewPassword456!"))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> assertThat(((ApiException) e).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+    }
+
+    @Test
+    @DisplayName("the forced first-login completion skips the current-password check entirely")
+    void forcedFirstLoginSkipsTheCheck() {
+        accounts.insert(
+                "invited@example.com", "Invited", AppRole.USER, null, AccountStatus.ACTIVE,
+                passwordEncoder.encode("TempPassword123!"), true);
+        CurrentUser caller = signInAndResolve("invited@example.com", "TempPassword123!");
+        assertThat(caller.account().mustChangePassword()).isTrue();
+
+        // No current password offered at all -- exactly what /create-password sends.
+        sessions.changeOwnPassword(caller, null, "NewPassword456!");
+
+        assertThat(passwordEncoder.matches("NewPassword456!", hashOf("invited@example.com"))).isTrue();
+    }
+
+    @Test
+    @DisplayName("still refuses reusing the current password as the new one (ADR-020)")
+    void refusesReusingCurrentPassword() {
+        accounts.insert(
+                "reuse@example.com", "Reuse", AppRole.USER, null, AccountStatus.ACTIVE,
+                passwordEncoder.encode("SamePassword123!"), false);
+        CurrentUser caller = signInAndResolve("reuse@example.com", "SamePassword123!");
+
+        assertThatThrownBy(() ->
+                        sessions.changeOwnPassword(caller, "SamePassword123!", "SamePassword123!"))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> {
+                    assertThat(((ApiException) e).status()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(e.getMessage()).isEqualTo("choose a password different from your current one");
+                });
+    }
+
+    @Test
+    @DisplayName("still refuses a Google-only account with no password to verify against")
+    void refusesGoogleOnlyAccount() {
+        Account googleOnly = accounts.insert("google.only@example.com", "Google Only", AppRole.USER, null, AccountStatus.ACTIVE);
+        CurrentUser caller = new CurrentUser(googleOnly, Set.<Permission>of(), new byte[] {9, 9, 9});
+
+        assertThatThrownBy(() -> sessions.changeOwnPassword(caller, "whatever", "NewPassword456!"))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> {
+                    assertThat(((ApiException) e).status()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(e.getMessage()).isEqualTo("this account has no password set; sign in with Google instead");
+                });
+    }
+
+    @Test
+    @DisplayName("revokes every other live session but keeps the caller's own (FR-AUTH-007)")
+    void revokesOtherSessionsButNotItsOwn() {
+        accounts.insert(
+                "multisession@example.com", "Multi Session", AppRole.USER, null, AccountStatus.ACTIVE,
+                passwordEncoder.encode("OldPassword123!"), false);
+
+        SessionService.IssuedSession first =
+                sessions.signInWithPassword("multisession@example.com", "OldPassword123!", "agent-1", "127.0.0.1");
+        SessionService.IssuedSession second =
+                sessions.signInWithPassword("multisession@example.com", "OldPassword123!", "agent-2", "127.0.0.2");
+        CurrentUser caller = sessions.resolve(first.token()).orElseThrow();
+
+        sessions.changeOwnPassword(caller, "OldPassword123!", "NewPassword456!");
+
+        assertThat(sessions.resolve(first.token())).isPresent();
+        assertThat(sessions.resolve(second.token())).isEmpty();
+    }
+}
