@@ -38,8 +38,12 @@ class NotificationServiceTest {
     private final AccountRepository accounts = mock(AccountRepository.class);
     private final DeviceTokenRepository devices = mock(DeviceTokenRepository.class);
     private final PushSender push = mock(PushSender.class);
+    // Real, not a mock: it holds a map of open connections and nothing else, so
+    // a mock would only test that a mock was called. With no tab connected,
+    // publish is a no-op, which is exactly the state these cases are in.
+    private final NotificationStream stream = new NotificationStream();
 
-    private final NotificationService service = new NotificationService(accounts, devices, push);
+    private final NotificationService service = new NotificationService(accounts, devices, push, stream);
 
     private static Account approver(String email) {
         return new Account(
