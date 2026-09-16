@@ -198,6 +198,27 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/notifications/stream")
                         .hasRole(AppRole.USER.name())
 
+                        // The topbar's activity feed. Read-only, and a `user`
+                        // floor rather than anything higher because every role
+                        // is entitled to their own history.
+                        //
+                        // This does NOT widen who can see account identities.
+                        // NotificationFeedService selects another account's rows
+                        // only for a super_admin; for every other role the query
+                        // filters on their own actor_id, so there is no other
+                        // person's email in the response to leak (NFR-SEC-PII).
+                        // That scope decision lives in the service because it is
+                        // a row filter, which a URL pattern cannot express — the
+                        // one place in this chain where that is true, and the
+                        // reason this comment exists.
+                        //
+                        // GET only, and exact-path: POST /api/v1/admin/
+                        // notifications/digest sends real mail and keeps its own
+                        // super_admin rule further down. Nothing here touches it.
+                        // // req: FR-OPS-001, FR-AUTH-008, NFR-SEC-PII
+                        .requestMatchers(HttpMethod.GET, "/api/v1/notifications")
+                        .hasRole(AppRole.USER.name())
+
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
                         // Liveness only. Carries no version, no configuration and
                         // no dependency status, so it discloses nothing.
@@ -226,6 +247,23 @@ public class SecurityConfig {
                         .hasRole(AppRole.SUPER_ADMIN.name())
 
                         .requestMatchers("/api/v1/admin/accounts/**")
+                        .hasRole(AppRole.SUPER_ADMIN.name())
+
+                        // Sending a content-activity digest on demand. Above the
+                        // admin floor deliberately, and stated here rather than
+                        // left to the /admin/** line below, which would have
+                        // admitted any admin by default:
+                        //
+                        //   - the mail carries page titles and the names of the
+                        //     people who edited them, so this is the same
+                        //     personal-data boundary as the accounts prefix
+                        //     (NFR-SEC-PII);
+                        //   - it puts mail in other people's inboxes, which is
+                        //     not editorial work — an admin publishes content
+                        //     (FR-AUTH-008).
+                        //
+                        // // req: FR-AUTH-008, NFR-SEC-PII, FR-OPS-001
+                        .requestMatchers("/api/v1/admin/notifications/**")
                         .hasRole(AppRole.SUPER_ADMIN.name())
 
                         // --- editorial writes and admin reads ----------------

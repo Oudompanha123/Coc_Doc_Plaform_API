@@ -85,6 +85,34 @@ public class AuditRepository {
                 .list();
     }
 
+    /**
+     * The most recent entries this one account was the actor of.
+     *
+     * <p>The counterpart to {@link #recent(int)}, which is unscoped: this is
+     * what a caller who may only see their own history gets. The filter is on
+     * {@code actor_id}, not {@code actor_email} — an email can be reassigned to
+     * a new account, and a feed that followed the address rather than the
+     * account would show one person another person's history.
+     *
+     * <p>Rows whose {@code actor_id} is null (system-initiated, or an account
+     * since deleted) belong to nobody and so are returned to nobody here.
+     *
+     * <p>// req: FR-OPS-001, NFR-SEC-PII
+     */
+    public List<AuditEntry> recentForActor(UUID actorId, int limit) {
+        return jdbc.sql("""
+                        select id, actor_id, actor_email, action, target_type, target_id,
+                               detail::text as detail, occurred_at
+                        from audit_log
+                        where actor_id = ?
+                        order by occurred_at desc, id desc
+                        limit ?
+                        """)
+                .params(actorId, limit)
+                .query(this::map)
+                .list();
+    }
+
     public List<AuditEntry> forTarget(String targetType, UUID targetId, int limit) {
         return jdbc.sql("""
                         select id, actor_id, actor_email, action, target_type, target_id,

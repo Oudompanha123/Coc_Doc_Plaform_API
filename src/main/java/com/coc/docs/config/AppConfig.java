@@ -1,5 +1,6 @@
 package com.coc.docs.config;
 
+import com.coc.docs.notify.NotificationProperties;
 import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -20,7 +21,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 // this, @Async on RegistrationNotifier is silently ignored and a slow FCM
 // holds up the response to somebody who has just registered.
 @EnableAsync
-@EnableConfigurationProperties(AppProperties.class)
+@EnableConfigurationProperties({AppProperties.class, NotificationProperties.class})
 public class AppConfig {
 
     /**

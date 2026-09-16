@@ -82,6 +82,11 @@ class SecurityRulesTest {
     // NavController/AdminNavController are in this slice too, same reasoning.
     @MockitoBean NavService navService;
 
+    // AdminNotificationController needs it to construct. Mocked for the same
+    // reason as the rest: this test is about who may reach the route, not about
+    // what the digest does — that is ActivityDigestServiceTest's job.
+    @MockitoBean com.coc.docs.notify.ActivityDigestService activityDigestService;
+
     // AuthController needs it to construct (ADR-018); mocked for the same
     // reason as sessionService above — this test is about which routes the
     // filter chain admits, not what password reset actually does.
@@ -106,6 +111,12 @@ class SecurityRulesTest {
     // (ADR-025). Mocked rather than real: this test is about which routes the
     // filter chain admits, not about what registering a device does.
     @MockitoBean com.coc.docs.notify.DeviceTokenRepository deviceTokenRepository;
+
+    // Same reason as above: NotificationFeedController is in this slice. What
+    // the feed contains is NotificationFeedServiceTest's job; what this test
+    // cares about is that GET /api/v1/notifications is admitted at the `user`
+    // floor while POST /api/v1/admin/notifications/digest stays super_admin.
+    @MockitoBean com.coc.docs.notify.NotificationFeedService notificationFeedService;
 
     @TestConfiguration
     static class Beans {
@@ -363,8 +374,9 @@ class SecurityRulesTest {
         @Test
         void refuses_an_admin() throws Exception {
             // FR-AUTH-008 in one assertion: an admin publishes content, and
-            // granting roles is a different kind of authority. This is the one
-            // route inside /admin/** that an admin cannot reach.
+            // granting roles is a different kind of authority. One of the few
+            // routes inside /admin/** that an admin cannot reach — see also
+            // /admin/roles/** and /admin/notifications/**.
             mvc.perform(get("/api/v1/admin/accounts").with(as(AppRole.ADMIN)))
                     .andExpect(status().isForbidden());
         }
@@ -384,6 +396,46 @@ class SecurityRulesTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"role\":\"super_admin\"}"))
                     .andExpect(status().isForbidden());
+        }
+    }
+
+    @Nested
+    @DisplayName("notifications")
+    class Notifications {
+
+        @Test
+        void refuses_an_admin() throws Exception {
+            // Above the admin floor deliberately: the mail this sends carries
+            // page titles and the names of the people who edited them, and it
+            // puts mail in other people's inboxes. Neither is editorial work.
+            // // req: FR-AUTH-008, NFR-SEC-PII
+            mvc.perform(post("/api/v1/admin/notifications/digest").with(as(AppRole.ADMIN)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void refuses_a_plain_user() throws Exception {
+            mvc.perform(post("/api/v1/admin/notifications/digest").with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(post("/api/v1/admin/notifications/digest")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void admits_a_super_admin() throws Exception {
+            java.time.LocalDate day = java.time.LocalDate.of(2026, 9, 14);
+            org.mockito.Mockito.when(activityDigestService.yesterday()).thenReturn(day);
+            org.mockito.Mockito.when(activityDigestService.sendDigestFor(
+                            org.mockito.ArgumentMatchers.eq(day),
+                            org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(new com.coc.docs.notify.ActivityDigestService.DigestResult(
+                            day, com.coc.docs.notify.ActivityDigestService.Outcome.SENT, 3, 2, 4));
+
+            mvc.perform(post("/api/v1/admin/notifications/digest").with(as(AppRole.SUPER_ADMIN)))
+                    .andExpect(status().isOk());
         }
     }
 
