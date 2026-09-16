@@ -3,6 +3,7 @@ package com.coc.docs.web;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.coc.docs.account.AccountService;
@@ -14,6 +15,9 @@ import com.coc.docs.config.AppProperties;
 import com.coc.docs.config.ProblemResponses;
 import com.coc.docs.config.SecurityConfig;
 import com.coc.docs.content.BlockBodyValidator;
+import com.coc.docs.docscontent.DocsContentService;
+import com.coc.docs.nav.NavProduct;
+import com.coc.docs.nav.NavService;
 import com.coc.docs.page.PageService;
 import java.time.Duration;
 import java.util.List;
@@ -24,6 +28,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -66,6 +72,15 @@ class SecurityRulesTest {
     @MockitoBean AccountService accountService;
     @MockitoBean SessionService sessionService;
     @MockitoBean BlockBodyValidator validator;
+
+    // DocsContentController/AdminDocsContentController are in this slice, so
+    // their dependency has to be too (same reasoning as deviceTokenRepository
+    // below) — this test is about which routes the filter chain admits, not
+    // about what the docs-content store actually does.
+    @MockitoBean DocsContentService docsContentService;
+
+    // NavController/AdminNavController are in this slice too, same reasoning.
+    @MockitoBean NavService navService;
 
     // AuthController needs it to construct (ADR-018); mocked for the same
     // reason as sessionService above — this test is about which routes the
@@ -247,6 +262,80 @@ class SecurityRulesTest {
         @Test
         void admits_an_admin() throws Exception {
             mvc.perform(get("/api/v1/admin/translation-status").with(as(AppRole.ADMIN)))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    @Nested
+    @DisplayName("docs content")
+    class DocsContentPath {
+
+        @Test
+        void the_read_side_is_reachable_without_a_session() throws Exception {
+            // /docs/** and the product pages carry no auth gate on the
+            // frontend and are meant to be public — a deliberate exception
+            // to the reader path's `user` floor above, not an oversight of
+            // it. 404 because nothing is mocked to exist for this slug; the
+            // point is that the route was reached rather than refused at
+            // the security layer, same reasoning as the Public tests above.
+            mvc.perform(get("/api/v1/docs-content/jex3-0/overview"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void the_write_side_refuses_a_user() throws Exception {
+            mvc.perform(put("/api/v1/admin/docs-content/jex3-0/overview")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void the_write_side_admits_an_admin() throws Exception {
+            mvc.perform(put("/api/v1/admin/docs-content/jex3-0/overview")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    @Nested
+    @DisplayName("nav structure")
+    class NavStructurePath {
+
+        @Test
+        void the_read_side_is_reachable_without_a_session() throws Exception {
+            // Same reasoning as DocsContentPath above: the sidebar/docs pages
+            // this drives are public, so this is a deliberate exception to
+            // the reader path's `user` floor.
+            mvc.perform(get("/api/v1/nav")).andExpect(status().isOk());
+        }
+
+        @Test
+        void the_write_side_refuses_a_user() throws Exception {
+            mvc.perform(post("/api/v1/admin/nav/products")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"key\":\"x\",\"label\":\"X\",\"icon\":\"layers\"}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void the_write_side_admits_an_admin() throws Exception {
+            // Stubbed to return a real record, not Mockito's null default —
+            // the controller maps the result through ApiDtos.NavProductResponse.of,
+            // which would NPE on a null product before the response status
+            // (what this test actually checks) is ever decided.
+            Mockito.when(navService.createProduct(
+                            ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any()))
+                    .thenReturn(new NavProduct("x", "X", "layers", 1, List.of()));
+
+            mvc.perform(post("/api/v1/admin/nav/products")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"key\":\"x\",\"label\":\"X\",\"icon\":\"layers\"}"))
                     .andExpect(status().isOk());
         }
     }

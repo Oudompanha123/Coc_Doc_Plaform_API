@@ -442,4 +442,40 @@ public final class ApiDtos {
 
     public record CreateAccountRequest(
             @NotBlank @Email String email, @NotBlank String role) {}
+
+    // -----------------------------------------------------------------------
+    // Nav structure
+    // -----------------------------------------------------------------------
+
+    /** One sidebar/docs product, with its ordered sub-items. */
+    public record NavProductResponse(String key, String label, String icon, List<NavItemResponse> items) {
+
+        public static NavProductResponse of(com.coc.docs.nav.NavProduct product) {
+            return new NavProductResponse(
+                    product.key(),
+                    product.label(),
+                    product.icon(),
+                    product.items().stream().map(NavItemResponse::of).toList());
+        }
+    }
+
+    /** One sub-item under a product. */
+    public record NavItemResponse(String slug, String label) {
+
+        public static NavItemResponse of(com.coc.docs.nav.NavItem item) {
+            return new NavItemResponse(item.slug(), item.label());
+        }
+    }
+
+    public record CreateNavProductRequest(@NotBlank String key, @NotBlank String label, @NotBlank String icon) {}
+
+    public record UpdateNavProductRequest(@NotBlank String label, @NotBlank String icon) {}
+
+    public record ReorderProductsRequest(@NotNull List<String> keys) {}
+
+    public record CreateNavItemRequest(@NotNull String slug, @NotBlank String label) {}
+
+    public record UpdateNavItemRequest(@NotBlank String label) {}
+
+    public record ReorderItemsRequest(@NotNull List<String> slugs) {}
 }
