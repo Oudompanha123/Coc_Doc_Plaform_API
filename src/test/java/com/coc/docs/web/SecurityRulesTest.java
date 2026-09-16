@@ -1,6 +1,7 @@
 package com.coc.docs.web;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -298,6 +299,31 @@ class SecurityRulesTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{}"))
                     .andExpect(status().isOk());
+        }
+    }
+
+    @Nested
+    @DisplayName("content images")
+    class ContentImagesPath {
+
+        @Test
+        void refuses_a_user() throws Exception {
+            mvc.perform(multipart("/api/v1/admin/content-images")
+                            .file("file", new byte[0])
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void admits_an_admin() throws Exception {
+            // 400, not 403: no ContentImageStorage bean exists in this slice
+            // (no object-storage credentials configured for the test), so
+            // the request reaches the controller and is refused for that
+            // business reason, not blocked at the security layer.
+            mvc.perform(multipart("/api/v1/admin/content-images")
+                            .file("file", new byte[0])
+                            .with(as(AppRole.ADMIN)))
+                    .andExpect(status().isBadRequest());
         }
     }
 
