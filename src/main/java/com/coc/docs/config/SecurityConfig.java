@@ -146,6 +146,15 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/notifications/devices/**")
                         .hasRole(AppRole.USER.name())
 
+                        // The live notification stream, same rule and same
+                        // reason: it carries only this account's own events,
+                        // resolved from the session, so there is nothing here
+                        // to point at anybody else. A long-lived response
+                        // rather than a request, but the authorisation question
+                        // is asked once, at the same place, before it opens.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/notifications/stream")
+                        .hasRole(AppRole.USER.name())
+
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
                         // Liveness only. Carries no version, no configuration and
                         // no dependency status, so it discloses nothing.

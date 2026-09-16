@@ -136,6 +136,18 @@ class SecurityRulesTest {
         SessionAuthenticationFilter sessionAuthenticationFilter(SessionService sessions) {
             return new SessionAuthenticationFilter(sessions);
         }
+
+        /**
+         * Real, because it is a map of open connections and nothing else.
+         *
+         * <p>Present only so that {@code NotificationStreamController} can be
+         * built — this class is about which roles reach which paths, and the
+         * stream endpoint is one of those paths.
+         */
+        @Bean
+        com.coc.docs.notify.NotificationStream notificationStream() {
+            return new com.coc.docs.notify.NotificationStream();
+        }
     }
 
     /**
