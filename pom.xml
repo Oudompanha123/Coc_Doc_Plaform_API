@@ -102,7 +102,7 @@
       <artifactId>spring-boot-starter-mail</artifactId>
     </dependency>
 
-    <!-- Push notifications (ADR-024). Optional at runtime: FirebaseConfig only
+    <!-- Push notifications (ADR-025). Optional at runtime: FirebaseConfig only
          creates a FirebaseMessaging when app.firebase.credentials is set, and
          PushSender takes it through an ObjectProvider, so a developer without
          a service account gets a log line instead of a broken application. -->
@@ -168,7 +168,7 @@
     </dependency>
 
     <!-- Object storage behind the S3 API (CONST-TECH-08): self-uploaded
-         profile photos (ADR-025). Path-style requests only
+         profile photos (ADR-026). Path-style requests only
          (AvatarStorageConfig), the one addressing scheme every S3-compatible
          provider is guaranteed to support. -->
     <dependency>
