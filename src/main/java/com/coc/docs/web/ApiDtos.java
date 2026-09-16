@@ -75,6 +75,16 @@ public final class ApiDtos {
             String ipAddress,
             Instant issuedAt,
             Instant expiresAt,
+            /**
+             * The browser and platform, as the server reads them —
+             * "Chrome on Windows". Sent rather than left to the client so that
+             * the list, the push banner and the audit entry all describe a
+             * device the same way; they did not, when the frontend parsed the
+             * user agent itself.
+             */
+            String device,
+            /** Whether this session was the first from a device like it (ADR-027). */
+            boolean newDevice,
             boolean current) {
 
         public static SessionResponse of(com.coc.docs.auth.SessionService.OwnSession session) {
@@ -84,6 +94,8 @@ public final class ApiDtos {
                     session.ipAddress(),
                     session.issuedAt(),
                     session.expiresAt(),
+                    session.device(),
+                    session.newDevice(),
                     session.current());
         }
     }
