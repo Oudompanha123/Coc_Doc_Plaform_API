@@ -82,6 +82,10 @@ class ActivityDigestServiceTest {
                 null,
                 Instant.now(),
                 Instant.now(),
+                false,
+                // hasPassword — the twelfth component, added with ADR-031.
+                // This caller is a fixture for the digest; it holds no
+                // password and does not need one.
                 false);
         return new CurrentUser(account, Set.of(), new byte[] {1});
     }
