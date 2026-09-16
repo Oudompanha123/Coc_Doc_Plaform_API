@@ -1,5 +1,6 @@
 package com.coc.docs.notify;
 
+import jakarta.annotation.PreDestroy;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -157,6 +158,28 @@ public class NotificationStream {
         // tab can open between the two, and removing the queue it was just
         // added to would leave that connection registered nowhere and silent.
         connections.computeIfPresent(accountId, (id, queue) -> queue.isEmpty() ? null : queue);
+    }
+
+    /**
+     * Ends every open connection.
+     *
+     * <p>Called on shutdown so that each browser sees its stream close and
+     * reconnects, rather than holding a socket to a process that has gone and
+     * waiting out the thirty-minute timeout to find out. A rolling restart is
+     * the ordinary case for this.
+     */
+    @PreDestroy
+    public void completeAll() {
+        connections.values().forEach(open -> {
+            for (SseEmitter emitter : List.copyOf(open)) {
+                try {
+                    emitter.complete();
+                } catch (RuntimeException e) {
+                    // Already gone. Nothing here is worth failing a shutdown.
+                }
+            }
+        });
+        connections.clear();
     }
 
     /** Open connections, for tests and for a health check that may want it later. */

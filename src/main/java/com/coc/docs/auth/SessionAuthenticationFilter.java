@@ -52,6 +52,40 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
         chain.doFilter(request, response);
     }
 
+    /**
+     * Also run on the ASYNC dispatch, which {@link OncePerRequestFilter} skips
+     * by default.
+     *
+     * <p>Without this, a response that goes asynchronous — the notification
+     * stream (ADR-028), or anything returning an {@code SseEmitter} — is
+     * authenticated on the way in and anonymous on the way back:
+     *
+     * <pre>
+     * Securing GET /api/v1/notifications/stream
+     * ERROR ... Servlet.service() for servlet [dispatcherServlet] threw exception
+     * org.springframework.security.authorization.AuthorizationDeniedException: Access Denied
+     * </pre>
+     *
+     * <p>The container dispatches the request a second time to finish the async
+     * response. Spring Security's {@code AuthorizationFilter} runs on that
+     * dispatch — it filters every dispatcher type by default, and that default
+     * is the safe one, worth keeping. This filter did not, so the second pass
+     * had an empty {@link SecurityContext} and the route was denied to a caller
+     * who had just been let in. The error escapes to the servlet rather than
+     * becoming a 401 because the response was already committed, which is what
+     * makes the log read like a crash instead of a refusal.
+     *
+     * <p>Nothing is weakened by running again: the cookie is re-read and
+     * re-resolved against the account row, so an account deactivated between
+     * the two dispatches is not authenticated on the second. The alternative —
+     * turning off authorization for async dispatches — would have made the
+     * route work by not checking it.
+     */
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return false;
+    }
+
     private static void authenticate(CurrentUser user) {
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(new SessionAuthentication(user));
