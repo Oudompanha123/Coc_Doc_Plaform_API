@@ -36,25 +36,88 @@ public class SessionRepository {
                 revoked == null ? null : revoked.toInstant());
     }
 
-    public void insert(
+    /**
+     * Writes a session and returns its public id.
+     *
+     * <p>The id is read back from the insert rather than generated here,
+     * because the column's default is the one that has to be authoritative —
+     * two sources for the same identifier is how they come to differ.
+     *
+     * @param newDevice whether this sign-in was from a device the account has
+     *     not used before. Passed in rather than worked out here: it is a
+     *     statement about the rows that existed a moment ago, and once this row
+     *     is written the answer is no longer recoverable.
+     */
+    public UUID insert(
             byte[] tokenHash,
             UUID accountId,
             Instant expiresAt,
             String userAgent,
-            String ipAddress) {
+            String ipAddress,
+            boolean newDevice) {
 
-        jdbc.sql("""
+        return jdbc.sql("""
                         insert into app_session
-                          (token_hash, account_id, expires_at, user_agent, ip_address)
-                        values (?, ?, ?, ?, ?::inet)
+                          (token_hash, account_id, expires_at, user_agent, ip_address,
+                           device_key, new_device)
+                        values (?, ?, ?, ?, ?::inet, ?, ?)
+                        returning id
                         """)
                 .params(
                         tokenHash,
                         accountId,
                         OffsetDateTime.ofInstant(expiresAt, java.time.ZoneOffset.UTC),
                         userAgent,
-                        ipAddress)
-                .update();
+                        ipAddress,
+                        // Derived here, never supplied, so the key and the user
+                        // agent it describes cannot disagree.
+                        DeviceDescription.key(userAgent),
+                        newDevice)
+                .query(UUID.class)
+                .single();
+    }
+
+    /** A session that is not being examined for device recognition. */
+    public UUID insert(
+            byte[] tokenHash, UUID accountId, Instant expiresAt, String userAgent, String ipAddress) {
+        return insert(tokenHash, accountId, expiresAt, userAgent, ipAddress, false);
+    }
+
+    /**
+     * Whether this account has signed in from this device before.
+     *
+     * <p>Revoked and expired sessions count. The question is "have you used
+     * this browser", not "are you using it now" — a laptop you signed out of
+     * last week is still a device you recognise, and treating it as new would
+     * make the alert fire on the ordinary act of signing back in.
+     */
+    public boolean hasDevice(UUID accountId, String deviceKey) {
+        Boolean found = jdbc.sql(
+                        "select exists(select 1 from app_session where account_id = ? and device_key = ?)")
+                .params(accountId, deviceKey)
+                .query(Boolean.class)
+                .single();
+        return Boolean.TRUE.equals(found);
+    }
+
+    /**
+     * Whether this account has any session at all that this system has a device
+     * key for.
+     *
+     * <p>Separates "a device I do not recognise" from "I have not been keeping
+     * track yet". Every row written before V16 has a null key, so immediately
+     * after that migration an account's every device is unrecognised — and
+     * announcing all of them would be a false alarm on the machine the person
+     * is sitting at. False here means seed quietly; only once there is
+     * something to compare against does a mismatch mean anything.
+     */
+    public boolean hasAnyKnownDevice(UUID accountId) {
+        Boolean found = jdbc.sql(
+                        "select exists(select 1 from app_session where account_id = ? and device_key is not null)")
+                .params(accountId)
+                .query(Boolean.class)
+                .single();
+        return Boolean.TRUE.equals(found);
     }
 
     /**
@@ -186,9 +249,16 @@ public class SessionRepository {
                 .optional();
     }
 
+
     /** One of the caller's own sessions, as the Security screen shows it. */
     public record SessionSummary(
-            UUID id, String userAgent, String ipAddress, Instant issuedAt, Instant expiresAt, byte[] tokenHash) {}
+            UUID id,
+            String userAgent,
+            String ipAddress,
+            Instant issuedAt,
+            Instant expiresAt,
+            boolean newDevice,
+            byte[] tokenHash) {}
 
     /**
      * The caller's own live sessions, newest first.
@@ -206,7 +276,8 @@ public class SessionRepository {
      */
     public List<SessionSummary> findLiveForAccount(UUID accountId, Instant now) {
         return jdbc.sql("""
-                        select id, user_agent, host(ip_address) as ip_address, issued_at, expires_at, token_hash
+                        select id, user_agent, host(ip_address) as ip_address, issued_at, expires_at,
+                               new_device, token_hash
                         from app_session
                         where account_id = ?
                           and revoked_at is null
@@ -220,6 +291,7 @@ public class SessionRepository {
                         rs.getString("ip_address"),
                         rs.getObject("issued_at", OffsetDateTime.class).toInstant(),
                         rs.getObject("expires_at", OffsetDateTime.class).toInstant(),
+                        rs.getBoolean("new_device"),
                         rs.getBytes("token_hash")))
                 .list();
     }

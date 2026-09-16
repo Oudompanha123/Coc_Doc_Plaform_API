@@ -29,11 +29,22 @@ public class NotificationService {
     private final DeviceTokenRepository devices;
     private final PushSender push;
 
+    /**
+     * The open browser connections. Sent to before the push, because it is the
+     * transport that always exists: Firebase is optional and mostly absent,
+     * this is an HTTP response.
+     */
+    private final NotificationStream stream;
+
     public NotificationService(
-            AccountRepository accounts, DeviceTokenRepository devices, PushSender push) {
+            AccountRepository accounts,
+            DeviceTokenRepository devices,
+            PushSender push,
+            NotificationStream stream) {
         this.accounts = accounts;
         this.devices = devices;
         this.push = push;
+        this.stream = stream;
     }
 
     /**
@@ -61,6 +72,12 @@ public class NotificationService {
             return;
         }
 
+        // Before the push, and before the early return below. A tab that is
+        // open is updated whether or not anybody has ever granted notification
+        // permission — which for most of this team is the only thing that
+        // happens at all.
+        recipients.forEach(id -> stream.publish(id, type));
+
         List<String> tokens =
                 devices.findByAccountIds(recipients).stream().map(DeviceToken::token).toList();
         if (tokens.isEmpty()) {
@@ -71,6 +88,48 @@ public class NotificationService {
         }
 
         List<String> dead = push.send(tokens, type, target);
+        if (!dead.isEmpty()) {
+            devices.deleteAll(dead);
+        }
+    }
+
+    /**
+     * Notifies one account about something that happened to it.
+     *
+     * <p>The counterpart to {@link #notifyApprovers}: there the recipients are
+     * whoever holds a role, here the recipient is the subject. A new-device
+     * sign-in is nobody else's business — not an administrator's either, which
+     * is why this does not quietly widen to super admins the way an
+     * "interesting security event" notification tends to.
+     *
+     * <p>Every one of the account's registered devices is sent to, including —
+     * unavoidably — the one that just signed in, because a device token and a
+     * session are not the same thing and cannot be matched up. Being asked
+     * "was this you?" on the device you are holding is a poor banner and a
+     * harmless one; failing to ask the other five would be the real fault.
+     *
+     * <p>// req: FR-AUTH-007, ADR-025, ADR-027
+     */
+    @Transactional
+    public void notifyAccount(
+            UUID accountId, NotificationType type, NotificationTarget target, String body) {
+        // Before the push, and before the early return below: an open tab is
+        // updated whether or not this person has ever granted notification
+        // permission, which for most of this team is the only thing that
+        // happens at all.
+        stream.publish(accountId, type);
+
+        List<String> tokens = devices.findByAccountIds(Set.of(accountId)).stream()
+                .map(DeviceToken::token)
+                .toList();
+        if (tokens.isEmpty()) {
+            // Normal: this person has not granted notification permission on
+            // any device. The alert is still in the bell and in the audit log.
+            log.debug("no registered devices for account {} ({})", accountId, type.key());
+            return;
+        }
+
+        List<String> dead = push.send(tokens, type, target, body);
         if (!dead.isEmpty()) {
             devices.deleteAll(dead);
         }
