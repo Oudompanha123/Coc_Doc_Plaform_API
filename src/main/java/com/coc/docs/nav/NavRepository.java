@@ -27,12 +27,16 @@ public class NavRepository {
 
     /** The full tree, products and their items both in sort order. */
     public List<NavProduct> findAllWithItems() {
-        record ProductRow(String key, String label, String icon, int sortOrder) {}
+        record ProductRow(String key, String label, String icon, int sortOrder, String minRole) {}
 
         List<ProductRow> products = jdbc.sql(
-                        "select key, label, icon, sort_order from nav_product order by sort_order")
+                        "select key, label, icon, sort_order, min_role from nav_product order by sort_order")
                 .query((rs, n) -> new ProductRow(
-                        rs.getString("key"), rs.getString("label"), rs.getString("icon"), rs.getInt("sort_order")))
+                        rs.getString("key"),
+                        rs.getString("label"),
+                        rs.getString("icon"),
+                        rs.getInt("sort_order"),
+                        rs.getString("min_role")))
                 .list();
 
         List<NavItem> items = jdbc.sql(
@@ -46,7 +50,12 @@ public class NavRepository {
 
         return products.stream()
                 .map(p -> new NavProduct(
-                        p.key(), p.label(), p.icon(), p.sortOrder(), itemsByProduct.getOrDefault(p.key(), List.of())))
+                        p.key(),
+                        p.label(),
+                        p.icon(),
+                        p.sortOrder(),
+                        p.minRole(),
+                        itemsByProduct.getOrDefault(p.key(), List.of())))
                 .toList();
     }
 

@@ -88,6 +88,12 @@ class SecurityRulesTest {
     // what the digest does — that is ActivityDigestServiceTest's job.
     @MockitoBean com.coc.docs.notify.ActivityDigestService activityDigestService;
 
+    // AdminAuditController is in this slice too, same reasoning.
+    @MockitoBean com.coc.docs.audit.AuditRepository auditRepository;
+
+    // AdminTaskController is in this slice too, same reasoning (ADR-033).
+    @MockitoBean com.coc.docs.tasks.TaskService taskService;
+
     // AuthController needs it to construct (ADR-018); mocked for the same
     // reason as sessionService above — this test is about which routes the
     // filter chain admits, not what password reset actually does.
@@ -382,8 +388,8 @@ class SecurityRulesTest {
             // which would NPE on a null product before the response status
             // (what this test actually checks) is ever decided.
             Mockito.when(navService.createProduct(
-                            ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any()))
-                    .thenReturn(new NavProduct("x", "X", "layers", 1, List.of()));
+                            ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any()))
+                    .thenReturn(new NavProduct("x", "X", "layers", 1, "user", List.of()));
 
             mvc.perform(post("/api/v1/admin/nav/products")
                             .with(as(AppRole.ADMIN))
@@ -461,6 +467,50 @@ class SecurityRulesTest {
                             day, com.coc.docs.notify.ActivityDigestService.Outcome.SENT, 3, 2, 4));
 
             mvc.perform(post("/api/v1/admin/notifications/digest").with(as(AppRole.SUPER_ADMIN)))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    @Nested
+    @DisplayName("audit trail")
+    class AuditTrail {
+
+        @Test
+        void refuses_an_admin() throws Exception {
+            // Same reasoning as AccountManagement above: every row names
+            // another account's email (NFR-SEC-PII), so this is the same
+            // class of exposure as /api/v1/admin/accounts/**, not an
+            // ordinary editorial read an admin can reach.
+            mvc.perform(get("/api/v1/admin/audit/recent").with(as(AppRole.ADMIN)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void admits_a_super_admin() throws Exception {
+            org.mockito.Mockito.when(auditRepository.recent(org.mockito.ArgumentMatchers.anyInt()))
+                    .thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/admin/audit/recent").with(as(AppRole.SUPER_ADMIN)))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    @Nested
+    @DisplayName("tasks")
+    class TasksPath {
+
+        @Test
+        void refuses_a_user() throws Exception {
+            mvc.perform(get("/api/v1/admin/tasks").with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void admits_an_admin() throws Exception {
+            org.mockito.Mockito.when(taskService.listOpen(org.mockito.ArgumentMatchers.anyInt()))
+                    .thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/admin/tasks").with(as(AppRole.ADMIN)))
                     .andExpect(status().isOk());
         }
     }

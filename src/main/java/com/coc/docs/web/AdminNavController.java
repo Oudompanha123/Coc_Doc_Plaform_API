@@ -1,10 +1,12 @@
 package com.coc.docs.web;
 
+import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.nav.NavItem;
 import com.coc.docs.nav.NavProduct;
 import com.coc.docs.nav.NavService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -37,8 +39,9 @@ public class AdminNavController {
     }
 
     @PostMapping("/products")
-    ApiDtos.NavProductResponse createProduct(@Valid @RequestBody ApiDtos.CreateNavProductRequest request) {
-        NavProduct product = nav.createProduct(request.key(), request.label(), request.icon());
+    ApiDtos.NavProductResponse createProduct(
+            @Valid @RequestBody ApiDtos.CreateNavProductRequest request, @AuthenticationPrincipal CurrentUser editor) {
+        NavProduct product = nav.createProduct(request.key(), request.label(), request.icon(), editor);
         return ApiDtos.NavProductResponse.of(product);
     }
 
@@ -50,8 +53,8 @@ public class AdminNavController {
     }
 
     @DeleteMapping("/products/{key}")
-    ResponseEntity<Void> deleteProduct(@PathVariable String key) {
-        nav.deleteProduct(key);
+    ResponseEntity<Void> deleteProduct(@PathVariable String key, @AuthenticationPrincipal CurrentUser editor) {
+        nav.deleteProduct(key, editor);
         return ResponseEntity.noContent().build();
     }
 
@@ -63,8 +66,10 @@ public class AdminNavController {
 
     @PostMapping("/products/{key}/items")
     ApiDtos.NavItemResponse createItem(
-            @PathVariable String key, @Valid @RequestBody ApiDtos.CreateNavItemRequest request) {
-        NavItem item = nav.createItem(key, request.slug(), request.label());
+            @PathVariable String key,
+            @Valid @RequestBody ApiDtos.CreateNavItemRequest request,
+            @AuthenticationPrincipal CurrentUser editor) {
+        NavItem item = nav.createItem(key, request.slug(), request.label(), editor);
         return ApiDtos.NavItemResponse.of(item);
     }
 
@@ -78,8 +83,9 @@ public class AdminNavController {
     }
 
     @DeleteMapping("/products/{key}/items/{slugSegment}")
-    ResponseEntity<Void> deleteItem(@PathVariable String key, @PathVariable String slugSegment) {
-        nav.deleteItem(key, segmentToSlug(slugSegment));
+    ResponseEntity<Void> deleteItem(
+            @PathVariable String key, @PathVariable String slugSegment, @AuthenticationPrincipal CurrentUser editor) {
+        nav.deleteItem(key, segmentToSlug(slugSegment), editor);
         return ResponseEntity.noContent().build();
     }
 

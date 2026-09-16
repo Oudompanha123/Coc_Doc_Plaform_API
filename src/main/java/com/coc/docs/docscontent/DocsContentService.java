@@ -1,8 +1,11 @@
 package com.coc.docs.docscontent;
 
+import com.coc.docs.audit.AuditAction;
+import com.coc.docs.audit.AuditRepository;
 import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.web.ApiException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.stereotype.Service;
@@ -24,9 +27,13 @@ public class DocsContentService {
     private static final Set<String> KNOWN_KINDS = Set.of("hero", "steps", "sections");
 
     private final DocsContentRepository repository;
+    private final AuditRepository audit;
+    private final ObjectMapper json;
 
-    public DocsContentService(DocsContentRepository repository) {
+    public DocsContentService(DocsContentRepository repository, AuditRepository audit, ObjectMapper json) {
         this.repository = repository;
+        this.audit = audit;
+        this.json = json;
     }
 
     public Optional<JsonNode> find(String productKey, String slug) {
@@ -39,6 +46,14 @@ public class DocsContentService {
             throw ApiException.badRequest(
                     "body.kind must be one of " + KNOWN_KINDS + ", got \"" + kind + "\"");
         }
-        return repository.upsert(productKey, slug, kind, body, editor.id());
+        JsonNode saved = repository.upsert(productKey, slug, kind, body, editor.id());
+        audit.append(
+                editor.id(),
+                editor.email(),
+                AuditAction.DOCS_CONTENT_SAVE,
+                AuditAction.TARGET_DOCS_CONTENT,
+                null,
+                json.createObjectNode().put("productKey", productKey).put("slug", slug).put("kind", kind));
+        return saved;
     }
 }

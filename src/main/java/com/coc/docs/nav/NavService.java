@@ -1,7 +1,11 @@
 package com.coc.docs.nav;
 
+import com.coc.docs.audit.AuditAction;
+import com.coc.docs.audit.AuditRepository;
+import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.docscontent.DocsContentRepository;
 import com.coc.docs.web.ApiException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -32,17 +36,25 @@ public class NavService {
 
     private final NavRepository repository;
     private final DocsContentRepository contentRepository;
+    private final AuditRepository audit;
+    private final ObjectMapper json;
 
-    public NavService(NavRepository repository, DocsContentRepository contentRepository) {
+    public NavService(
+            NavRepository repository,
+            DocsContentRepository contentRepository,
+            AuditRepository audit,
+            ObjectMapper json) {
         this.repository = repository;
         this.contentRepository = contentRepository;
+        this.audit = audit;
+        this.json = json;
     }
 
     public List<NavProduct> findAll() {
         return repository.findAllWithItems();
     }
 
-    public NavProduct createProduct(String key, String label, String icon) {
+    public NavProduct createProduct(String key, String label, String icon, CurrentUser editor) {
         validateKey(key, "product key");
         if (RESERVED_PRODUCT_KEYS.contains(key)) {
             throw ApiException.badRequest("\"" + key + "\" is already a route in this app and can't be used as a product key");
@@ -54,7 +66,14 @@ public class NavService {
         requireLabel(icon);
         int order = repository.nextProductOrder();
         repository.insertProduct(key, label, icon, order);
-        return new NavProduct(key, label, icon, order, List.of());
+        audit.append(
+                editor.id(),
+                editor.email(),
+                AuditAction.NAV_PRODUCT_CREATE,
+                AuditAction.TARGET_NAV_PRODUCT,
+                null,
+                json.createObjectNode().put("key", key).put("label", label));
+        return new NavProduct(key, label, icon, order, "user", List.of());
     }
 
     public void updateProduct(String key, String label, String icon) {
@@ -72,7 +91,7 @@ public class NavService {
      * content), so a product can never disappear out from under content
      * still reachable through it.
      */
-    public void deleteProduct(String key) {
+    public void deleteProduct(String key, CurrentUser editor) {
         if (!repository.productExists(key)) {
             throw ApiException.notFound("product " + key);
         }
@@ -82,6 +101,13 @@ public class NavService {
                     "\"" + key + "\" still has " + itemCount + " sub-item(s) — remove those first");
         }
         repository.deleteProduct(key);
+        audit.append(
+                editor.id(),
+                editor.email(),
+                AuditAction.NAV_PRODUCT_DELETE,
+                AuditAction.TARGET_NAV_PRODUCT,
+                null,
+                json.createObjectNode().put("key", key));
     }
 
     public void reorderProducts(List<String> orderedKeys) {
@@ -93,7 +119,7 @@ public class NavService {
         repository.reorderProducts(orderedKeys);
     }
 
-    public NavItem createItem(String productKey, String slug, String label) {
+    public NavItem createItem(String productKey, String slug, String label, CurrentUser editor) {
         if (!repository.productExists(productKey)) {
             throw ApiException.notFound("product " + productKey);
         }
@@ -106,6 +132,13 @@ public class NavService {
         requireLabel(label);
         int order = repository.nextItemOrder(productKey);
         repository.insertItem(productKey, slug, label, order);
+        audit.append(
+                editor.id(),
+                editor.email(),
+                AuditAction.NAV_ITEM_CREATE,
+                AuditAction.TARGET_NAV_ITEM,
+                null,
+                json.createObjectNode().put("productKey", productKey).put("slug", slug).put("label", label));
         return new NavItem(productKey, slug, label, order);
     }
 
@@ -118,7 +151,7 @@ public class NavService {
     }
 
     /** Refuses to delete a sub-item that still has a saved docs_content row. */
-    public void deleteItem(String productKey, String slug) {
+    public void deleteItem(String productKey, String slug, CurrentUser editor) {
         if (!repository.itemExists(productKey, slug)) {
             throw ApiException.notFound("item " + productKey + "/" + slug);
         }
@@ -127,6 +160,13 @@ public class NavService {
                     "\"" + productKey + "/" + slug + "\" still has saved content — delete that first");
         }
         repository.deleteItem(productKey, slug);
+        audit.append(
+                editor.id(),
+                editor.email(),
+                AuditAction.NAV_ITEM_DELETE,
+                AuditAction.TARGET_NAV_ITEM,
+                null,
+                json.createObjectNode().put("productKey", productKey).put("slug", slug));
     }
 
     public void reorderItems(String productKey, List<String> orderedSlugs) {

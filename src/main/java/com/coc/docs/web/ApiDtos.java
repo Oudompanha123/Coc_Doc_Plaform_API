@@ -472,13 +472,15 @@ public final class ApiDtos {
     // -----------------------------------------------------------------------
 
     /** One sidebar/docs product, with its ordered sub-items. */
-    public record NavProductResponse(String key, String label, String icon, List<NavItemResponse> items) {
+    public record NavProductResponse(
+            String key, String label, String icon, String minRole, List<NavItemResponse> items) {
 
         public static NavProductResponse of(com.coc.docs.nav.NavProduct product) {
             return new NavProductResponse(
                     product.key(),
                     product.label(),
                     product.icon(),
+                    product.minRole(),
                     product.items().stream().map(NavItemResponse::of).toList());
         }
     }
@@ -570,6 +572,36 @@ public final class ApiDtos {
 
         public static NotificationItem of(NotificationFeedService.FeedItem item) {
             return new NotificationItem(item.id(), item.actorEmail(), item.summary(), item.occurredAt());
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Audit / activity
+    // -----------------------------------------------------------------------
+
+    /** One audit entry, as the Overview "Recent Activity" panel sees it —
+     *  the actor's own id and the target's uuid are dropped: neither means
+     *  anything to that panel, and dropping them means one less field to
+     *  remember not to widen later. */
+    public record ActivityEntryResponse(
+            String actorEmail, String action, String targetType, JsonNode detail, Instant occurredAt) {
+
+        public static ActivityEntryResponse of(com.coc.docs.audit.AuditEntry entry) {
+            return new ActivityEntryResponse(
+                    entry.actorEmail(), entry.action(), entry.targetType(), entry.detail(), entry.occurredAt());
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Tasks (ADR-033)
+    // -----------------------------------------------------------------------
+
+    public record CreateTaskRequest(@NotBlank String title, java.time.LocalDate dueDate) {}
+
+    public record TaskResponse(UUID id, String title, java.time.LocalDate dueDate, String status, Instant createdAt) {
+
+        public static TaskResponse of(com.coc.docs.tasks.Task task) {
+            return new TaskResponse(task.id(), task.title(), task.dueDate(), task.status(), task.createdAt());
         }
     }
 }

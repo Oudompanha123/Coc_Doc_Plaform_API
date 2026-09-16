@@ -8,8 +8,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.coc.docs.account.AppRole;
+import com.coc.docs.audit.AuditRepository;
+import com.coc.docs.auth.CurrentUser;
+import com.coc.docs.auth.TestCallers;
 import com.coc.docs.docscontent.DocsContentRepository;
 import com.coc.docs.web.ApiException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.TextNode;
 import java.util.List;
 import java.util.Optional;
@@ -30,7 +35,10 @@ class NavServiceTest {
 
     private final NavRepository repository = mock(NavRepository.class);
     private final DocsContentRepository contentRepository = mock(DocsContentRepository.class);
-    private final NavService service = new NavService(repository, contentRepository);
+    private final AuditRepository audit = mock(AuditRepository.class);
+    private final NavService service = new NavService(repository, contentRepository, audit, new ObjectMapper());
+
+    private static final CurrentUser EDITOR = TestCallers.user(AppRole.ADMIN);
 
     @Test
     @DisplayName("refuses to delete a product that still has sub-items")
@@ -38,7 +46,7 @@ class NavServiceTest {
         when(repository.productExists("jex3-0")).thenReturn(true);
         when(repository.itemCountForProduct("jex3-0")).thenReturn(3);
 
-        assertThatThrownBy(() -> service.deleteProduct("jex3-0"))
+        assertThatThrownBy(() -> service.deleteProduct("jex3-0", EDITOR))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).status())
                 .isEqualTo(HttpStatus.CONFLICT);
@@ -52,7 +60,7 @@ class NavServiceTest {
         when(repository.productExists("jex3-0")).thenReturn(true);
         when(repository.itemCountForProduct("jex3-0")).thenReturn(0);
 
-        service.deleteProduct("jex3-0");
+        service.deleteProduct("jex3-0", EDITOR);
 
         verify(repository).deleteProduct("jex3-0");
     }
@@ -63,7 +71,7 @@ class NavServiceTest {
         when(repository.itemExists("jex3-0", "overview")).thenReturn(true);
         when(contentRepository.find("jex3-0", "overview")).thenReturn(Optional.of(TextNode.valueOf("x")));
 
-        assertThatThrownBy(() -> service.deleteItem("jex3-0", "overview"))
+        assertThatThrownBy(() -> service.deleteItem("jex3-0", "overview", EDITOR))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).status())
                 .isEqualTo(HttpStatus.CONFLICT);
@@ -77,7 +85,7 @@ class NavServiceTest {
         when(repository.itemExists("jex3-0", "prerequisites")).thenReturn(true);
         when(contentRepository.find("jex3-0", "prerequisites")).thenReturn(Optional.empty());
 
-        service.deleteItem("jex3-0", "prerequisites");
+        service.deleteItem("jex3-0", "prerequisites", EDITOR);
 
         verify(repository).deleteItem("jex3-0", "prerequisites");
     }
@@ -85,7 +93,7 @@ class NavServiceTest {
     @Test
     @DisplayName("refuses a product key that already names a static route")
     void refusesReservedKey() {
-        assertThatThrownBy(() -> service.createProduct("settings", "Settings", "layers"))
+        assertThatThrownBy(() -> service.createProduct("settings", "Settings", "layers", EDITOR))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).status())
                 .isEqualTo(HttpStatus.BAD_REQUEST);
@@ -96,7 +104,7 @@ class NavServiceTest {
     @Test
     @DisplayName("refuses a product key that is not kebab-case")
     void refusesMalformedKey() {
-        assertThatThrownBy(() -> service.createProduct("Not Valid!", "X", "layers"))
+        assertThatThrownBy(() -> service.createProduct("Not Valid!", "X", "layers", EDITOR))
                 .isInstanceOf(ApiException.class);
     }
 
@@ -105,7 +113,7 @@ class NavServiceTest {
     void refusesDuplicateKey() {
         when(repository.productExists("coach")).thenReturn(true);
 
-        assertThatThrownBy(() -> service.createProduct("coach", "Coach", "person"))
+        assertThatThrownBy(() -> service.createProduct("coach", "Coach", "person", EDITOR))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).status())
                 .isEqualTo(HttpStatus.BAD_REQUEST);
@@ -117,7 +125,7 @@ class NavServiceTest {
         when(repository.productExists("newthing")).thenReturn(false);
         when(repository.nextProductOrder()).thenReturn(6);
 
-        NavProduct created = service.createProduct("newthing", "New Thing", "layers");
+        NavProduct created = service.createProduct("newthing", "New Thing", "layers", EDITOR);
 
         assertThat(created.key()).isEqualTo("newthing");
         assertThat(created.sortOrder()).isEqualTo(6);
@@ -128,7 +136,7 @@ class NavServiceTest {
     @DisplayName("refuses a reorder whose key set does not match the current products")
     void refusesMismatchedReorder() {
         when(repository.findAllWithItems())
-                .thenReturn(List.of(new NavProduct("jex3-0", "Jex3.0", "layers", 1, List.of())));
+                .thenReturn(List.of(new NavProduct("jex3-0", "Jex3.0", "layers", 1, "user", List.of())));
 
         assertThatThrownBy(() -> service.reorderProducts(List.of("jex3-0", "made-up")))
                 .isInstanceOf(ApiException.class)

@@ -233,11 +233,13 @@ public class SecurityConfig {
                         // publishes content, and granting roles is a different
                         // kind of authority.
                         //
-                        // This is also the whole of NFR-SEC-PII's enforcement.
-                        // Every account's email and display name is reachable
-                        // through this prefix and nowhere else in the API, so
-                        // the personal-data boundary is this one line rather
-                        // than a property spread across response types.
+                        // This is also most of NFR-SEC-PII's enforcement. Every
+                        // account's email and display name is reachable
+                        // through this prefix (and, since AuditRepository's
+                        // reads went live, one other: the audit trail below,
+                        // gated at this same floor for the same reason), so
+                        // the personal-data boundary is these two lines
+                        // rather than a property spread across response types.
                         // // req: FR-AUTH-008, NFR-SEC-PII
                         // The role catalogue answers "what may an admin do",
                         // which is the same class of question as who holds a
@@ -264,6 +266,13 @@ public class SecurityConfig {
                         //
                         // // req: FR-AUTH-008, NFR-SEC-PII, FR-OPS-001
                         .requestMatchers("/api/v1/admin/notifications/**")
+                        .hasRole(AppRole.SUPER_ADMIN.name())
+
+                        // AuditRepository's own Javadoc requires this floor: every
+                        // row carries another account's actor_email, so a reader
+                        // over it is the same class of PII exposure as the
+                        // accounts endpoints above, not an ordinary editorial read.
+                        .requestMatchers("/api/v1/admin/audit/**")
                         .hasRole(AppRole.SUPER_ADMIN.name())
 
                         // --- editorial writes and admin reads ----------------

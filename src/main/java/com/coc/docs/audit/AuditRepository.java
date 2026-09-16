@@ -19,16 +19,16 @@ import org.springframework.stereotype.Repository;
  *
  * <p>Every row carries {@code actor_email}, denormalised so the trail stays
  * readable after an account is deactivated — which makes this table personal
- * data under NFR-SEC-PII. It satisfies that requirement today by being
- * unreachable: the read methods below exist, but no controller calls them, so
- * there is no route through which an audit row can leave the service.
+ * data under NFR-SEC-PII. {@code recent()} is now reachable, through {@code
+ * AdminAuditController} (Overview's "Recent Activity" panel) — gated at the
+ * {@code super_admin} floor in {@code SecurityConfig}, the same floor {@code
+ * /api/v1/admin/accounts/**} carries, for the same reason: both surface
+ * another account's identity, not the caller's own.
  *
- * <p>That is a property of the current wiring, not a guarantee. <b>A controller
- * added over these reads must sit behind the {@code super_admin} floor</b>
- * ({@code /api/v1/admin/accounts/**} in {@code SecurityConfig}), alongside the
- * other route that returns other people's identities. The default-deny terminal
- * rule makes forgetting safe rather than open, but it would place an audit route
- * at {@code super_admin} by accident rather than by decision.
+ * <p><b>Any further controller added over these reads must sit at that same
+ * {@code super_admin} floor.</b> The default-deny terminal rule makes
+ * forgetting safe rather than open, but it would place a new audit route at
+ * {@code super_admin} by accident rather than by decision.
  *
  * <p>// req: FR-OPS-001, NFR-OPS-AUDIT, NFR-SEC-PII, ADR-006
  */

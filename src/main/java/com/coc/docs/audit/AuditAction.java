@@ -76,6 +76,14 @@ public final class AuditAction {
      */
     public static final String NOTIFICATION_DIGEST_SEND = "notification.digest_send";
 
+    /** An admin saved a docs-content field (Hero/Steps/Sections) for a product's sub-item. */
+    public static final String DOCS_CONTENT_SAVE = "docs_content.save";
+
+    public static final String NAV_PRODUCT_CREATE = "nav.product_create";
+    public static final String NAV_PRODUCT_DELETE = "nav.product_delete";
+    public static final String NAV_ITEM_CREATE = "nav.item_create";
+    public static final String NAV_ITEM_DELETE = "nav.item_delete";
+
     /** Target types, for the {@code target_type} column. */
     public static final String TARGET_PAGE = "page";
 
@@ -85,4 +93,17 @@ public final class AuditAction {
 
     /** A notification the system sent; carries no target id, there is no row to point at. */
     public static final String TARGET_NOTIFICATION = "notification";
+
+    /**
+     * docs_content/nav_product/nav_item are keyed by (product key, slug) or a
+     * plain string key, not a uuid primary key — unlike page/account, there is
+     * no id to put in {@code target_id} for these, so it stays null and the
+     * identifying fields travel in {@code detail} instead (same reasoning as
+     * {@link #ACCOUNT_DELETE}: the trail has to name the target without a row
+     * left to join to).
+     */
+    public static final String TARGET_DOCS_CONTENT = "docs_content";
+
+    public static final String TARGET_NAV_PRODUCT = "nav_product";
+    public static final String TARGET_NAV_ITEM = "nav_item";
 }
