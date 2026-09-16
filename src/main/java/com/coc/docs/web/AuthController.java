@@ -115,6 +115,13 @@ public class AuthController {
     ResponseEntity<ApiDtos.MeResponse> signIn(
             @Valid @RequestBody ApiDtos.GoogleSignInRequest request, HttpServletRequest http) {
 
+        // Read before the new one is issued: the cookie this request carried
+        // names the session being replaced in this same browser, and leaving it
+        // live would grow the "active sessions" list by one on every sign-in
+        // and leave a working credential nobody holds (SessionService.
+        // revokeSuperseded).
+        sessions.revokeSuperseded(readCookie(http, SessionService.COOKIE_NAME));
+
         SessionService.IssuedSession issued = sessions.signIn(
                 request.idToken(),
                 readCookie(http, NonceService.COOKIE_NAME),
@@ -501,6 +508,10 @@ public class AuthController {
     @PostMapping("/login-password")
     ResponseEntity<ApiDtos.MeResponse> signInWithPassword(
             @Valid @RequestBody PasswordLoginRequest request, HttpServletRequest http) {
+
+        // Same as the Google path above: the incoming cookie names the session
+        // this sign-in supersedes.
+        sessions.revokeSuperseded(readCookie(http, SessionService.COOKIE_NAME));
 
         SessionService.IssuedSession issued = sessions.signInWithPassword(
                 request.email(),

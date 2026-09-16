@@ -391,6 +391,51 @@ public class SessionService {
                 json.createObjectNode());
     }
 
+    /**
+     * Ends the session a new sign-in is replacing, in the same browser.
+     *
+     * <p>Signing in again overwrites the session cookie, so the previous
+     * session becomes unreachable by the person who owned it — and stays valid
+     * on the server until its TTL runs out. Two costs: Settings shows a list of
+     * "active sessions" that grows by one every time somebody signs in on the
+     * same browser and never shrinks, and a token nobody holds any more is
+     * still a working credential for up to a day.
+     *
+     * <p>Driven by the cookie the sign-in request carried, not by matching the
+     * user agent. A user agent identifies a browser build, not a browser: two
+     * people on the same Chrome version share one, and revoking on that basis
+     * would sign somebody else out of their own machine. The cookie is the
+     * only thing that says "this exact session is being replaced", and it is
+     * present precisely when that is true.
+     *
+     * <p>Silent when the token names nothing — an expired session, a cookie
+     * from a rebuilt database, a first sign-in. None of those is an error.
+     *
+     * <p>// req: FR-AUTH-007, NFR-SEC-SESSION
+     */
+    @Transactional
+    public void revokeSuperseded(String previousToken) {
+        if (previousToken == null || previousToken.isBlank()) {
+            return;
+        }
+        byte[] tokenHash = hash(previousToken);
+        sessions
+                .find(tokenHash)
+                .ifPresent(session -> {
+                    if (sessions.revoke(tokenHash) > 0) {
+                        accounts
+                                .findById(session.accountId())
+                                .ifPresent(account -> audit.append(
+                                        account.id(),
+                                        account.email(),
+                                        AuditAction.AUTH_SIGN_OUT,
+                                        AuditAction.TARGET_SESSION,
+                                        account.id(),
+                                        json.createObjectNode().put("reason", "superseded")));
+                    }
+                });
+    }
+
     /** Ends every session for an account, used when it is demoted or deactivated. */
     @Transactional
     public int revokeAllFor(java.util.UUID accountId) {
