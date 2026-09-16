@@ -33,6 +33,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 public class SessionAuthenticationFilter extends OncePerRequestFilter {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(SessionAuthenticationFilter.class);
+
     private final SessionService sessions;
 
     public SessionAuthenticationFilter(SessionService sessions) {
@@ -45,9 +48,38 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
 
         if (SecurityContextHolder.getContext().getAuthentication() == null) {
-            readCookie(request)
-                    .flatMap(sessions::resolve)
-                    .ifPresent(SessionAuthenticationFilter::authenticate);
+            Optional<String> token = readCookie(request);
+            Optional<CurrentUser> caller = token.flatMap(sessions::resolve);
+            caller.ifPresent(SessionAuthenticationFilter::authenticate);
+
+            // Why these two lines exist: an Access Denied names nothing. It is
+            // the same message whether the cookie was absent, the session had
+            // expired, the account was deactivated, or the role is simply too
+            // low for the route — four different problems with four different
+            // answers, and a day was spent guessing between them on
+            // 2026-09-16. Debug level, so it costs nothing in normal running.
+            //
+            // The account id and role, never the email: this line is for
+            // finding out why a request was refused, not for recording who
+            // (NFR-SEC-PII). The audit trail is where identity belongs.
+            if (log.isDebugEnabled()) {
+                if (token.isEmpty()) {
+                    log.debug("no session cookie on {} {}", request.getMethod(), request.getRequestURI());
+                } else if (caller.isEmpty()) {
+                    log.debug(
+                            "session cookie on {} {} resolved to nothing — expired, revoked,"
+                                    + " or an account that is no longer active",
+                            request.getMethod(),
+                            request.getRequestURI());
+                } else {
+                    log.debug(
+                            "authenticated account {} as {} on {} {}",
+                            caller.get().account().id(),
+                            caller.get().account().role().wire(),
+                            request.getMethod(),
+                            request.getRequestURI());
+                }
+            }
         }
         chain.doFilter(request, response);
     }
