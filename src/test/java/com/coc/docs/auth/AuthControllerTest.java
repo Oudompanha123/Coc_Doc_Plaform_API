@@ -3,6 +3,7 @@ package com.coc.docs.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -84,6 +85,7 @@ class AuthControllerTest {
     @MockitoBean SessionService sessions;
     @MockitoBean PasswordResetService passwordResets;
     @MockitoBean RegistrationOtpService registrationOtp;
+    @MockitoBean TotpService totp;
 
     // Present so the context and the filter chain wire up; untouched here.
     @MockitoBean PageService pageService;
@@ -137,7 +139,7 @@ class AuthControllerTest {
      */
     @BeforeEach
     void resetSessionService() {
-        Mockito.reset(sessions, passwordResets, registrationOtp);
+        Mockito.reset(sessions, passwordResets, registrationOtp, totp);
     }
 
     private static RequestPostProcessor as(AppRole role) {
@@ -441,7 +443,8 @@ class AuthControllerTest {
                     null,
                     Instant.now(),
                     Instant.now(),
-                    false);
+                    false,
+                    true);
             when(registrationOtp.verify("new.person@example.com", "123456")).thenReturn(created);
 
             mvc.perform(post("/api/v1/auth/register/verify")
@@ -650,6 +653,12 @@ class AuthControllerTest {
         @Test
         @DisplayName("sets the new password and confirms")
         void resetsPassword() throws Exception {
+            // ADR-029: the controller now relays whichever message the
+            // service returns (it differs for a Google-only account's first
+            // password vs. a genuine reset) rather than hardcoding one.
+            when(passwordResets.resetPassword("good-token", "newHunter2222"))
+                    .thenReturn("Your password has been reset. You can now log in.");
+
             mvc.perform(post("/api/v1/auth/reset-password")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
@@ -660,6 +669,22 @@ class AuthControllerTest {
                             "Your password has been reset. You can now log in."));
 
             verify(passwordResets).resetPassword("good-token", "newHunter2222");
+        }
+
+        @Test
+        @DisplayName("relays the distinct message for a Google-only account's first password (ADR-029)")
+        void relaysInitialSetMessage() throws Exception {
+            when(passwordResets.resetPassword("google-only-token", "newHunter2222"))
+                    .thenReturn("Your password has been set. You can now log in with your email and password.");
+
+            mvc.perform(post("/api/v1/auth/reset-password")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"token":"google-only-token","newPassword":"newHunter2222"}
+                                    """))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.message").value(
+                            "Your password has been set. You can now log in with your email and password."));
         }
 
         @Test
@@ -693,13 +718,15 @@ class AuthControllerTest {
     }
 
     /**
-     * Two entry points, one route (ADR-022, revision of ADR-020/017): the
-     * first-login completion — the caller already holds a session issued on
-     * the temporary password — and the voluntary "My Profile &rarr; Change
-     * Password" self-service screen. {@code SessionService} is mocked, so
-     * these tests cover the HTTP/DTO layer and the message branch only; the
-     * real current-password rule lives in {@code
-     * ChangeOwnPasswordIntegrationTest}.
+     * Three callers, one route (ADR-022/ADR-024, revision of ADR-020/017;
+     * ADR-030 adds the third): the first-login completion — the caller
+     * already holds a session issued on the temporary password — the
+     * voluntary "My Profile &rarr; Change Password" self-service screen, and
+     * that same screen used by a Google-only account setting a password it
+     * never had. {@code SessionService} is mocked, so these tests cover the
+     * HTTP/DTO layer and the message branch only; the real current-password
+     * rule — including that the initial-set caller skips it entirely — lives
+     * in {@code ChangeOwnPasswordIntegrationTest}.
      */
     @Nested
     @DisplayName("POST /api/v1/auth/change-password")
@@ -738,8 +765,19 @@ class AuthControllerTest {
         }
 
         @Test
-        @DisplayName("forced first-login: rejects a missing temporary password without reaching the session layer (ADR-024)")
-        void rejectsMissingCurrentPasswordDuringForcedFirstLogin() throws Exception {
+        @DisplayName("forced first-login: a missing temporary password now reaches the session layer, which refuses it (ADR-030)")
+        void missingCurrentPasswordDuringForcedFirstLoginReachesTheSessionLayer() throws Exception {
+            // currentPassword is no longer @NotBlank at the DTO level (ADR-030)
+            // — a Google-only caller genuinely has none to send. So a missing
+            // value for THIS caller (who has a temporary password to prove) is
+            // no longer stopped at the boundary; SessionService.changeOwnPassword
+            // is what refuses it now. That real rejection is exercised against a
+            // database in ChangeOwnPasswordIntegrationTest; here only the wiring
+            // is asserted — the request reaches the (mocked) service layer.
+            doThrow(ApiException.badRequest("your current password is incorrect"))
+                    .when(sessions)
+                    .changeOwnPassword(any(), any(), any());
+
             mvc.perform(post("/api/v1/auth/change-password")
                             .with(SecurityMockMvcRequestPostProcessors.authentication(
                                     TestCallers.authentication(AppRole.USER, true)))
@@ -747,9 +785,27 @@ class AuthControllerTest {
                             .content("""
                                     {"newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
                                     """))
-                    .andExpect(status().isBadRequest());
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.detail").value("your current password is incorrect"));
 
-            verify(sessions, never()).changeOwnPassword(any(), any(), any());
+            verify(sessions).changeOwnPassword(any(), isNull(), eq("NewPassword123!"));
+        }
+
+        @Test
+        @DisplayName("Google-only account: sets an initial password with the 'set' message, sending no currentPassword (ADR-030)")
+        void setsInitialPasswordForGoogleOnlyAccount() throws Exception {
+            mvc.perform(post("/api/v1/auth/change-password")
+                            .with(SecurityMockMvcRequestPostProcessors.authentication(
+                                    TestCallers.authentication(AppRole.USER, false, false)))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"newPassword":"NewPassword123!","confirmPassword":"NewPassword123!"}
+                                    """))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.message").value(
+                            "Your password has been set. You can now also sign in with your email and password."));
+
+            verify(sessions).changeOwnPassword(any(), isNull(), eq("NewPassword123!"));
         }
 
         @Test
@@ -969,6 +1025,126 @@ class AuthControllerTest {
         void doesNotBlockLogout() throws Exception {
             mvc.perform(post("/api/v1/auth/logout").with(mustChangePassword()))
                     .andExpect(status().isNoContent());
+        }
+    }
+
+    private static String passwordLoginBody() {
+        return """
+                {"email":"user@example.com","password":"Password123!"}""";
+    }
+
+    /**
+     * ADR-028. The controller has two jobs here: pass through an ordinary
+     * session unchanged, and — for an account with confirmed TOTP — issue a
+     * pending-MFA cookie instead of a session, never both at once.
+     */
+    @Nested
+    @DisplayName("POST /api/v1/auth/login-password")
+    class LoginPassword {
+
+        @Test
+        @DisplayName("issues a session when the account has no TOTP enrolled")
+        void issuesSessionWithoutMfa() throws Exception {
+            var caller = TestCallers.user(AppRole.USER);
+            when(sessions.signInWithPassword(any(), any(), any(), any()))
+                    .thenReturn(new SessionService.IssuedSession(
+                            "opaque-session-token", caller.account(), Instant.now()));
+
+            mvc.perform(post("/api/v1/auth/login-password")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(passwordLoginBody()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.authenticated").value(true))
+                    .andExpect(jsonPath("$.email").value(caller.email()));
+        }
+
+        @Test
+        @DisplayName("returns mfaRequired and a pending-MFA cookie instead, when TOTP is enrolled")
+        void returnsMfaRequiredInstead() throws Exception {
+            when(sessions.signInWithPassword(any(), any(), any(), any()))
+                    .thenReturn(new SessionService.MfaRequired("pending-token", Instant.now().plusSeconds(300)));
+
+            MvcResult result = mvc.perform(post("/api/v1/auth/login-password")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(passwordLoginBody()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.mfaRequired").value(true))
+                    .andReturn();
+
+            assertThat(result.getResponse().getHeaders(HttpHeaders.SET_COOKIE))
+                    .anySatisfy(header -> assertThat(header)
+                            .contains(TotpService.MFA_PENDING_COOKIE_NAME + "=pending-token")
+                            .contains("HttpOnly")
+                            .contains("SameSite=Lax"))
+                    // No real session cookie alongside it -- the whole point of
+                    // this branch is that a session is not yet issued.
+                    .noneMatch(header -> header.startsWith(SessionService.COOKIE_NAME + "="));
+        }
+    }
+
+    /**
+     * ADR-028. Redeems the pending-MFA cookie {@code /login-password} left
+     * behind; {@code TotpService}/{@code SessionService} are both mocked, so
+     * this only proves the controller's own plumbing (cookie in, session
+     * cookie + cleared pending cookie out) — code verification itself is
+     * {@code TotpServiceIntegrationTest}'s job.
+     */
+    @Nested
+    @DisplayName("POST /api/v1/auth/mfa/verify")
+    class MfaVerify {
+
+        @Test
+        @DisplayName("completes sign-in and clears the pending cookie on a correct code")
+        void completesSignIn() throws Exception {
+            var caller = TestCallers.user(AppRole.USER);
+            when(totp.verifyLoginChallenge(eq("pending-token"), eq("123456"))).thenReturn(caller.account());
+            when(sessions.issueForAccount(eq(caller.account()), any(), any()))
+                    .thenReturn(new SessionService.IssuedSession(
+                            "opaque-session-token", caller.account(), Instant.now()));
+
+            MvcResult result = mvc.perform(post("/api/v1/auth/mfa/verify")
+                            .cookie(new jakarta.servlet.http.Cookie(
+                                    TotpService.MFA_PENDING_COOKIE_NAME, "pending-token"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"code":"123456"}"""))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.authenticated").value(true))
+                    .andReturn();
+
+            assertThat(result.getResponse().getHeaders(HttpHeaders.SET_COOKIE))
+                    .anySatisfy(header -> assertThat(header)
+                            .contains(SessionService.COOKIE_NAME + "=opaque-session-token"))
+                    .anySatisfy(header -> assertThat(header)
+                            .contains(TotpService.MFA_PENDING_COOKIE_NAME + "=")
+                            .contains("Max-Age=0"));
+        }
+
+        @Test
+        @DisplayName("refuses without a pending-MFA cookie, and never reaches TotpService")
+        void refusesWithoutPendingCookie() throws Exception {
+            mvc.perform(post("/api/v1/auth/mfa/verify")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"code":"123456"}"""))
+                    .andExpect(status().isBadRequest());
+
+            verify(totp, never()).verifyLoginChallenge(any(), any());
+        }
+
+        @Test
+        @DisplayName("a wrong code is refused")
+        void refusesWrongCode() throws Exception {
+            when(totp.verifyLoginChallenge(any(), any()))
+                    .thenThrow(ApiException.badRequest("That code is incorrect."));
+
+            mvc.perform(post("/api/v1/auth/mfa/verify")
+                            .cookie(new jakarta.servlet.http.Cookie(
+                                    TotpService.MFA_PENDING_COOKIE_NAME, "pending-token"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"code":"000000"}"""))
+                    .andExpect(status().isBadRequest());
         }
     }
 }

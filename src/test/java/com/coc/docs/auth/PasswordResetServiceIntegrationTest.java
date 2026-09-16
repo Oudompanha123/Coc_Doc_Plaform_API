@@ -3,6 +3,7 @@ package com.coc.docs.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -26,13 +27,14 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
- * The reset flow against a real PostgreSQL (ADR-018). {@link
- * PasswordResetMailer} is mocked deliberately — what is under test is
- * everything around it: which accounts are even eligible, that a redeemed
+ * The reset flow against a real PostgreSQL (ADR-018, revised by ADR-029).
+ * {@link PasswordResetMailer} is mocked deliberately — what is under test is
+ * everything around it: that every existing account is eligible (including
+ * a Google-only one, getting its first password — ADR-029), that a redeemed
  * token cannot be redeemed twice, and that a reset revokes live sessions —
  * not SMTP delivery, which has no place in this suite.
  *
- * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-014, ADR-018
+ * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-014, ADR-018, ADR-029
  */
 class PasswordResetServiceIntegrationTest extends PostgresTestBase {
 
@@ -75,7 +77,9 @@ class PasswordResetServiceIntegrationTest extends PostgresTestBase {
         // The link goes to the address of record, not to whatever casing the
         // requester typed. Asserting the input back would have pinned the
         // opposite behaviour — mail addressed to an unnormalised string.
-        verify(mailer).sendResetLink(eq(withPassword.email()), token.capture());
+        // true: withPassword already holds a password_hash, so this mints a
+        // genuine reset, not a first-password "set" (ADR-029).
+        verify(mailer).sendResetLink(eq(withPassword.email()), token.capture(), eq(true));
         return token.getValue();
     }
 
@@ -120,16 +124,45 @@ class PasswordResetServiceIntegrationTest extends PostgresTestBase {
                     assertThat(((ApiException) e).status()).isEqualTo(HttpStatus.NOT_FOUND);
                     assertThat(e.getMessage()).isEqualTo("No account found with this email address.");
                 });
-        verify(mailer, never()).sendResetLink(any(), any());
+        verify(mailer, never()).sendResetLink(any(), any(), anyBoolean());
     }
 
     @Test
-    @DisplayName("does nothing for a Google-only account (ADR-018 decision 2)")
-    void ignoresAGoogleOnlyAccount() {
-        accounts.insert("google.only@example.com", "Google Only", AppRole.USER, null, AccountStatus.ACTIVE);
+    @DisplayName("mints a token and emails a Google-only account too, as a first password (ADR-029)")
+    void mintsATokenForAGoogleOnlyAccount() {
+        Account googleOnly =
+                accounts.insert("google.only@example.com", "Google Only", AppRole.USER, null, AccountStatus.ACTIVE);
+        ArgumentCaptor<String> token = ArgumentCaptor.forClass(String.class);
 
         resets.requestReset("google.only@example.com");
-        verify(mailer, never()).sendResetLink(any(), any());
+
+        // false: this account holds no password_hash yet, so the emailed
+        // wording is "set", not "reset" — ADR-029 revises ADR-018 decision 2,
+        // which used to leave this case untouched entirely.
+        verify(mailer).sendResetLink(eq("google.only@example.com"), token.capture(), eq(false));
+        Long rowCount = jdbc.sql("select count(*) from password_reset_token where account_id = ?")
+                .param(googleOnly.id())
+                .query(Long.class)
+                .single();
+        assertThat(rowCount).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("redeeming a Google-only account's token sets its first password and says so distinctly (ADR-029)")
+    void redeemingSetsAnInitialPasswordForAGoogleOnlyAccount() {
+        accounts.insert("google.only2@example.com", "Google Only", AppRole.USER, null, AccountStatus.ACTIVE);
+        ArgumentCaptor<String> token = ArgumentCaptor.forClass(String.class);
+        resets.requestReset("google.only2@example.com");
+        verify(mailer).sendResetLink(eq("google.only2@example.com"), token.capture(), eq(false));
+
+        String message = resets.resetPassword(token.getValue(), "NewPassword456!");
+
+        assertThat(message).isEqualTo("Your password has been set. You can now log in with your email and password.");
+        String newHash = accounts
+                .findCredentialByEmailIgnoreCase("google.only2@example.com")
+                .orElseThrow()
+                .passwordHash();
+        assertThat(passwordEncoder.matches("NewPassword456!", newHash)).isTrue();
     }
 
     @Test
@@ -144,8 +177,10 @@ class PasswordResetServiceIntegrationTest extends PostgresTestBase {
     void resetIsAppliedOnceAndOnlyOnce() {
         String token = mintedToken("reset.me@example.com");
 
-        resets.resetPassword(token, "NewPassword456!");
+        String message = resets.resetPassword(token, "NewPassword456!");
 
+        // "reset", not "set" (ADR-029) -- withPassword already held a password.
+        assertThat(message).isEqualTo("Your password has been reset. You can now log in.");
         String newHash = accounts
                 .findCredentialByEmailIgnoreCase("reset.me@example.com")
                 .orElseThrow()

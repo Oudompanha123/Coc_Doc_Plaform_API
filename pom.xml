@@ -112,6 +112,28 @@
       <version>9.4.1</version>
     </dependency>
 
+    <!-- TOTP second factor (ADR-028): RFC 6238 code generation/verification
+         with time-window tolerance. Don't hand-roll HMAC-based OTP crypto,
+         same reasoning as reusing PasswordEncoder for bcrypt rather than a
+         custom hash. -->
+    <dependency>
+      <groupId>dev.samstevens.totp</groupId>
+      <artifactId>totp</artifactId>
+      <version>1.7.1</version>
+    </dependency>
+    <!-- QR code rendering that dev.samstevens.totp's QrGenerator delegates to
+         (ADR-028): the setup wizard's scannable QR image. -->
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>core</artifactId>
+      <version>3.5.3</version>
+    </dependency>
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>javase</artifactId>
+      <version>3.5.3</version>
+    </dependency>
+
     <!-- The OpenAPI contract is generated from the annotated controllers
          themselves (served at /v3/api-docs), not hand-maintained separately,
          so the frontend's generated client cannot silently drift from the

@@ -22,11 +22,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 /**
  * {@code SessionService.changeOwnPassword} against a real PostgreSQL —
  * specifically the current-password rule ADR-022 added (revision of
- * ADR-020) and ADR-024 made unconditional. {@code AuthControllerTest.ChangePassword}
+ * ADR-020), ADR-024 made unconditional for an existing hash, and ADR-030
+ * gave a third, hash-free branch. {@code AuthControllerTest.ChangePassword}
  * covers the HTTP/DTO layer with a mocked {@code SessionService}; this is
  * where the actual business rule is exercised.
  *
- * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-020, ADR-022, ADR-024
+ * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-020, ADR-022, ADR-024, ADR-030
  */
 class ChangeOwnPasswordIntegrationTest extends PostgresTestBase {
 
@@ -46,10 +47,15 @@ class ChangeOwnPasswordIntegrationTest extends PostgresTestBase {
         accounts.insert("boss@example.com", "Boss", AppRole.SUPER_ADMIN, null, AccountStatus.ACTIVE);
     }
 
-    /** Signs in with a real password and resolves the resulting token back into a real {@code CurrentUser}. */
+    /**
+     * Signs in with a real password and resolves the resulting token back into
+     * a real {@code CurrentUser}. Cast is safe here: no fixture in this suite
+     * enrolls TOTP (ADR-028), so {@code signInWithPassword} always returns a
+     * real session, never {@code MfaRequired}.
+     */
     private CurrentUser signInAndResolve(String email, String rawPassword) {
         SessionService.IssuedSession issued =
-                sessions.signInWithPassword(email, rawPassword, "test-agent", "127.0.0.1");
+                (SessionService.IssuedSession) sessions.signInWithPassword(email, rawPassword, "test-agent", "127.0.0.1");
         return sessions.resolve(issued.token()).orElseThrow();
     }
 
@@ -139,6 +145,22 @@ class ChangeOwnPasswordIntegrationTest extends PostgresTestBase {
     }
 
     @Test
+    @DisplayName("the forced first-login completion is refused when no temporary password is given at all (ADR-030 no longer stops this at the DTO layer)")
+    void forcedFirstLoginRefusesMissingTemporaryPassword() {
+        accounts.insert(
+                "invited3@example.com", "Invited", AppRole.USER, null, AccountStatus.ACTIVE,
+                passwordEncoder.encode("TempPassword123!"), true);
+        CurrentUser caller = signInAndResolve("invited3@example.com", "TempPassword123!");
+
+        assertThatThrownBy(() -> sessions.changeOwnPassword(caller, null, "NewPassword456!"))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> {
+                    assertThat(((ApiException) e).status()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(e.getMessage()).isEqualTo("your current password is incorrect");
+                });
+    }
+
+    @Test
     @DisplayName("still refuses reusing the current password as the new one (ADR-020)")
     void refusesReusingCurrentPassword() {
         accounts.insert(
@@ -156,17 +178,32 @@ class ChangeOwnPasswordIntegrationTest extends PostgresTestBase {
     }
 
     @Test
-    @DisplayName("still refuses a Google-only account with no password to verify against")
-    void refusesGoogleOnlyAccount() {
+    @DisplayName("a Google-only account sets an initial password, needing no current one (ADR-030)")
+    void setsInitialPasswordForGoogleOnlyAccount() {
         Account googleOnly = accounts.insert("google.only@example.com", "Google Only", AppRole.USER, null, AccountStatus.ACTIVE);
+        assertThat(googleOnly.hasPassword()).isFalse();
         CurrentUser caller = new CurrentUser(googleOnly, Set.<Permission>of(), new byte[] {9, 9, 9});
 
-        assertThatThrownBy(() -> sessions.changeOwnPassword(caller, "whatever", "NewPassword456!"))
-                .isInstanceOf(ApiException.class)
-                .satisfies(e -> {
-                    assertThat(((ApiException) e).status()).isEqualTo(HttpStatus.BAD_REQUEST);
-                    assertThat(e.getMessage()).isEqualTo("this account has no password set; sign in with Google instead");
-                });
+        // No current password supplied at all — there is none to prove.
+        sessions.changeOwnPassword(caller, null, "NewPassword456!");
+
+        String hash = hashOf("google.only@example.com");
+        assertThat(hash).isNotNull();
+        assertThat(passwordEncoder.matches("NewPassword456!", hash)).isTrue();
+    }
+
+    @Test
+    @DisplayName("a Google-only account still cannot reuse a wrong or irrelevant 'current' password as an excuse to skip the rule for others")
+    void initialPasswordSetIgnoresAnyCurrentPasswordSupplied() {
+        Account googleOnly = accounts.insert("google.only2@example.com", "Google Only", AppRole.USER, null, AccountStatus.ACTIVE);
+        CurrentUser caller = new CurrentUser(googleOnly, Set.<Permission>of(), new byte[] {9, 9, 9});
+
+        // Whatever is sent here is simply irrelevant — there is no hash to
+        // check it against — so this still succeeds rather than being
+        // refused as "incorrect".
+        sessions.changeOwnPassword(caller, "whatever-nonsense", "NewPassword456!");
+
+        assertThat(passwordEncoder.matches("NewPassword456!", hashOf("google.only2@example.com"))).isTrue();
     }
 
     @Test
@@ -176,9 +213,9 @@ class ChangeOwnPasswordIntegrationTest extends PostgresTestBase {
                 "multisession@example.com", "Multi Session", AppRole.USER, null, AccountStatus.ACTIVE,
                 passwordEncoder.encode("OldPassword123!"), false);
 
-        SessionService.IssuedSession first =
+        SessionService.IssuedSession first = (SessionService.IssuedSession)
                 sessions.signInWithPassword("multisession@example.com", "OldPassword123!", "agent-1", "127.0.0.1");
-        SessionService.IssuedSession second =
+        SessionService.IssuedSession second = (SessionService.IssuedSession)
                 sessions.signInWithPassword("multisession@example.com", "OldPassword123!", "agent-2", "127.0.0.2");
         CurrentUser caller = sessions.resolve(first.token()).orElseThrow();
 

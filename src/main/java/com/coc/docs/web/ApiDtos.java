@@ -122,7 +122,15 @@ public final class ApiDtos {
              * Create New Password instead of the normal workspace until it
              * turns false (revision of ADR-017).
              */
-            boolean mustChangePassword) {
+            boolean mustChangePassword,
+            /**
+             * Whether this account holds a password credential at all
+             * (ADR-030). "My Profile → Change Password" reads this to decide
+             * whether to render a "Current Password" field — false for a
+             * Google-only account, which has nothing to prove and is instead
+             * offered "Set a password".
+             */
+            boolean hasPassword) {
 
         public static MeResponse of(CurrentUser user, Instant lastSignInAt) {
             return new MeResponse(
@@ -134,7 +142,8 @@ public final class ApiDtos {
                     true,
                     user.account().createdAt(),
                     lastSignInAt,
-                    user.account().mustChangePassword());
+                    user.account().mustChangePassword(),
+                    user.account().hasPassword());
         }
 
         /**
@@ -146,7 +155,7 @@ public final class ApiDtos {
          * satisfied here or not at all. // req: NFR-SEC-PII
          */
         public static MeResponse anonymous() {
-            return new MeResponse(null, null, null, null, null, false, null, null, false);
+            return new MeResponse(null, null, null, null, null, false, null, null, false, false);
         }
     }
 
