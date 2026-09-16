@@ -105,7 +105,7 @@ public class SessionRepository {
      * key for.
      *
      * <p>Separates "a device I do not recognise" from "I have not been keeping
-     * track yet". Every row written before V15 has a null key, so immediately
+     * track yet". Every row written before V16 has a null key, so immediately
      * after that migration an account's every device is unrecognised — and
      * announcing all of them would be a false alarm on the machine the person
      * is sitting at. False here means seed quietly; only once there is
