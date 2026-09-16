@@ -108,7 +108,8 @@ class AdminAccountControllerTest {
                 null,
                 Instant.parse("2026-09-01T09:00:00Z"),
                 Instant.parse("2026-09-01T09:00:00Z"),
-                false);
+                false,
+                true);
     }
 
     /** A super admin, the only role that reaches any of this. */
@@ -246,7 +247,8 @@ class AdminAccountControllerTest {
                     Instant.parse("2026-09-14T10:00:00Z"),
                     Instant.parse("2026-09-01T09:00:00Z"),
                     Instant.parse("2026-09-14T10:00:00Z"),
-                    false);
+                    false,
+                    true);
 
             when(accountService.update(eq(ACCOUNT_ID), isNull(), eq(false), isNull(), any()))
                     .thenReturn(deactivated);

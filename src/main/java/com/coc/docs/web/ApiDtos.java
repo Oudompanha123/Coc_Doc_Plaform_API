@@ -9,6 +9,8 @@ import com.coc.docs.page.Page;
 import com.coc.docs.page.PageRepository;
 import com.coc.docs.page.PageService;
 import com.coc.docs.page.PageVersion;
+import com.coc.docs.notify.ActivityDigestService;
+import com.coc.docs.notify.NotificationFeedService;
 import com.coc.docs.page.PageVersionRepository;
 import com.coc.docs.section.Section;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -16,6 +18,7 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -134,7 +137,15 @@ public final class ApiDtos {
              * Create New Password instead of the normal workspace until it
              * turns false (revision of ADR-017).
              */
-            boolean mustChangePassword) {
+            boolean mustChangePassword,
+            /**
+             * Whether this account holds a password credential at all
+             * (ADR-030). "My Profile → Change Password" reads this to decide
+             * whether to render a "Current Password" field — false for a
+             * Google-only account, which has nothing to prove and is instead
+             * offered "Set a password".
+             */
+            boolean hasPassword) {
 
         public static MeResponse of(CurrentUser user, Instant lastSignInAt) {
             return new MeResponse(
@@ -146,7 +157,8 @@ public final class ApiDtos {
                     true,
                     user.account().createdAt(),
                     lastSignInAt,
-                    user.account().mustChangePassword());
+                    user.account().mustChangePassword(),
+                    user.account().hasPassword());
         }
 
         /**
@@ -158,7 +170,7 @@ public final class ApiDtos {
          * satisfied here or not at all. // req: NFR-SEC-PII
          */
         public static MeResponse anonymous() {
-            return new MeResponse(null, null, null, null, null, false, null, null, false);
+            return new MeResponse(null, null, null, null, null, false, null, null, false, false);
         }
     }
 
@@ -490,4 +502,74 @@ public final class ApiDtos {
     public record UpdateNavItemRequest(@NotBlank String label) {}
 
     public record ReorderItemsRequest(@NotNull List<String> slugs) {}
+
+    // -----------------------------------------------------------------------
+    // Notifications
+    // -----------------------------------------------------------------------
+
+    /**
+     * The outcome of an on-demand digest send.
+     *
+     * <p>Counts, never addresses or names. The mail itself carries the page
+     * titles and the editors; the confirmation a caller gets back does not need
+     * to repeat them, and a recipient list echoed over HTTP would put personal
+     * data in a place NFR-SEC-PII does not require it to be.
+     *
+     * @param sent whether a message was handed to the transport. False is a
+     *     normal answer: nothing to report, nobody configured to receive it, or
+     *     no SMTP host set — {@code reason} says which.
+     */
+    public record DigestResponse(
+            LocalDate day, boolean sent, int pagesChanged, int sections, int recipients, String reason) {
+
+        public static DigestResponse of(ActivityDigestService.DigestResult result) {
+            return new DigestResponse(
+                    result.day(),
+                    result.sent(),
+                    result.pagesChanged(),
+                    result.sections(),
+                    result.recipients(),
+                    reasonFor(result.outcome()));
+        }
+
+        /**
+         * Why nothing was sent, in words a caller can act on.
+         *
+         * <p>Taken from the outcome the service reported, never inferred from
+         * the counts: a failed send of a day with no activity would otherwise
+         * be reported as "no activity", which is the wrong thing to go and fix.
+         */
+        private static String reasonFor(ActivityDigestService.Outcome outcome) {
+            return switch (outcome) {
+                case SENT -> "sent";
+                case NO_ACTIVITY -> "no page activity on this day";
+                case NO_RECIPIENTS ->
+                        "no recipients: app.notifications.recipients is empty and no active admin exists";
+                case NOT_DELIVERED ->
+                        "not delivered: no SMTP host is configured (spring.mail.host), or the relay "
+                                + "refused it — see the server log";
+            };
+        }
+    }
+
+    /**
+     * One line in the topbar's activity feed.
+     *
+     * <p>{@code occurredAt} is the instant, not a rendered "5m ago": the server
+     * does not know the reader's clock or locale, and a cached response would
+     * freeze a relative string while the absolute one stays correct. The client
+     * formats it.
+     *
+     * <p>There is deliberately no {@code read} flag — see
+     * {@code NotificationFeedService}'s note on why unread state would need a
+     * table of its own.
+     *
+     * <p>// req: FR-OPS-001, NFR-SEC-PII
+     */
+    public record NotificationItem(String id, String actorEmail, String summary, Instant occurredAt) {
+
+        public static NotificationItem of(NotificationFeedService.FeedItem item) {
+            return new NotificationItem(item.id(), item.actorEmail(), item.summary(), item.occurredAt());
+        }
+    }
 }

@@ -41,7 +41,16 @@ import java.util.UUID;
  * deactivatedAt} — so unlike the hash it does live here, and does travel with
  * {@code Account} into responses that need to act on it.
  *
- * <p>// req: FR-AUTH-002, FR-AUTH-003, FR-AUTH-005, ADR-014
+ * <p>{@code hasPassword} is the same kind of fact, added by ADR-030: whether
+ * a {@code password_hash} exists at all, derived in SQL
+ * ({@code AccountRepository}) so the hash itself still never leaves the two
+ * queries that actually read it. {@code SessionService.changeOwnPassword}
+ * uses it to tell a voluntary change (a hash already exists, prove it first)
+ * from a Google-only account setting its first password (nothing to prove);
+ * {@code MeResponse} carries it so the frontend can decide which of those two
+ * to render before the caller ever opens the form.
+ *
+ * <p>// req: FR-AUTH-002, FR-AUTH-003, FR-AUTH-005, ADR-014, ADR-030
  */
 public record Account(
         UUID id,
@@ -66,7 +75,9 @@ public record Account(
          * password until this account's owner replaces it. See
          * {@code AccountService.create} and {@code SessionService.changeOwnPassword}.
          */
-        boolean mustChangePassword) {
+        boolean mustChangePassword,
+        /** Whether a {@code password_hash} exists at all (ADR-030) — see the class javadoc. */
+        boolean hasPassword) {
 
     /**
      * Defensive copy. The role set backs every authorisation decision made
@@ -122,20 +133,20 @@ public record Account(
     public Account withStatus(AccountStatus newStatus) {
         return new Account(
                 id, email, displayName, roles, avatarUrl, avatarUploadedAt, newStatus, deactivatedAt, createdAt,
-                updatedAt, mustChangePassword);
+                updatedAt, mustChangePassword, hasPassword);
     }
 
     /** A copy holding a different set of roles. */
     public Account withRoles(Set<AppRole> newRoles) {
         return new Account(
                 id, email, displayName, newRoles, avatarUrl, avatarUploadedAt, status, deactivatedAt, createdAt,
-                updatedAt, mustChangePassword);
+                updatedAt, mustChangePassword, hasPassword);
     }
 
     /** A copy with a self-uploaded photo (ADR-026) — {@code avatarUploadedAt} marks it as owner-controlled. */
     public Account withUploadedAvatar(String newAvatarUrl, Instant uploadedAt) {
         return new Account(
                 id, email, displayName, roles, newAvatarUrl, uploadedAt, status, deactivatedAt, createdAt,
-                updatedAt, mustChangePassword);
+                updatedAt, mustChangePassword, hasPassword);
     }
 }

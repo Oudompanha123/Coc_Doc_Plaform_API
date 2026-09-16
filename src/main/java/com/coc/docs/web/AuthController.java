@@ -6,10 +6,19 @@ import com.coc.docs.auth.PasswordResetService;
 import com.coc.docs.auth.RegistrationChallenge;
 import com.coc.docs.auth.RegistrationOtpService;
 import com.coc.docs.auth.SessionService;
+import com.coc.docs.auth.TotpService;
 import com.coc.docs.auth.dto.ChangePasswordRequest;
 import com.coc.docs.auth.dto.ChangePasswordResponse;
 import com.coc.docs.auth.dto.ForgotPasswordRequest;
 import com.coc.docs.auth.dto.ForgotPasswordResponse;
+import com.coc.docs.auth.dto.MfaDisableRequest;
+import com.coc.docs.auth.dto.MfaDisableResponse;
+import com.coc.docs.auth.dto.MfaRequiredResponse;
+import com.coc.docs.auth.dto.MfaSetupStartResponse;
+import com.coc.docs.auth.dto.MfaSetupVerifyRequest;
+import com.coc.docs.auth.dto.MfaSetupVerifyResponse;
+import com.coc.docs.auth.dto.MfaStatusResponse;
+import com.coc.docs.auth.dto.MfaVerifyRequest;
 import com.coc.docs.auth.dto.PasswordLoginRequest;
 import com.coc.docs.auth.dto.RegisterChallengeResponse;
 import com.coc.docs.auth.dto.RegisterRequest;
@@ -23,6 +32,8 @@ import com.coc.docs.auth.NonceService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Locale;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
@@ -61,6 +72,7 @@ public class AuthController {
     private final NonceService nonces;
     private final PasswordResetService passwordResets;
     private final RegistrationOtpService registrationOtp;
+    private final TotpService totp;
 
     public AuthController(
             SessionService sessions,
@@ -68,13 +80,15 @@ public class AuthController {
             PasswordEncoder passwordEncoder,
             NonceService nonces,
             PasswordResetService passwordResets,
-            RegistrationOtpService registrationOtp) {
+            RegistrationOtpService registrationOtp,
+            TotpService totp) {
         this.sessions = sessions;
         this.properties = properties;
         this.passwordEncoder = passwordEncoder;
         this.nonces = nonces;
         this.passwordResets = passwordResets;
         this.registrationOtp = registrationOtp;
+        this.totp = totp;
     }
 
     /**
@@ -143,7 +157,8 @@ public class AuthController {
                         true,
                         issued.account().createdAt(),
                         sessions.lastSignInForAccount(issued.account().id()).orElse(null),
-                        issued.account().mustChangePassword()));
+                        issued.account().mustChangePassword(),
+                        issued.account().hasPassword()));
     }
 
     /**
@@ -191,7 +206,8 @@ public class AuthController {
                 true,
                 updated.createdAt(),
                 sessions.lastSignInForAccount(updated.id()).orElse(null),
-                updated.mustChangePassword());
+                updated.mustChangePassword(),
+                updated.hasPassword());
     }
 
     /**
@@ -224,7 +240,8 @@ public class AuthController {
                 true,
                 updated.createdAt(),
                 sessions.lastSignInForAccount(updated.id()).orElse(null),
-                updated.mustChangePassword());
+                updated.mustChangePassword(),
+                updated.hasPassword());
     }
 
     /**
@@ -249,7 +266,8 @@ public class AuthController {
                 true,
                 updated.createdAt(),
                 sessions.lastSignInForAccount(updated.id()).orElse(null),
-                updated.mustChangePassword());
+                updated.mustChangePassword(),
+                updated.hasPassword());
     }
 
     /**
@@ -378,6 +396,38 @@ public class AuthController {
                 .build();
     }
 
+    /**
+     * The pending-MFA cookie (ADR-031) — same shape as {@link
+     * #nonceCookie}, and for the same reason: it proves nothing on its own
+     * (only its hash is stored, and it grants no access by itself), so it
+     * carries the same {@code httpOnly}/{@code secure}/{@code sameSite=Lax}
+     * flags as the real session cookie without being one.
+     */
+    private ResponseCookie mfaPendingCookie(SessionService.MfaRequired mfaRequired) {
+        return ResponseCookie.from(TotpService.MFA_PENDING_COOKIE_NAME, mfaRequired.challengeToken())
+                .httpOnly(true)
+                .secure(properties.cookieSecure())
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(Duration.between(Instant.now(), mfaRequired.expiresAt()))
+                .build();
+    }
+
+    private ResponseCookie expiredMfaPendingCookie() {
+        return ResponseCookie.from(TotpService.MFA_PENDING_COOKIE_NAME, "")
+                .httpOnly(true)
+                .secure(properties.cookieSecure())
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(0)
+                .build();
+    }
+
+    /** Seconds until the pending-MFA challenge expires — for the response body, not the cookie. */
+    private static long mfaChallengeTtlSeconds(SessionService.MfaRequired mfaRequired) {
+        return Math.max(0, Duration.between(Instant.now(), mfaRequired.expiresAt()).toSeconds());
+    }
+
     /** Null when absent or blank, which {@code KeycloakIdTokenService} refuses outright. */
     private static String readCookie(HttpServletRequest request, String name) {
         Cookie[] cookies = request.getCookies();
@@ -497,30 +547,87 @@ public class AuthController {
     }
 
     /**
-     * Exchanges an email and password for a session cookie.
+     * Exchanges an email and password for a session cookie — or, since
+     * ADR-031, a pending-MFA cookie when the account has confirmed TOTP.
      *
      * <p>Refusals are deliberately indistinguishable — see
      * {@code SessionService.signInWithPassword}. This method adds nothing to
-     * the response that would tell them apart.
+     * the response that would tell them apart. The MFA branch is not a
+     * refusal at all: the password was correct, and the caller is told so
+     * plainly (unlike a rejected sign-in, there is no anti-enumeration
+     * reason to hide it — this is the same account, mid-sign-in, being told
+     * about its own second factor).
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-014
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, FR-AUTH-009, ADR-014, ADR-031
      */
     @PostMapping("/login-password")
-    ResponseEntity<ApiDtos.MeResponse> signInWithPassword(
+    ResponseEntity<?> signInWithPassword(
             @Valid @RequestBody PasswordLoginRequest request, HttpServletRequest http) {
 
         // Same as the Google path above: the incoming cookie names the session
         // this sign-in supersedes.
         sessions.revokeSuperseded(readCookie(http, SessionService.COOKIE_NAME));
 
-        SessionService.IssuedSession issued = sessions.signInWithPassword(
+        SessionService.PasswordSignInResult result = sessions.signInWithPassword(
                 request.email(),
                 request.password(),
                 http.getHeader(HttpHeaders.USER_AGENT),
                 clientIp(http));
 
+        return switch (result) {
+            case SessionService.IssuedSession issued -> ResponseEntity.ok()
+                    .header(HttpHeaders.SET_COOKIE, sessionCookie(issued).toString())
+                    .body(new ApiDtos.MeResponse(
+                            issued.account().id(),
+                            issued.account().email(),
+                            issued.account().displayName(),
+                            issued.account().role().wire(),
+                            issued.account().avatarUrl(),
+                            true,
+                            issued.account().createdAt(),
+                            sessions.lastSignInForAccount(issued.account().id()).orElse(null),
+                            issued.account().mustChangePassword(),
+                            issued.account().hasPassword()));
+            case SessionService.MfaRequired mfaRequired -> ResponseEntity.ok()
+                    .header(HttpHeaders.SET_COOKIE, mfaPendingCookie(mfaRequired).toString())
+                    .body(new MfaRequiredResponse(true, mfaChallengeTtlSeconds(mfaRequired)));
+        };
+    }
+
+    // -----------------------------------------------------------------------
+    // TOTP second factor (ADR-031)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Completes a password sign-in that returned {@link
+     * MfaRequiredResponse}: redeems the {@code coc_mfa_pending} cookie
+     * against a TOTP code and, on success, issues the real session.
+     *
+     * <p>Public, and it has to be — no session exists until this call
+     * succeeds. What stands in for authentication here is the pending-MFA
+     * cookie itself, proof that this browser already supplied a correct
+     * password moments earlier ({@code SessionService.signInWithPassword}).
+     *
+     * <p>// req: FR-AUTH-009, ADR-031
+     */
+    @PostMapping("/mfa/verify")
+    ResponseEntity<ApiDtos.MeResponse> verifyMfa(
+            @Valid @RequestBody MfaVerifyRequest request, HttpServletRequest http) {
+
+        String pendingToken = readCookie(http, TotpService.MFA_PENDING_COOKIE_NAME);
+        if (pendingToken == null) {
+            throw ApiException.badRequest("This sign-in attempt has expired. Please sign in again.");
+        }
+
+        Account account = totp.verifyLoginChallenge(pendingToken, request.code());
+        SessionService.IssuedSession issued = sessions.issueForAccount(
+                account, http.getHeader(HttpHeaders.USER_AGENT), clientIp(http));
+
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, sessionCookie(issued).toString())
+                // Spent — the same "don't leave a used one-shot cookie lying
+                // around" reasoning /google already applies to the nonce.
+                .header(HttpHeaders.SET_COOKIE, expiredMfaPendingCookie().toString())
                 .body(new ApiDtos.MeResponse(
                         issued.account().id(),
                         issued.account().email(),
@@ -530,7 +637,71 @@ public class AuthController {
                         true,
                         issued.account().createdAt(),
                         sessions.lastSignInForAccount(issued.account().id()).orElse(null),
-                        issued.account().mustChangePassword()));
+                        issued.account().mustChangePassword(),
+                        issued.account().hasPassword()));
+    }
+
+    /**
+     * Starts (or restarts) TOTP enrollment for the caller's own account —
+     * the QR code and manual-entry secret a setup wizard needs.
+     *
+     * <p>// req: FR-AUTH-009, ADR-031
+     */
+    @PostMapping("/mfa/setup/start")
+    MfaSetupStartResponse startMfaSetup(@AuthenticationPrincipal CurrentUser caller) {
+        if (caller == null) {
+            throw ApiException.forbidden("sign in first");
+        }
+        TotpService.SetupMaterial material = totp.startSetup(caller);
+        return new MfaSetupStartResponse(
+                material.secret(), material.qrCodeDataUri(), material.issuer(), material.accountLabel());
+    }
+
+    /**
+     * Confirms a pending enrollment with a code from the authenticator app —
+     * from this point on, {@code /login-password} gates this account behind
+     * it.
+     *
+     * <p>// req: FR-AUTH-009, ADR-031
+     */
+    @PostMapping("/mfa/setup/verify")
+    MfaSetupVerifyResponse verifyMfaSetup(
+            @Valid @RequestBody MfaSetupVerifyRequest request, @AuthenticationPrincipal CurrentUser caller) {
+        if (caller == null) {
+            throw ApiException.forbidden("sign in first");
+        }
+        totp.confirmSetup(caller, request.code());
+        return new MfaSetupVerifyResponse("Two-factor authentication is now on for your account.");
+    }
+
+    /**
+     * Turns TOTP off — requires the current password (see {@code
+     * TotpService.disable}'s Javadoc for why).
+     *
+     * <p>// req: FR-AUTH-009, ADR-031
+     */
+    @PostMapping("/mfa/disable")
+    MfaDisableResponse disableMfa(
+            @Valid @RequestBody MfaDisableRequest request, @AuthenticationPrincipal CurrentUser caller) {
+        if (caller == null) {
+            throw ApiException.forbidden("sign in first");
+        }
+        totp.disable(caller, request.currentPassword());
+        return new MfaDisableResponse("Two-factor authentication has been turned off.");
+    }
+
+    /**
+     * Whether the caller's own account currently has TOTP enrolled — what
+     * {@code SecurityTab}'s toggle reflects on load.
+     *
+     * <p>// req: FR-AUTH-009, ADR-031
+     */
+    @GetMapping("/mfa/status")
+    MfaStatusResponse mfaStatus(@AuthenticationPrincipal CurrentUser caller) {
+        if (caller == null) {
+            throw ApiException.forbidden("sign in first");
+        }
+        return new MfaStatusResponse(totp.isEnabledFor(caller.id()));
     }
 
     // -----------------------------------------------------------------------
@@ -538,18 +709,22 @@ public class AuthController {
     // -----------------------------------------------------------------------
 
     /**
-     * Replaces the caller's own password.
+     * Replaces the caller's own password, or gives them one for the first time.
      *
-     * <p>Two entry points share this one route: the "Create New Password"
-     * step of the first-login flow — the caller already holds a session,
-     * issued by {@link #signInWithPassword} on the temporary password — and,
-     * since ADR-022, the voluntary "My Profile &rarr; Change Password"
-     * self-service screen. {@code SessionService.changeOwnPassword} verifies
-     * {@code currentPassword} for both — since ADR-024, the forced flow also
-     * re-proves the temporary password it signed in with rather than being
-     * exempt; see that method's javadoc for why. {@code
-     * caller.account().mustChangePassword()} still tells the two entry
-     * points apart, now only to pick the confirmation message below.
+     * <p>Three callers share this one route: the "Create New Password" step
+     * of the first-login flow — the caller already holds a session, issued
+     * by {@link #signInWithPassword} on the temporary password — the
+     * voluntary "My Profile &rarr; Change Password" self-service screen
+     * (ADR-022), and, since ADR-030, that same screen used by a Google-only
+     * account to set a password it never had. {@code
+     * SessionService.changeOwnPassword} decides which of those three this
+     * is and verifies {@code currentPassword} for the two that have an
+     * existing hash to prove — since ADR-024, the forced flow also re-proves
+     * the temporary password it signed in with rather than being exempt; see
+     * that method's javadoc for why. {@code caller.account().mustChangePassword()}
+     * and {@code caller.account().hasPassword()}, both read here before the
+     * call, are what tell the three apart to pick the confirmation message
+     * below.
      *
      * <p>Requires only {@code USER} rank because it acts on the caller's own
      * account and cannot name another (see {@code SecurityConfig}'s
@@ -558,10 +733,11 @@ public class AuthController {
      * ChangePasswordRequest}'s javadoc.
      *
      * <p>The confirmation message differs by which entry point this was: the
-     * forced flow says the account is now usable, which would be a false
-     * promise for someone who already had full access before this call.
+     * forced flow says the account is now usable, and the initial-set case
+     * says a password now exists at all — either would be a false or
+     * confusing promise for the other two callers.
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-022, ADR-024
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-022, ADR-024, ADR-030
      */
     @PostMapping("/change-password")
     ChangePasswordResponse changePassword(
@@ -576,12 +752,21 @@ public class AuthController {
         }
 
         boolean wasForcedFirstLogin = caller.account().mustChangePassword();
+        // Read before the call: changeOwnPassword is what makes this true,
+        // so it has to be captured from the state at the start of the
+        // request, same as wasForcedFirstLogin above (ADR-030).
+        boolean hadNoPassword = !caller.account().hasPassword();
         sessions.changeOwnPassword(caller, request.currentPassword(), request.newPassword());
 
-        return new ChangePasswordResponse(
-                wasForcedFirstLogin
-                        ? "Password created successfully. You can now access your account."
-                        : "Your password has been changed.");
+        String message;
+        if (hadNoPassword) {
+            message = "Your password has been set. You can now also sign in with your email and password.";
+        } else if (wasForcedFirstLogin) {
+            message = "Password created successfully. You can now access your account.";
+        } else {
+            message = "Your password has been changed.";
+        }
+        return new ChangePasswordResponse(message);
     }
 
     // -----------------------------------------------------------------------
@@ -595,14 +780,16 @@ public class AuthController {
      * account at all" — {@code PasswordResetService.requestReset} throws for
      * that one (ADR-019), which {@code ApiExceptionHandler} turns into the
      * {@code 404} the caller actually sees. This method adds nothing that
-     * would tell the remaining cases apart; a Google-only account and a
-     * genuinely emailed reset are still indistinguishable from here (ADR-018
-     * decision 3, narrowed by ADR-019).
+     * would tell the remaining cases apart; a Google-only account (getting
+     * its first password) and a genuinely emailed reset are indistinguishable
+     * from here (ADR-018 decision 3, narrowed by ADR-019) — and, since
+     * ADR-029, both really do mint a token and send an email now, not just
+     * share an API response.
      *
      * <p>Public, and it has to be — a signed-out visitor who forgot their
      * password is, by definition, not signed in yet.
      *
-     * <p>// req: FR-AUTH-002, ADR-018, ADR-019
+     * <p>// req: FR-AUTH-002, ADR-018, ADR-019, ADR-029
      */
     @PostMapping("/forgot-password")
     @ResponseStatus(HttpStatus.OK)
@@ -612,7 +799,8 @@ public class AuthController {
     }
 
     /**
-     * Completes a password reset: sets the new password and spends the token.
+     * Completes a password reset — or, for a Google-only account, a first
+     * password (ADR-029): sets the new password and spends the token.
      *
      * <p>Unlike {@link #forgotPassword}, a rejected token here is reported
      * plainly — the caller already holds a value that came from their own
@@ -624,12 +812,12 @@ public class AuthController {
      * predated the reset is revoked server-side, so the caller signs in fresh
      * at {@code /login} either way.
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-018
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-018, ADR-029
      */
     @PostMapping("/reset-password")
     @ResponseStatus(HttpStatus.OK)
     ResetPasswordResponse resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
-        passwordResets.resetPassword(request.token(), request.newPassword());
-        return new ResetPasswordResponse("Your password has been reset. You can now log in.");
+        String message = passwordResets.resetPassword(request.token(), request.newPassword());
+        return new ResetPasswordResponse(message);
     }
 }

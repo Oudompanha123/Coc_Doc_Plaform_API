@@ -10,6 +10,7 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import jakarta.servlet.DispatcherType;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -86,6 +87,35 @@ public class SecurityConfig {
                 .addFilterBefore(sessionFilter, UsernamePasswordAuthenticationFilter.class)
 
                 .authorizeHttpRequests(authorize -> authorize
+                        // --- the container finishing a response it already
+                        //     authorised ----------------------------------------
+                        //
+                        // An SseEmitter response is dispatched twice: once as a
+                        // REQUEST, which is where the decision is made, and once
+                        // as ASYNC, when the container comes back to finish it.
+                        // Spring Security authorises both by default.
+                        //
+                        // Re-deciding on the second one protects nothing. The
+                        // body has already been streamed, so a refusal takes
+                        // nothing back — and it cannot even be reported, because
+                        // the response is committed:
+                        //
+                        //   Unable to handle the Spring Security Exception
+                        //   because the response is already committed
+                        //
+                        // which arrives as a hundred-frame stack trace every
+                        // time a long-lived stream outlives its session. And
+                        // they do outlive them: signing in again revokes the
+                        // session it replaces, and any stream still open on the
+                        // old one is then denied on its way out.
+                        //
+                        // An ASYNC dispatch cannot happen for a request that was
+                        // never authorised in the first place, so permitting it
+                        // widens nothing. SessionAuthenticationFilter still runs
+                        // on it, so the principal is there for anything that
+                        // needs one.
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
+
                         // --- public: no session yet, by necessity -------------
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/nonce").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/google").permitAll()
@@ -98,6 +128,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register/resend").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register/verify").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login-password").permitAll()
+                        // ADR-031: redeeming the pending-MFA cookie a correct password just
+                        // left behind. Public by the same necessity as /login-password itself
+                        // -- no session exists yet, and what stands in for one here is the
+                        // pending cookie, not this route's own permissions.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/verify").permitAll()
                         // ADR-018: starting or completing a password reset. Both public
                         // by the same necessity — a visitor who forgot their password,
                         // by definition, has no session to present.
@@ -130,6 +165,14 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/change-password")
                         .hasRole(AppRole.USER.name())
 
+                        // Self-service TOTP enrollment (ADR-031): same floor and reasoning
+                        // as change-password above -- acts on the caller's own account,
+                        // resolved from the session, and cannot name another.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/setup/start").hasRole(AppRole.USER.name())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/setup/verify").hasRole(AppRole.USER.name())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/disable").hasRole(AppRole.USER.name())
+                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/mfa/status").hasRole(AppRole.USER.name())
+
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/sessions").hasRole(AppRole.USER.name())
 
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/auth/sessions/**")
@@ -153,6 +196,27 @@ public class SecurityConfig {
                         // rather than a request, but the authorisation question
                         // is asked once, at the same place, before it opens.
                         .requestMatchers(HttpMethod.GET, "/api/v1/notifications/stream")
+                        .hasRole(AppRole.USER.name())
+
+                        // The topbar's activity feed. Read-only, and a `user`
+                        // floor rather than anything higher because every role
+                        // is entitled to their own history.
+                        //
+                        // This does NOT widen who can see account identities.
+                        // NotificationFeedService selects another account's rows
+                        // only for a super_admin; for every other role the query
+                        // filters on their own actor_id, so there is no other
+                        // person's email in the response to leak (NFR-SEC-PII).
+                        // That scope decision lives in the service because it is
+                        // a row filter, which a URL pattern cannot express — the
+                        // one place in this chain where that is true, and the
+                        // reason this comment exists.
+                        //
+                        // GET only, and exact-path: POST /api/v1/admin/
+                        // notifications/digest sends real mail and keeps its own
+                        // super_admin rule further down. Nothing here touches it.
+                        // // req: FR-OPS-001, FR-AUTH-008, NFR-SEC-PII
+                        .requestMatchers(HttpMethod.GET, "/api/v1/notifications")
                         .hasRole(AppRole.USER.name())
 
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
@@ -183,6 +247,23 @@ public class SecurityConfig {
                         .hasRole(AppRole.SUPER_ADMIN.name())
 
                         .requestMatchers("/api/v1/admin/accounts/**")
+                        .hasRole(AppRole.SUPER_ADMIN.name())
+
+                        // Sending a content-activity digest on demand. Above the
+                        // admin floor deliberately, and stated here rather than
+                        // left to the /admin/** line below, which would have
+                        // admitted any admin by default:
+                        //
+                        //   - the mail carries page titles and the names of the
+                        //     people who edited them, so this is the same
+                        //     personal-data boundary as the accounts prefix
+                        //     (NFR-SEC-PII);
+                        //   - it puts mail in other people's inboxes, which is
+                        //     not editorial work — an admin publishes content
+                        //     (FR-AUTH-008).
+                        //
+                        // // req: FR-AUTH-008, NFR-SEC-PII, FR-OPS-001
+                        .requestMatchers("/api/v1/admin/notifications/**")
                         .hasRole(AppRole.SUPER_ADMIN.name())
 
                         // --- editorial writes and admin reads ----------------

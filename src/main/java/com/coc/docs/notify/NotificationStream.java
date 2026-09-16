@@ -1,5 +1,6 @@
 package com.coc.docs.notify;
 
+import jakarta.annotation.PreDestroy;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -108,9 +109,12 @@ public class NotificationStream {
         for (SseEmitter emitter : List.copyOf(open)) {
             try {
                 emitter.send(SseEmitter.event().name("notification").data(type.key()));
-            } catch (IOException | IllegalStateException e) {
+            } catch (Exception e) {
                 // The tab closed between the check and the send, or the
-                // response was already committed. Both are ordinary.
+                // response was already committed. Both are ordinary, and the
+                // catch is deliberately wide: this runs from an after-commit
+                // listener on a path that has already succeeded, so nothing a
+                // dead socket can throw is worth turning into a failure there.
                 remove(accountId, emitter);
             }
         }
@@ -135,7 +139,10 @@ public class NotificationStream {
             for (SseEmitter emitter : List.copyOf(open)) {
                 try {
                     emitter.send(SseEmitter.event().comment("keep-alive"));
-                } catch (IOException | IllegalStateException e) {
+                } catch (Exception e) {
+                    // Wide on purpose. A heartbeat that dies on one dead
+                    // connection stops keeping every other one alive, and a
+                    // scheduled task that throws is a task nobody is watching.
                     remove(accountId, emitter);
                 }
             }
@@ -157,6 +164,28 @@ public class NotificationStream {
         // tab can open between the two, and removing the queue it was just
         // added to would leave that connection registered nowhere and silent.
         connections.computeIfPresent(accountId, (id, queue) -> queue.isEmpty() ? null : queue);
+    }
+
+    /**
+     * Ends every open connection.
+     *
+     * <p>Called on shutdown so that each browser sees its stream close and
+     * reconnects, rather than holding a socket to a process that has gone and
+     * waiting out the thirty-minute timeout to find out. A rolling restart is
+     * the ordinary case for this.
+     */
+    @PreDestroy
+    public void completeAll() {
+        connections.values().forEach(open -> {
+            for (SseEmitter emitter : List.copyOf(open)) {
+                try {
+                    emitter.complete();
+                } catch (RuntimeException e) {
+                    // Already gone. Nothing here is worth failing a shutdown.
+                }
+            }
+        });
+        connections.clear();
     }
 
     /** Open connections, for tests and for a health check that may want it later. */

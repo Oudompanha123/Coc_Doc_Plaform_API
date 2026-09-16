@@ -50,8 +50,31 @@ public final class AuditAction {
     public static final String PASSWORD_RESET_REQUEST = "auth.password_reset_request";
     public static final String PASSWORD_RESET_COMPLETE = "auth.password_reset_complete";
 
-    /** A self-service password change — first-login (temporary password) or otherwise. */
+    /**
+     * A self-service password write — first-login (temporary password), a
+     * voluntary change, or a Google-only account setting its first password
+     * (ADR-030). {@code detail.kind} on the entry tells the last one apart
+     * from a change.
+     */
     public static final String PASSWORD_CHANGE_COMPLETE = "auth.password_change_complete";
+
+    /** TOTP second factor confirmed on an account (ADR-031). */
+    public static final String MFA_ENABLED = "auth.mfa_enabled";
+
+    /** TOTP second factor turned off, after re-proving the current password (ADR-031). */
+    public static final String MFA_DISABLED = "auth.mfa_disabled";
+
+    /**
+     * A content-activity digest was sent on demand rather than on its schedule.
+     *
+     * <p>Audited because it is a person causing mail containing page titles and
+     * editor names to be sent to a recipient list — the same class of act as
+     * changing who holds a role, and the only record that it happened at all.
+     * The scheduled firing is not audited: it is the system doing what it was
+     * configured to do, and an audit row every morning would bury the manual
+     * ones it exists to make visible.
+     */
+    public static final String NOTIFICATION_DIGEST_SEND = "notification.digest_send";
 
     /** Target types, for the {@code target_type} column. */
     public static final String TARGET_PAGE = "page";
@@ -59,4 +82,7 @@ public final class AuditAction {
     public static final String TARGET_SECTION = "section";
     public static final String TARGET_ACCOUNT = "account";
     public static final String TARGET_SESSION = "session";
+
+    /** A notification the system sent; carries no target id, there is no row to point at. */
+    public static final String TARGET_NOTIFICATION = "notification";
 }
