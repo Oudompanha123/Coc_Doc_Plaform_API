@@ -13,7 +13,7 @@ import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
 
 /**
- * Loads {@code backend/..env.local} (gitignored — see {@code backend/env.example})
+ * Loads {@code backend/.env.local} (gitignored — see {@code backend/.env.example})
  * as a property source, so {@code DB_HOST}/{@code DB_PORT}/{@code DB_NAME}/
  * {@code DB_USER}/{@code DB_PASSWORD} — referenced as {@code ${...}} in
  * application.yml, with no hard-coded fallback — are available regardless of
@@ -30,20 +30,20 @@ import org.springframework.core.env.MapPropertySource;
  * name always wins, exactly like every other {@code .env} loader — this only
  * fills in what isn't already set.
  *
- * <p>// req: local DB config via backend/..env.local
+ * <p>// req: local DB config via backend/.env.local
  */
 public class DotenvEnvironmentPostProcessor implements EnvironmentPostProcessor {
 
     /**
      * File names, most-documented first.
      *
-     * <p>{@code backend/..env.local} is this repository's convention — it is what
+     * <p>{@code backend/.env.local} is this repository's convention — it is what
      * {@code CONTRIBUTING.md} tells a new developer to create, what
-     * {@code backend/env.example} is copied to, and what
+     * {@code backend/.env.example} is copied to, and what
      * {@code scripts/check-env-documented.sh} checks against. It is therefore
      * the file that actually exists on people's machines.
      *
-     * <p>{@code ...env.local} at the repo root is kept as a second name because
+     * <p>{@code .env.local} at the repo root is kept as a second name because
      * this class originally looked only there. Anyone who created one on that
      * basis keeps working; nobody has to move a file holding a password.
      *
@@ -78,8 +78,8 @@ public class DotenvEnvironmentPostProcessor implements EnvironmentPostProcessor 
     /**
      * Directory outer, name inner: from whichever directory the JVM started
      * in, the repository's documented file wins over the fallback name. The
-     * other order would let a stale root {@code ...env.local} shadow the
-     * {@code backend/..env.local} someone is actually editing.
+     * other order would let a stale root {@code .env.local} shadow the
+     * {@code backend/.env.local} someone is actually editing.
      */
     private static Path findEnvFile() {
         for (String dir : CANDIDATE_DIRS) {
