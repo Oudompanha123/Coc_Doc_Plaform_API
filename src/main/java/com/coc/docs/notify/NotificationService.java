@@ -29,11 +29,22 @@ public class NotificationService {
     private final DeviceTokenRepository devices;
     private final PushSender push;
 
+    /**
+     * The open browser connections. Sent to before the push, because it is the
+     * transport that always exists: Firebase is optional and mostly absent,
+     * this is an HTTP response.
+     */
+    private final NotificationStream stream;
+
     public NotificationService(
-            AccountRepository accounts, DeviceTokenRepository devices, PushSender push) {
+            AccountRepository accounts,
+            DeviceTokenRepository devices,
+            PushSender push,
+            NotificationStream stream) {
         this.accounts = accounts;
         this.devices = devices;
         this.push = push;
+        this.stream = stream;
     }
 
     /**
@@ -60,6 +71,12 @@ public class NotificationService {
             log.warn("no active super_admin to notify about {}", type.key());
             return;
         }
+
+        // Before the push, and before the early return below. A tab that is
+        // open is updated whether or not anybody has ever granted notification
+        // permission — which for most of this team is the only thing that
+        // happens at all.
+        recipients.forEach(id -> stream.publish(id, type));
 
         List<String> tokens =
                 devices.findByAccountIds(recipients).stream().map(DeviceToken::token).toList();
@@ -96,6 +113,12 @@ public class NotificationService {
     @Transactional
     public void notifyAccount(
             UUID accountId, NotificationType type, NotificationTarget target, String body) {
+        // Before the push, and before the early return below: an open tab is
+        // updated whether or not this person has ever granted notification
+        // permission, which for most of this team is the only thing that
+        // happens at all.
+        stream.publish(accountId, type);
+
         List<String> tokens = devices.findByAccountIds(Set.of(accountId)).stream()
                 .map(DeviceToken::token)
                 .toList();
