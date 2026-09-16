@@ -10,6 +10,7 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import jakarta.servlet.DispatcherType;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -86,6 +87,35 @@ public class SecurityConfig {
                 .addFilterBefore(sessionFilter, UsernamePasswordAuthenticationFilter.class)
 
                 .authorizeHttpRequests(authorize -> authorize
+                        // --- the container finishing a response it already
+                        //     authorised ----------------------------------------
+                        //
+                        // An SseEmitter response is dispatched twice: once as a
+                        // REQUEST, which is where the decision is made, and once
+                        // as ASYNC, when the container comes back to finish it.
+                        // Spring Security authorises both by default.
+                        //
+                        // Re-deciding on the second one protects nothing. The
+                        // body has already been streamed, so a refusal takes
+                        // nothing back — and it cannot even be reported, because
+                        // the response is committed:
+                        //
+                        //   Unable to handle the Spring Security Exception
+                        //   because the response is already committed
+                        //
+                        // which arrives as a hundred-frame stack trace every
+                        // time a long-lived stream outlives its session. And
+                        // they do outlive them: signing in again revokes the
+                        // session it replaces, and any stream still open on the
+                        // old one is then denied on its way out.
+                        //
+                        // An ASYNC dispatch cannot happen for a request that was
+                        // never authorised in the first place, so permitting it
+                        // widens nothing. SessionAuthenticationFilter still runs
+                        // on it, so the principal is there for anything that
+                        // needs one.
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
+
                         // --- public: no session yet, by necessity -------------
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/nonce").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/google").permitAll()
