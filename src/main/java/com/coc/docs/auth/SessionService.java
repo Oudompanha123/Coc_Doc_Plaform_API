@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.Optional;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -96,6 +97,16 @@ public class SessionService {
 
     private final PasswordEncoder passwordEncoder;
 
+    /**
+     * Announces a sign-in from an unrecognised device, without this class
+     * knowing who hears about it or how.
+     *
+     * <p>The same shape {@code AccountRepository} uses for registration: the
+     * thing that happened is published where it happens, and the notifier is a
+     * listener that sign-in does not wait for and cannot be broken by.
+     */
+    private final ApplicationEventPublisher events;
+
     public SessionService(
             SessionRepository sessions,
             AccountRepository accounts,
@@ -108,7 +119,8 @@ public class SessionService {
             Clock clock,
             PasswordEncoder passwordEncoder,
             AccountTotpRepository totps,
-            MfaLoginChallengeRepository mfaChallenges) {
+            MfaLoginChallengeRepository mfaChallenges,
+            ApplicationEventPublisher events) {
         this.sessions = sessions;
         this.accounts = accounts;
         this.audit = audit;
@@ -121,6 +133,7 @@ public class SessionService {
         this.passwordEncoder = passwordEncoder;
         this.totps = totps;
         this.mfaChallenges = mfaChallenges;
+        this.events = events;
     }
 
     /**
@@ -230,23 +243,13 @@ public class SessionService {
             throw new GoogleIdTokenVerifier.AuthenticationFailure("this account cannot sign in");
         }
 
-        Instant now = clock.instant();
-        Instant expiresAt = now.plus(properties.sessionTtl());
-
-        String token = newToken();
-        sessions.insert(hash(token), account.id(), expiresAt, userAgent, ipAddress);
-
-        audit.append(
-                account.id(),
-                account.email(),
-                AuditAction.AUTH_SIGN_IN,
-                AuditAction.TARGET_SESSION,
-                account.id(),
-                json.createObjectNode()
-                        .put("role", account.role().wire())
-                        .put("expiresAt", expiresAt.toString()));
-
-        return new IssuedSession(token, account, expiresAt);
+        // Both sign-in paths write a session the same way, through one method.
+        // They did not always: this one carried its own copy of the insert and
+        // the audit entry, so a change made to the shared method — the device
+        // check below, say — would have been absent from exactly the path most
+        // people use. The audit entry gains the "via" it did not have before,
+        // which is the whole difference.
+        return issue(account, userAgent, ipAddress, "google");
     }
 
     /**
@@ -427,6 +430,51 @@ public class SessionService {
                 json.createObjectNode());
     }
 
+    /**
+     * Ends the session a new sign-in is replacing, in the same browser.
+     *
+     * <p>Signing in again overwrites the session cookie, so the previous
+     * session becomes unreachable by the person who owned it — and stays valid
+     * on the server until its TTL runs out. Two costs: Settings shows a list of
+     * "active sessions" that grows by one every time somebody signs in on the
+     * same browser and never shrinks, and a token nobody holds any more is
+     * still a working credential for up to a day.
+     *
+     * <p>Driven by the cookie the sign-in request carried, not by matching the
+     * user agent. A user agent identifies a browser build, not a browser: two
+     * people on the same Chrome version share one, and revoking on that basis
+     * would sign somebody else out of their own machine. The cookie is the
+     * only thing that says "this exact session is being replaced", and it is
+     * present precisely when that is true.
+     *
+     * <p>Silent when the token names nothing — an expired session, a cookie
+     * from a rebuilt database, a first sign-in. None of those is an error.
+     *
+     * <p>// req: FR-AUTH-007, NFR-SEC-SESSION
+     */
+    @Transactional
+    public void revokeSuperseded(String previousToken) {
+        if (previousToken == null || previousToken.isBlank()) {
+            return;
+        }
+        byte[] tokenHash = hash(previousToken);
+        sessions
+                .find(tokenHash)
+                .ifPresent(session -> {
+                    if (sessions.revoke(tokenHash) > 0) {
+                        accounts
+                                .findById(session.accountId())
+                                .ifPresent(account -> audit.append(
+                                        account.id(),
+                                        account.email(),
+                                        AuditAction.AUTH_SIGN_OUT,
+                                        AuditAction.TARGET_SESSION,
+                                        account.id(),
+                                        json.createObjectNode().put("reason", "superseded")));
+                    }
+                });
+    }
+
     /** Ends every session for an account, used when it is demoted or deactivated. */
     @Transactional
     public int revokeAllFor(java.util.UUID accountId) {
@@ -561,14 +609,31 @@ public class SessionService {
     /**
      * Records a session for an already-authenticated account.
      *
-     * <p>Shared by both sign-in paths deliberately: session lifetime, hashing
-     * and the audit entry are properties of a session, not of how someone
+     * <p>Shared by every sign-in path deliberately (Google, password, and —
+     * since ADR-028 — the second half of a password+TOTP sign-in via {@link
+     * #issueForAccount}): session lifetime, hashing, the audit entry and
+     * device recognition are properties of a session, not of how someone
      * proved who they were.
      */
     private IssuedSession issue(Account account, String userAgent, String ipAddress, String via) {
-        Instant expiresAt = clock.instant().plus(properties.sessionTtl());
+        Instant issuedAt = clock.instant();
+        Instant expiresAt = issuedAt.plus(properties.sessionTtl());
+
+        // Asked before the row is written, and it has to be: a moment later
+        // this session is itself a prior session from this device, and the
+        // answer is no longer recoverable from the table.
+        //
+        // Two questions, not one. "Is this device unknown" is only meaningful
+        // once some device is known — before that it is true of every device,
+        // including the one in front of the person, and announcing it would
+        // train them to dismiss the alert on the day it starts working.
+        String deviceKey = DeviceDescription.key(userAgent);
+        boolean newDevice = sessions.hasAnyKnownDevice(account.id())
+                && !sessions.hasDevice(account.id(), deviceKey);
+
         String token = newToken();
-        sessions.insert(hash(token), account.id(), expiresAt, userAgent, ipAddress);
+        java.util.UUID sessionId =
+                sessions.insert(hash(token), account.id(), expiresAt, userAgent, ipAddress, newDevice);
 
         audit.append(
                 account.id(),
@@ -579,7 +644,25 @@ public class SessionService {
                 json.createObjectNode()
                         .put("role", account.role().wire())
                         .put("via", via)
+                        // In the audit trail whether or not anybody was
+                        // notified. A notification is a convenience that can
+                        // fail; this is the record that has to survive it.
+                        .put("device", DeviceDescription.describe(userAgent))
+                        .put("newDevice", newDevice)
                         .put("expiresAt", expiresAt.toString()));
+
+        if (newDevice) {
+            // Published, not sent. The listener runs after this transaction
+            // commits and off the request thread, so nobody is warned about a
+            // session that was rolled back and nobody waits on Firebase to
+            // finish signing in.
+            events.publishEvent(new NewDeviceSignInEvent(
+                    account.id(),
+                    sessionId,
+                    DeviceDescription.describe(userAgent),
+                    ipAddress,
+                    issuedAt));
+        }
 
         return new IssuedSession(token, account, expiresAt);
     }
@@ -595,6 +678,8 @@ public class SessionService {
             String ipAddress,
             Instant issuedAt,
             Instant expiresAt,
+            String device,
+            boolean newDevice,
             boolean current) {}
 
     /**
@@ -624,6 +709,8 @@ public class SessionService {
                         s.ipAddress(),
                         s.issuedAt(),
                         s.expiresAt(),
+                        DeviceDescription.describe(s.userAgent()),
+                        s.newDevice(),
                         MessageDigest.isEqual(s.tokenHash(), caller.sessionTokenHash())))
                 .toList();
     }

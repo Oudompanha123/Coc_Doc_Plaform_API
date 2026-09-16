@@ -28,18 +28,40 @@ public enum NotificationType {
             "registration.pending",
             "New registration",
             "1 new registration awaiting approval",
-            "/users-roles?tab=pending");
+            "/users-roles?tab=pending",
+            "approve"),
+
+    /**
+     * Somebody signed in to an account from a device it has not been used on
+     * before (ADR-027). Goes to the account's owner and to nobody else: this
+     * is the one notification in the system whose recipient is its subject.
+     *
+     * <p>The default body is replaced at send time with the device — "Chrome
+     * on Windows" — because a fixed string cannot say the one thing that makes
+     * this alert actionable. The device is not identity: it names a browser
+     * and an operating system, which is what lets the reader answer "was that
+     * me" without unlocking anything. Where from and exactly when stay inside
+     * the app, behind the session.
+     */
+    NEW_DEVICE_SIGN_IN(
+            "auth.new-device",
+            "New sign-in",
+            "Your account was signed in to from a new device",
+            "/settings",
+            "session");
 
     private final String key;
     private final String title;
     private final String body;
     private final String path;
+    private final String targetParam;
 
-    NotificationType(String key, String title, String body, String path) {
+    NotificationType(String key, String title, String body, String path, String targetParam) {
         this.key = key;
         this.title = title;
         this.body = body;
         this.path = path;
+        this.targetParam = targetParam;
     }
 
     /** Stable identifier for logs and for the client, which may route on it. */
@@ -51,6 +73,7 @@ public enum NotificationType {
         return title;
     }
 
+    /** Used when the sender has nothing more specific to say. */
     public String body() {
         return body;
     }
@@ -58,5 +81,22 @@ public enum NotificationType {
     /** Path within the frontend, resolved against its origin by the client. */
     public String path() {
         return path;
+    }
+
+    /**
+     * Where a click should land, with the subject named in the query string.
+     *
+     * <p>Built here rather than by the sender because the separator depends on
+     * the path, and the sender had it wrong for any path without a query of
+     * its own: it appended {@code &} unconditionally, which happened to work
+     * for the one type that existed and would have produced
+     * {@code /settings&session=…} for this one.
+     */
+    public String deepLink(String origin, String targetId) {
+        String url = origin + path;
+        if (targetId == null) {
+            return url;
+        }
+        return url + (path.contains("?") ? "&" : "?") + targetParam + "=" + targetId;
     }
 }

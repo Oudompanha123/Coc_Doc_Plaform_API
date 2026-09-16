@@ -65,6 +65,21 @@ public class PushSender {
      *     unsubscribe people because the network blinked.
      */
     public List<String> send(Collection<String> tokens, NotificationType type, NotificationTarget target) {
+        return send(tokens, type, target, type.body());
+    }
+
+    /**
+     * As {@link #send(Collection, NotificationType, NotificationTarget)}, with
+     * the banner text supplied by the caller.
+     *
+     * <p>A parameter rather than a field on the type, because some
+     * notifications only have something worth saying at the moment they are
+     * sent — a new-device sign-in says which device, and a constant cannot.
+     * The caller is responsible for keeping that text free of identity
+     * (ADR-025 decision 6); it renders on a lock screen.
+     */
+    public List<String> send(
+            Collection<String> tokens, NotificationType type, NotificationTarget target, String body) {
         if (tokens.isEmpty()) {
             return List.of();
         }
@@ -82,18 +97,22 @@ public class PushSender {
         List<String> dead = new ArrayList<>();
         for (int start = 0; start < all.size(); start += BATCH_LIMIT) {
             List<String> batch = all.subList(start, Math.min(start + BATCH_LIMIT, all.size()));
-            dead.addAll(sendBatch(fcm, batch, type, target));
+            dead.addAll(sendBatch(fcm, batch, type, target, body));
         }
         return dead;
     }
 
     private List<String> sendBatch(
-            FirebaseMessaging fcm, List<String> batch, NotificationType type, NotificationTarget target) {
+            FirebaseMessaging fcm,
+            List<String> batch,
+            NotificationType type,
+            NotificationTarget target,
+            String body) {
         MulticastMessage message = MulticastMessage.builder()
                 .addAllTokens(batch)
                 .setNotification(Notification.builder()
                         .setTitle(type.title())
-                        .setBody(type.body())
+                        .setBody(body)
                         .build())
                 // Read by the service worker to route the click. Sent as data
                 // rather than baked into the notification so the client decides
@@ -105,8 +124,7 @@ public class PushSender {
                 // An id, not a name — the banner text stays free of identity
                 // (ADR-025 decision 6) and a UUID discloses nothing on a lock
                 // screen.
-                .putData("link", frontendOrigin + type.path()
-                        + (target.id() == null ? "" : "&approve=" + target.id()))
+                .putData("link", type.deepLink(frontendOrigin, target.id()))
                 // The subject picture, shown in the banner. Absent for a
                 // password registration; the client draws initials rather than
                 // falling back to an app logo, which says nothing about who

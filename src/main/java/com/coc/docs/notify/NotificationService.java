@@ -75,4 +75,40 @@ public class NotificationService {
             devices.deleteAll(dead);
         }
     }
+
+    /**
+     * Notifies one account about something that happened to it.
+     *
+     * <p>The counterpart to {@link #notifyApprovers}: there the recipients are
+     * whoever holds a role, here the recipient is the subject. A new-device
+     * sign-in is nobody else's business — not an administrator's either, which
+     * is why this does not quietly widen to super admins the way an
+     * "interesting security event" notification tends to.
+     *
+     * <p>Every one of the account's registered devices is sent to, including —
+     * unavoidably — the one that just signed in, because a device token and a
+     * session are not the same thing and cannot be matched up. Being asked
+     * "was this you?" on the device you are holding is a poor banner and a
+     * harmless one; failing to ask the other five would be the real fault.
+     *
+     * <p>// req: FR-AUTH-007, ADR-025, ADR-027
+     */
+    @Transactional
+    public void notifyAccount(
+            UUID accountId, NotificationType type, NotificationTarget target, String body) {
+        List<String> tokens = devices.findByAccountIds(Set.of(accountId)).stream()
+                .map(DeviceToken::token)
+                .toList();
+        if (tokens.isEmpty()) {
+            // Normal: this person has not granted notification permission on
+            // any device. The alert is still in the bell and in the audit log.
+            log.debug("no registered devices for account {} ({})", accountId, type.key());
+            return;
+        }
+
+        List<String> dead = push.send(tokens, type, target, body);
+        if (!dead.isEmpty()) {
+            devices.deleteAll(dead);
+        }
+    }
 }
