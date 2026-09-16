@@ -6,12 +6,12 @@
 #
 # For a personal local setup (your own Postgres, your own Google OAuth client
 # id) use one of the two gitignored paths rather than editing a default below:
-# copy backend/.env.example to backend/.env.local and export it, or write an
+# copy backend/.env.example to backend/..env.local and export it, or write an
 # application-local.yml and run with SPRING_PROFILES_ACTIVE=local. Neither can
 # reach a commit; a real value edited into this file can, and has.
 
 spring:
-  # Load backend/.env.local directly, so a developer's values reach the
+  # Load backend/..env.local directly, so a developer's values reach the
   # application whatever launches it — IDE Run, IDE Debug, `mvn
   # spring-boot:run`, a test — with nothing to install first.
   #
@@ -27,17 +27,17 @@ spring:
   # `optional:` means an absent file is not an error, which is the normal case
   # everywhere but a developer machine. Both paths are listed because the
   # working directory is backend/ under the IDE and spring-boot:run, but the
-  # repository root under some shells. .env.local is KEY=VALUE, hence
+  # repository root under some shells. ..env.local is KEY=VALUE, hence
   # [.properties] — the extension hint Spring needs to parse a file whose name
   # does not end in one.
   #
   # This cannot weaken a deployment: OS environment variables outrank imported
   # config data in Spring Boot's precedence, so anything the environment sets
-  # still wins, and .env.local is gitignored and never shipped.
+  # still wins, and ..env.local is gitignored and never shipped.
   config:
     import:
-      - optional:file:./.env.local[.properties]
-      - optional:file:./backend/.env.local[.properties]
+      - optional:file:./..env.local[.properties]
+      - optional:file:./backend/..env.local[.properties]
 
   # Default active profile — deliberately NOT "no profile", so `mvn
   # spring-boot:run`/an IDE run configuration works with zero setup beyond
@@ -98,7 +98,7 @@ spring:
     # applied version BELOW your highest local migration is `missing`; one
     # ABOVE it is `future`, and the message is identical. V8 against a
     # checkout that stops at V7 is `future`, so it needs `*:future` — set it
-    # in your own .env.local rather than here, because it is one person
+    # in your own ..env.local rather than here, because it is one person
     # schema being ahead, not a state the team shares.
     #
     # This makes Flyway tolerate an applied migration it cannot find, so the

@@ -26,7 +26,7 @@ import org.springframework.context.annotation.Configuration;
  * {@code FIREBASE_CREDENTIALS}, rather than as a path to a file. A path means
  * every developer and every deployment needs a file placed at a matching
  * location; an environment variable is the same mechanism as every other
- * secret here (ADR-007), and {@code .env.local} is already gitignored.
+ * secret here (ADR-007), and {@code ..env.local} is already gitignored.
  *
  * <p>// req: ADR-007, ADR-025
  */
