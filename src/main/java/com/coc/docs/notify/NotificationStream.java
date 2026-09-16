@@ -109,9 +109,12 @@ public class NotificationStream {
         for (SseEmitter emitter : List.copyOf(open)) {
             try {
                 emitter.send(SseEmitter.event().name("notification").data(type.key()));
-            } catch (IOException | IllegalStateException e) {
+            } catch (Exception e) {
                 // The tab closed between the check and the send, or the
-                // response was already committed. Both are ordinary.
+                // response was already committed. Both are ordinary, and the
+                // catch is deliberately wide: this runs from an after-commit
+                // listener on a path that has already succeeded, so nothing a
+                // dead socket can throw is worth turning into a failure there.
                 remove(accountId, emitter);
             }
         }
@@ -136,7 +139,10 @@ public class NotificationStream {
             for (SseEmitter emitter : List.copyOf(open)) {
                 try {
                     emitter.send(SseEmitter.event().comment("keep-alive"));
-                } catch (IOException | IllegalStateException e) {
+                } catch (Exception e) {
+                    // Wide on purpose. A heartbeat that dies on one dead
+                    // connection stops keeping every other one alive, and a
+                    // scheduled task that throws is a task nobody is watching.
                     remove(accountId, emitter);
                 }
             }
