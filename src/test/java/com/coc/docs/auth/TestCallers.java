@@ -31,6 +31,15 @@ public final class TestCallers {
 
     /** As {@link #user(AppRole)}, for a caller still under the first-login gate. */
     public static CurrentUser user(AppRole role, boolean mustChangePassword) {
+        return user(role, mustChangePassword, true);
+    }
+
+    /**
+     * As {@link #user(AppRole, boolean)}, also choosing whether the account
+     * holds a password credential at all (ADR-030) — pass {@code false} for a
+     * Google-only caller.
+     */
+    public static CurrentUser user(AppRole role, boolean mustChangePassword, boolean hasPassword) {
         Account account = new Account(
                 UUID.randomUUID(),
                 role.wire() + "@example.com",
@@ -42,7 +51,8 @@ public final class TestCallers {
                 null,
                 Instant.now(),
                 Instant.now(),
-                mustChangePassword);
+                mustChangePassword,
+                hasPassword);
         return new CurrentUser(account, com.coc.docs.account.TestPermissions.of(role), new byte[] {1, 2, 3});
     }
 
@@ -54,5 +64,11 @@ public final class TestCallers {
     /** As {@link #authentication(AppRole)}, for a caller still under the first-login gate. */
     public static Authentication authentication(AppRole role, boolean mustChangePassword) {
         return new SessionAuthenticationFilter.SessionAuthentication(user(role, mustChangePassword));
+    }
+
+    /** As {@link #authentication(AppRole, boolean)}, also choosing {@code hasPassword} (ADR-030). */
+    public static Authentication authentication(AppRole role, boolean mustChangePassword, boolean hasPassword) {
+        return new SessionAuthenticationFilter.SessionAuthentication(
+                user(role, mustChangePassword, hasPassword));
     }
 }

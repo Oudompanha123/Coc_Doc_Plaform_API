@@ -50,8 +50,19 @@ public final class AuditAction {
     public static final String PASSWORD_RESET_REQUEST = "auth.password_reset_request";
     public static final String PASSWORD_RESET_COMPLETE = "auth.password_reset_complete";
 
-    /** A self-service password change — first-login (temporary password) or otherwise. */
+    /**
+     * A self-service password write — first-login (temporary password), a
+     * voluntary change, or a Google-only account setting its first password
+     * (ADR-030). {@code detail.kind} on the entry tells the last one apart
+     * from a change.
+     */
     public static final String PASSWORD_CHANGE_COMPLETE = "auth.password_change_complete";
+
+    /** TOTP second factor confirmed on an account (ADR-031). */
+    public static final String MFA_ENABLED = "auth.mfa_enabled";
+
+    /** TOTP second factor turned off, after re-proving the current password (ADR-031). */
+    public static final String MFA_DISABLED = "auth.mfa_disabled";
 
     /** Target types, for the {@code target_type} column. */
     public static final String TARGET_PAGE = "page";

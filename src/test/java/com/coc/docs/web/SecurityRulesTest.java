@@ -98,6 +98,10 @@ class SecurityRulesTest {
     // reason as passwordResetService above.
     @MockitoBean com.coc.docs.auth.RegistrationOtpService registrationOtpService;
 
+    // AuthController needs it to construct (ADR-031); mocked for the same
+    // reason as registrationOtpService above.
+    @MockitoBean com.coc.docs.auth.TotpService totpService;
+
     // DeviceTokenController is in this slice, so its dependency has to be too
     // (ADR-025). Mocked rather than real: this test is about which routes the
     // filter chain admits, not about what registering a device does.
@@ -449,5 +453,41 @@ class SecurityRulesTest {
                                     SessionService.COOKIE_NAME, "made-up-token")))
                     .andExpect(status().isUnauthorized());
         }
+    }
+
+    @Nested
+    @DisplayName("the notification stream")
+    class NotificationStreamRoute {
+
+        @Test
+        void is_reachable_by_any_signed_in_account() throws Exception {
+            // The rule this pins: a live stream is a long-lived response, but
+            // the authorisation question is an ordinary one asked once, before
+            // it opens. On 2026-09-16 this route answered Access Denied to a
+            // signed-in caller and the cause was worth being able to bisect
+            // here rather than in a browser.
+            mvc.perform(get("/api/v1/notifications/stream").with(as(AppRole.USER)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void is_reachable_by_an_admin_too() throws Exception {
+            mvc.perform(get("/api/v1/notifications/stream").with(as(AppRole.ADMIN)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void is_refused_without_a_session() throws Exception {
+            // It carries one account's own events, so there is no anonymous
+            // form of this request that could mean anything.
+            mvc.perform(get("/api/v1/notifications/stream")).andExpect(status().isUnauthorized());
+        }
+
+        // The async dispatch — the second pass that actually delivers this
+        // response — is deliberately not tested here. MockMvc reinstalls the
+        // test's SecurityContext on every dispatch, so it is authenticated on
+        // both passes whatever the filters do, and a case written here would
+        // pass with the bug present. Verified by reintroducing it.
+        // NotificationStreamAuthIntegrationTest covers it over real HTTP.
     }
 }

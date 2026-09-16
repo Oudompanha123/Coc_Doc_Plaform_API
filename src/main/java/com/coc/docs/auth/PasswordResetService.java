@@ -68,26 +68,31 @@ public class PasswordResetService {
     }
 
     /**
-     * Starts a reset. Mints a token and emails it <b>only</b> when the address
-     * belongs to an account that already holds a password hash (ADR-018
-     * decision 2) — a Google/Keycloak-only account is left untouched.
+     * Starts a reset — or, for a Google-only account, a first password
+     * (ADR-029, revision of ADR-018 decision 2). Mints a token and emails a
+     * link for <b>every account that exists</b>, regardless of whether it
+     * already holds a password hash; {@code mailer.sendResetLink}'s {@code
+     * hadExistingPassword} flag only changes the emailed wording ("reset"
+     * vs. "set"), not whether anything is sent.
      *
-     * <p><b>Revised by ADR-019:</b> an address with no account at all is no
-     * longer folded into the same generic response — it now throws, and the
-     * exact message reaches the caller as a {@code 404}. A Google-only
-     * account is still folded into the generic 200, same as a genuinely
-     * emailed reset (ADR-018 decision 3 still holds for that one
-     * distinction; it no longer holds for "does an account exist at all").
-     * {@code /login-password} is unaffected by this — see ADR-019.
+     * <p><b>Revised by ADR-019:</b> an address with no account at all is not
+     * folded into the same generic response — it throws, and the exact
+     * message reaches the caller as a {@code 404}. Every account that does
+     * exist — password-holding or Google-only alike — now gets the
+     * identical treatment: a token, an email, and the same generic {@code
+     * 200} (ADR-018 decision 3, and — since ADR-029 — one fewer side channel
+     * for telling the two apart than before: previously the API response
+     * was already identical, but whether an email actually arrived was not).
+     * {@code /login-password} is unaffected by any of this — see ADR-019.
      *
      * <p>What this method does <em>not</em> equalise, on either side of the
      * ADR-019 split, is response time: sending a real email takes measurably
-     * longer than the no-op path. That gap is accepted rather than closed
+     * longer than a 404's no-op path. That gap is accepted rather than closed
      * here — see {@code SessionService}'s dummy-hash comparison for the shape
      * a real fix would take, and ADR-018's "no rate limiting yet" gap, which
      * this shares and — per ADR-019 — now matters more than it did.
      *
-     * <p>// req: ADR-018, ADR-019
+     * <p>// req: ADR-018, ADR-019, ADR-029
      */
     @Transactional
     public void requestReset(String email) {
@@ -106,23 +111,13 @@ public class PasswordResetService {
             throw new ApiException(HttpStatus.NOT_FOUND, "No account found with this email address.");
         }
 
-        if (found.get().passwordHash() == null) {
-            Account googleOnly = found.get().account();
-            audit.append(
-                    googleOnly.id(),
-                    googleOnly.email(),
-                    AuditAction.PASSWORD_RESET_REQUEST,
-                    AuditAction.TARGET_ACCOUNT,
-                    googleOnly.id(),
-                    json.createObjectNode().put("emailed", false).put("reason", "no_password_credential"));
-            return;
-        }
-
         Account account = found.get().account();
+        boolean hadExistingPassword = found.get().passwordHash() != null;
+
         String rawToken = newToken();
         Instant expiresAt = clock.instant().plus(TTL);
         tokens.insert(hash(rawToken), account.id(), expiresAt);
-        mailer.sendResetLink(account.email(), rawToken);
+        mailer.sendResetLink(account.email(), rawToken, hadExistingPassword);
 
         audit.append(
                 account.id(),
@@ -130,7 +125,10 @@ public class PasswordResetService {
                 AuditAction.PASSWORD_RESET_REQUEST,
                 AuditAction.TARGET_ACCOUNT,
                 account.id(),
-                json.createObjectNode().put("emailed", true).put("expiresAt", expiresAt.toString()));
+                json.createObjectNode()
+                        .put("emailed", true)
+                        .put("expiresAt", expiresAt.toString())
+                        .put("hadPasswordAlready", hadExistingPassword));
     }
 
     /**
@@ -142,10 +140,18 @@ public class PasswordResetService {
      * mailbox, so refusing it discloses nothing about anyone else's account
      * (ADR-018 decision 3).
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-018
+     * <p><b>Distinguishes an initial set from a genuine reset for its return
+     * message and audit {@code detail.kind} only (ADR-029)</b> — the same
+     * "read the old state before it changes" shape {@code
+     * SessionService.changeOwnPassword} already uses (ADR-030). The write
+     * itself ({@code AccountRepository.updatePasswordHash}) was already
+     * unconditional and needed no change: an account with no existing hash
+     * was never special-cased there.
+     *
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-018, ADR-029
      */
     @Transactional
-    public void resetPassword(String rawToken, String newRawPassword) {
+    public String resetPassword(String rawToken, String newRawPassword) {
         byte[] tokenHash = hash(rawToken);
         Optional<PasswordResetToken> found = tokens.find(tokenHash);
 
@@ -154,7 +160,9 @@ public class PasswordResetService {
         }
 
         UUID accountId = found.get().accountId();
-        Account account = accounts.findById(accountId).orElseThrow();
+        AccountCredential credential = accounts.findCredentialById(accountId).orElseThrow();
+        Account account = credential.account();
+        boolean settingInitialPassword = credential.passwordHash() == null;
 
         accounts.updatePasswordHash(accountId, passwordEncoder.encode(newRawPassword));
         tokens.markUsed(tokenHash);
@@ -166,7 +174,13 @@ public class PasswordResetService {
                 AuditAction.PASSWORD_RESET_COMPLETE,
                 AuditAction.TARGET_ACCOUNT,
                 account.id(),
-                json.createObjectNode().put("sessionsRevoked", revoked));
+                json.createObjectNode()
+                        .put("sessionsRevoked", revoked)
+                        .put("kind", settingInitialPassword ? "initial-set" : "reset"));
+
+        return settingInitialPassword
+                ? "Your password has been set. You can now log in with your email and password."
+                : "Your password has been reset. You can now log in.";
     }
 
     /** Table hygiene, mirroring {@code SessionService.purgeExpired} — not a security control. */

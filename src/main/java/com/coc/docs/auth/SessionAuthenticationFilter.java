@@ -33,6 +33,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 public class SessionAuthenticationFilter extends OncePerRequestFilter {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(SessionAuthenticationFilter.class);
+
     private final SessionService sessions;
 
     public SessionAuthenticationFilter(SessionService sessions) {
@@ -45,11 +48,74 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
 
         if (SecurityContextHolder.getContext().getAuthentication() == null) {
-            readCookie(request)
-                    .flatMap(sessions::resolve)
-                    .ifPresent(SessionAuthenticationFilter::authenticate);
+            Optional<String> token = readCookie(request);
+            Optional<CurrentUser> caller = token.flatMap(sessions::resolve);
+            caller.ifPresent(SessionAuthenticationFilter::authenticate);
+
+            // Why these two lines exist: an Access Denied names nothing. It is
+            // the same message whether the cookie was absent, the session had
+            // expired, the account was deactivated, or the role is simply too
+            // low for the route — four different problems with four different
+            // answers, and a day was spent guessing between them on
+            // 2026-09-16. Debug level, so it costs nothing in normal running.
+            //
+            // The account id and role, never the email: this line is for
+            // finding out why a request was refused, not for recording who
+            // (NFR-SEC-PII). The audit trail is where identity belongs.
+            if (log.isDebugEnabled()) {
+                if (token.isEmpty()) {
+                    log.debug("no session cookie on {} {}", request.getMethod(), request.getRequestURI());
+                } else if (caller.isEmpty()) {
+                    log.debug(
+                            "session cookie on {} {} resolved to nothing — expired, revoked,"
+                                    + " or an account that is no longer active",
+                            request.getMethod(),
+                            request.getRequestURI());
+                } else {
+                    log.debug(
+                            "authenticated account {} as {} on {} {}",
+                            caller.get().account().id(),
+                            caller.get().account().role().wire(),
+                            request.getMethod(),
+                            request.getRequestURI());
+                }
+            }
         }
         chain.doFilter(request, response);
+    }
+
+    /**
+     * Also run on the ASYNC dispatch, which {@link OncePerRequestFilter} skips
+     * by default.
+     *
+     * <p>Without this, a response that goes asynchronous — the notification
+     * stream (ADR-028), or anything returning an {@code SseEmitter} — is
+     * authenticated on the way in and anonymous on the way back:
+     *
+     * <pre>
+     * Securing GET /api/v1/notifications/stream
+     * ERROR ... Servlet.service() for servlet [dispatcherServlet] threw exception
+     * org.springframework.security.authorization.AuthorizationDeniedException: Access Denied
+     * </pre>
+     *
+     * <p>The container dispatches the request a second time to finish the async
+     * response. Spring Security's {@code AuthorizationFilter} runs on that
+     * dispatch — it filters every dispatcher type by default, and that default
+     * is the safe one, worth keeping. This filter did not, so the second pass
+     * had an empty {@link SecurityContext} and the route was denied to a caller
+     * who had just been let in. The error escapes to the servlet rather than
+     * becoming a 401 because the response was already committed, which is what
+     * makes the log read like a crash instead of a refusal.
+     *
+     * <p>Nothing is weakened by running again: the cookie is re-read and
+     * re-resolved against the account row, so an account deactivated between
+     * the two dispatches is not authenticated on the second. The alternative —
+     * turning off authorization for async dispatches — would have made the
+     * route work by not checking it.
+     */
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return false;
     }
 
     private static void authenticate(CurrentUser user) {

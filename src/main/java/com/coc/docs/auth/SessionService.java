@@ -17,6 +17,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Optional;
@@ -48,10 +49,23 @@ public class SessionService {
 
     public static final String COOKIE_NAME = "coc_session";
 
+    /**
+     * How long a post-password MFA challenge (ADR-031) stays redeemable —
+     * long enough to switch to an authenticator app and type a code, short
+     * enough not to sit as a standing, password-already-proven credential.
+     */
+    private static final Duration MFA_CHALLENGE_TTL = Duration.ofMinutes(5);
+
     private final SessionRepository sessions;
     private final AccountRepository accounts;
     private final AuditRepository audit;
     private final GoogleIdTokenVerifier google;
+
+    /** TOTP enrollment lookups for the password sign-in path (ADR-031) — no dependency the other direction: see {@link TotpService}'s class Javadoc. */
+    private final AccountTotpRepository totps;
+
+    /** Mints the pending-MFA challenge {@link TotpService#verifyLoginChallenge} redeems (ADR-031). */
+    private final MfaLoginChallengeRepository mfaChallenges;
 
     /**
      * The ADR-013 broker, present only when a Keycloak realm is configured.
@@ -104,6 +118,8 @@ public class SessionService {
             ObjectMapper json,
             Clock clock,
             PasswordEncoder passwordEncoder,
+            AccountTotpRepository totps,
+            MfaLoginChallengeRepository mfaChallenges,
             ApplicationEventPublisher events) {
         this.sessions = sessions;
         this.accounts = accounts;
@@ -115,11 +131,30 @@ public class SessionService {
         this.json = json;
         this.clock = clock;
         this.passwordEncoder = passwordEncoder;
+        this.totps = totps;
+        this.mfaChallenges = mfaChallenges;
         this.events = events;
     }
 
+    /**
+     * What {@link #signInWithPassword} returns (ADR-031): either a real
+     * session, or notice that a TOTP code is still needed. Sealed rather
+     * than a boolean-plus-nullable-field pair, so {@code AuthController}'s
+     * {@code switch} is exhaustive and the compiler — not a runtime null
+     * check — enforces that every case is handled.
+     */
+    public sealed interface PasswordSignInResult permits IssuedSession, MfaRequired {}
+
     /** An issued session: the plaintext token, which exists only here and in the response. */
-    public record IssuedSession(String token, Account account, Instant expiresAt) {}
+    public record IssuedSession(String token, Account account, Instant expiresAt) implements PasswordSignInResult {}
+
+    /**
+     * The password was correct, but this account has confirmed TOTP
+     * (ADR-031) — no session yet. {@code challengeToken} is the plaintext
+     * value {@code AuthController} sets as the {@code coc_mfa_pending}
+     * cookie; only its hash is persisted ({@link #mintMfaChallenge}).
+     */
+    public record MfaRequired(String challengeToken, Instant expiresAt) implements PasswordSignInResult {}
 
     // -----------------------------------------------------------------------
     // Sign in
@@ -263,7 +298,8 @@ public class SessionService {
                 existing.deactivatedAt(),
                 existing.createdAt(),
                 existing.updatedAt(),
-                existing.mustChangePassword());
+                existing.mustChangePassword(),
+                existing.hasPassword());
     }
 
     /**
@@ -504,12 +540,19 @@ public class SessionService {
      * the miss path makes an unknown address answer measurably faster than a
      * known one, which is the same disclosure by another route.
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-014
+     * <p><b>MFA (ADR-031).</b> A correct password does not always end here.
+     * When the account has a confirmed TOTP enrollment, this returns {@link
+     * MfaRequired} instead of issuing a session — {@code AuthController}
+     * sets that as a short-lived pending-MFA cookie rather than the real
+     * session cookie, and only {@code TotpService.verifyLoginChallenge}
+     * (redeemed via {@link #issueForAccount}) finishes the sign-in.
+     *
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, FR-AUTH-009, ADR-014, ADR-031
      */
     // Same reason as signIn: the refusal is audited and then thrown, and a
     // rollback would erase the record of it. Nothing else here writes.
     @Transactional(noRollbackFor = GoogleIdTokenVerifier.AuthenticationFailure.class)
-    public IssuedSession signInWithPassword(
+    public PasswordSignInResult signInWithPassword(
             String email, String rawPassword, String userAgent, String ipAddress) {
 
         Optional<AccountCredential> found = accounts.findCredentialByEmailIgnoreCase(email);
@@ -535,15 +578,42 @@ public class SessionService {
             throw new GoogleIdTokenVerifier.AuthenticationFailure("email or password not accepted");
         }
 
-        return issue(found.get().account(), userAgent, ipAddress, "password");
+        Account account = found.get().account();
+        boolean mfaEnrolled = totps.find(account.id()).filter(AccountTotp::isConfirmed).isPresent();
+        if (mfaEnrolled) {
+            return mintMfaChallenge(account);
+        }
+        return issue(account, userAgent, ipAddress, "password");
+    }
+
+    private MfaRequired mintMfaChallenge(Account account) {
+        String rawToken = newToken();
+        Instant expiresAt = clock.instant().plus(MFA_CHALLENGE_TTL);
+        mfaChallenges.insert(account.id(), hash(rawToken), expiresAt);
+        return new MfaRequired(rawToken, expiresAt);
+    }
+
+    /**
+     * Issues a real session for an account that has already cleared both
+     * factors (ADR-031) — the second half of the password+TOTP sign-in,
+     * called by {@code AuthController} once {@code
+     * TotpService.verifyLoginChallenge} returns the account. A thin public
+     * wrapper over {@link #issue}, which every other sign-in path already
+     * uses privately.
+     */
+    @Transactional
+    public IssuedSession issueForAccount(Account account, String userAgent, String ipAddress) {
+        return issue(account, userAgent, ipAddress, "password-mfa");
     }
 
     /**
      * Records a session for an already-authenticated account.
      *
-     * <p>Shared by both sign-in paths deliberately: session lifetime, hashing,
-     * the audit entry and device recognition are properties of a session, not
-     * of how someone proved who they were.
+     * <p>Shared by every sign-in path deliberately (Google, password, and —
+     * since ADR-031 — the second half of a password+TOTP sign-in via {@link
+     * #issueForAccount}): session lifetime, hashing, the audit entry and
+     * device recognition are properties of a session, not of how someone
+     * proved who they were.
      */
     private IssuedSession issue(Account account, String userAgent, String ipAddress, String via) {
         Instant issuedAt = clock.instant();
@@ -775,22 +845,24 @@ public class SessionService {
      * could name someone else.
      *
      * <p><b>Current-password check (ADR-022, revision of ADR-020; made
-     * unconditional by ADR-024).</b> Every caller — voluntary change and
-     * forced first-login completion alike — must prove {@code
-     * currentRawPassword} against the stored hash first. Without this, a
-     * session alone (left open on a shared machine, or lifted by an XSS the
-     * {@code httpOnly} cookie doesn't fully close off, ADR-011) would be
-     * enough to lock the real owner out by silently setting a new password.
-     * The forced flow re-proves the same temporary password {@code
-     * /login-password} just verified moments earlier on this exact session —
-     * ADR-022 originally exempted this case for that reason, but ADR-024
-     * removes the exemption on direct PM request for an old-password field
-     * on {@code /create-password}.
+     * unconditional for existing hashes by ADR-024; given a third branch by
+     * ADR-030).</b> Whenever this account already holds a {@code
+     * password_hash} — voluntary change and forced first-login completion
+     * alike — the caller must prove {@code currentRawPassword} against it
+     * first. Without this, a session alone (left open on a shared machine, or
+     * lifted by an XSS the {@code httpOnly} cookie doesn't fully close off,
+     * ADR-011) would be enough to lock the real owner out by silently setting
+     * a new password. The forced flow re-proves the same temporary password
+     * {@code /login-password} just verified moments earlier on this exact
+     * session — ADR-022 originally exempted this case for that reason, but
+     * ADR-024 removes the exemption on direct PM request for an old-password
+     * field on {@code /create-password}.
      *
-     * <p>Refuses a Google-only account (no {@code password_hash} to replace)
-     * and refuses reusing the current password — the one rule this endpoint
-     * exists to enforce for a just-invited account, since a temporary password
-     * that could be "changed" back to itself was never actually replaced.
+     * <p><b>No existing hash at all (ADR-030).</b> A Google-only account
+     * setting its first password: there is no current password to prove and
+     * no existing hash to refuse reusing, so both checks are skipped rather
+     * than failing — this is not the old "Google-only accounts are refused
+     * outright" behaviour, which ADR-030 replaces.
      *
      * <p>Every other live session for this account is revoked, not this one:
      * the caller is using this exact session to make the change, and ending it
@@ -799,30 +871,28 @@ public class SessionService {
      * reset path, which has no current session to spare and revokes all of
      * them.
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-022, ADR-024
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, ADR-017, ADR-022, ADR-024, ADR-030
      */
     @Transactional
     public void changeOwnPassword(CurrentUser caller, String currentRawPassword, String newRawPassword) {
         AccountCredential credential = accounts.findCredentialById(caller.id()).orElseThrow();
+        boolean settingInitialPassword = credential.passwordHash() == null;
 
-        if (credential.passwordHash() == null) {
-            throw ApiException.badRequest(
-                    "this account has no password set; sign in with Google instead");
-        }
+        if (!settingInitialPassword) {
+            if (currentRawPassword == null
+                    || currentRawPassword.isBlank()
+                    || !passwordEncoder.matches(currentRawPassword, credential.passwordHash())) {
+                // Reported plainly, not folded into a generic failure: the caller
+                // already holds a live session as themselves, so there is no third
+                // party here for a generic message to protect from enumeration —
+                // same reasoning ADR-018 decision 3 applies to /reset-password.
+                throw ApiException.badRequest("your current password is incorrect");
+            }
 
-        if (currentRawPassword == null
-                || currentRawPassword.isBlank()
-                || !passwordEncoder.matches(currentRawPassword, credential.passwordHash())) {
-            // Reported plainly, not folded into a generic failure: the caller
-            // already holds a live session as themselves, so there is no third
-            // party here for a generic message to protect from enumeration —
-            // same reasoning ADR-018 decision 3 applies to /reset-password.
-            throw ApiException.badRequest("your current password is incorrect");
-        }
-
-        if (passwordEncoder.matches(newRawPassword, credential.passwordHash())) {
-            throw ApiException.badRequest(
-                    "choose a password different from your current one");
+            if (passwordEncoder.matches(newRawPassword, credential.passwordHash())) {
+                throw ApiException.badRequest(
+                        "choose a password different from your current one");
+            }
         }
 
         accounts.updatePasswordHash(caller.id(), passwordEncoder.encode(newRawPassword));
@@ -834,6 +904,8 @@ public class SessionService {
                 AuditAction.PASSWORD_CHANGE_COMPLETE,
                 AuditAction.TARGET_ACCOUNT,
                 caller.id(),
-                json.createObjectNode().put("otherSessionsRevoked", revoked));
+                json.createObjectNode()
+                        .put("otherSessionsRevoked", revoked)
+                        .put("kind", settingInitialPassword ? "initial-set" : "change"));
     }
 }

@@ -102,7 +102,7 @@
       <artifactId>spring-boot-starter-mail</artifactId>
     </dependency>
 
-    <!-- Push notifications (ADR-024). Optional at runtime: FirebaseConfig only
+    <!-- Push notifications (ADR-025). Optional at runtime: FirebaseConfig only
          creates a FirebaseMessaging when app.firebase.credentials is set, and
          PushSender takes it through an ObjectProvider, so a developer without
          a service account gets a log line instead of a broken application. -->
@@ -110,6 +110,28 @@
       <groupId>com.google.firebase</groupId>
       <artifactId>firebase-admin</artifactId>
       <version>9.4.1</version>
+    </dependency>
+
+    <!-- TOTP second factor (ADR-031): RFC 6238 code generation/verification
+         with time-window tolerance. Don't hand-roll HMAC-based OTP crypto,
+         same reasoning as reusing PasswordEncoder for bcrypt rather than a
+         custom hash. -->
+    <dependency>
+      <groupId>dev.samstevens.totp</groupId>
+      <artifactId>totp</artifactId>
+      <version>1.7.1</version>
+    </dependency>
+    <!-- QR code rendering that dev.samstevens.totp's QrGenerator delegates to
+         (ADR-031): the setup wizard's scannable QR image. -->
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>core</artifactId>
+      <version>3.5.3</version>
+    </dependency>
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>javase</artifactId>
+      <version>3.5.3</version>
     </dependency>
 
     <!-- The OpenAPI contract is generated from the annotated controllers
@@ -146,7 +168,7 @@
     </dependency>
 
     <!-- Object storage behind the S3 API (CONST-TECH-08): self-uploaded
-         profile photos (ADR-025). Path-style requests only
+         profile photos (ADR-026). Path-style requests only
          (AvatarStorageConfig), the one addressing scheme every S3-compatible
          provider is guaranteed to support. -->
     <dependency>

@@ -57,7 +57,8 @@ class NotificationServiceTest {
                 null,
                 Instant.now(),
                 Instant.now(),
-                false);
+                false,
+                true);
     }
 
     private static DeviceToken device(UUID accountId, String token) {

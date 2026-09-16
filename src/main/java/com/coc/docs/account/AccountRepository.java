@@ -32,14 +32,17 @@ public class AccountRepository {
     /**
      * The account columns, always aliased {@code a}.
      *
-     * <p>{@code password_hash} is deliberately absent: every query in this
-     * class except {@link #findCredentialByEmailIgnoreCase} must be incapable
-     * of reading it. Kept as its own list rather than appended, so neither can
-     * drift into the other by accident.
+     * <p>{@code password_hash} itself is deliberately absent: every query in
+     * this class except {@link #findCredentialByEmailIgnoreCase} and
+     * {@link #findCredentialById} must be incapable of reading it. Kept as its
+     * own list rather than appended, so neither can drift into the other by
+     * accident. {@code has_password} (ADR-030) is not the exception to that —
+     * it is a boolean Postgres computes from the column, never the column
+     * itself, so it is safe to include everywhere.
      */
     private static final String ACCOUNT_COLUMNS =
             "a.id, a.email, a.display_name, a.avatar_url, a.avatar_uploaded_at, a.status, a.deactivated_at, "
-                    + "a.created_at, a.updated_at, a.must_change_password";
+                    + "a.created_at, a.updated_at, a.must_change_password, (a.password_hash is not null) as has_password";
 
     /**
      * {@code filter (where ...)} rather than a plain {@code array_agg}: the
@@ -88,7 +91,8 @@ public class AccountRepository {
                 deactivated == null ? null : deactivated.toInstant(),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
                 rs.getObject("updated_at", OffsetDateTime.class).toInstant(),
-                rs.getBoolean("must_change_password"));
+                rs.getBoolean("must_change_password"),
+                rs.getBoolean("has_password"));
     }
 
     /**
@@ -377,10 +381,11 @@ public class AccountRepository {
 
     /**
      * Sets a new password hash — the reset path (ADR-018), the self-service
-     * change path (revision of ADR-017), and nowhere else. Also usable to give
-     * a Google-only account its first password hash, but nothing in this
-     * codebase does that yet (ADR-018 decision 2 deliberately does not go
-     * there).
+     * change path (revision of ADR-017), and, since ADR-030, the same
+     * self-service path also giving a Google-only account its first password
+     * hash. {@code /forgot-password} still does not go there as a side
+     * effect (ADR-018 decision 2) — this is the deliberate, authenticated
+     * door instead.
      *
      * <p>Always clears {@code must_change_password}. Whichever path landed a
      * new hash on this row, the temporary credential it was guarding against
