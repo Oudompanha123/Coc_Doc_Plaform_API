@@ -127,7 +127,7 @@ class NewDeviceSignInTest extends PostgresTestBase {
     @DisplayName("the new device is flagged in the caller's own session list")
     void listedSessionCarriesTheFlag() {
         signIn(CHROME);
-        // Cast is safe here: no fixture in this suite enrolls TOTP (ADR-028),
+        // Cast is safe here: no fixture in this suite enrolls TOTP (ADR-031),
         // so signInWithPassword always returns a real session.
         SessionService.IssuedSession onFirefox = (SessionService.IssuedSession)
                 sessions.signInWithPassword("user@example.com", PASSWORD, FIREFOX, "127.0.0.1");

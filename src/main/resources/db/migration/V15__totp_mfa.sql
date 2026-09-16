@@ -1,8 +1,8 @@
 -- Coc Docs Platform — TOTP (Google Authenticator) second factor
--- Implements ADR-028: an opt-in second factor gating /login-password only.
+-- Implements ADR-031: an opt-in second factor gating /login-password only.
 -- Two tables, both mirroring the hashed-challenge shape ADR-021 already
 -- established for registration_challenge.
---                            // req: FR-AUTH-002, FR-AUTH-009, ADR-011, ADR-028
+--                            // req: FR-AUTH-002, FR-AUTH-009, ADR-011, ADR-031
 
 -- One row per account that has ever started TOTP setup. confirmed_at is
 -- null while a setup attempt is pending its confirmation code -- see
@@ -15,7 +15,7 @@
 -- one-way hash cannot be used, and no application-layer encryption key
 -- exists anywhere in this codebase to encrypt it with (ADR-007 is N/A for
 -- exactly this reason). It sits in the same trust boundary as the database
--- connection string -- see ADR-028 Key Choice 2 and Consequences.
+-- connection string -- see ADR-031 Key Choice 2 and Consequences.
 create table account_totp (
   id              uuid        primary key default gen_random_uuid(),
   account_id      uuid        not null references account(id) on delete cascade,
@@ -39,7 +39,7 @@ create table account_totp (
 );
 
 comment on table account_totp is
-  'TOTP second factor for password sign-in (ADR-028). At most one row per account, enforced below. confirmed_at null = setup in progress, not yet usable to gate sign-in.';
+  'TOTP second factor for password sign-in (ADR-031). At most one row per account, enforced below. confirmed_at null = setup in progress, not yet usable to gate sign-in.';
 
 -- At most one TOTP enrollment per account, whether pending or confirmed --
 -- TotpService.startSetup replaces an existing pending row rather than
@@ -67,7 +67,7 @@ create table mfa_login_challenge (
 );
 
 comment on table mfa_login_challenge is
-  'A password sign-in that has passed its first factor and is waiting on a TOTP code (ADR-028). Deleted on successful verification; purged when expired by MfaLoginChallengeMaintenance, mirroring RegistrationOtpMaintenance/PasswordResetTokenMaintenance.';
+  'A password sign-in that has passed its first factor and is waiting on a TOTP code (ADR-031). Deleted on successful verification; purged when expired by MfaLoginChallengeMaintenance, mirroring RegistrationOtpMaintenance/PasswordResetTokenMaintenance.';
 
 create unique index mfa_login_challenge_token_hash_uq on mfa_login_challenge (token_hash);
 

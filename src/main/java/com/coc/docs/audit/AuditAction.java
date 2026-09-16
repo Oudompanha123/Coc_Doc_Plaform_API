@@ -58,10 +58,10 @@ public final class AuditAction {
      */
     public static final String PASSWORD_CHANGE_COMPLETE = "auth.password_change_complete";
 
-    /** TOTP second factor confirmed on an account (ADR-028). */
+    /** TOTP second factor confirmed on an account (ADR-031). */
     public static final String MFA_ENABLED = "auth.mfa_enabled";
 
-    /** TOTP second factor turned off, after re-proving the current password (ADR-028). */
+    /** TOTP second factor turned off, after re-proving the current password (ADR-031). */
     public static final String MFA_DISABLED = "auth.mfa_disabled";
 
     /** Target types, for the {@code target_type} column. */

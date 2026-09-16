@@ -98,7 +98,7 @@ class SecurityRulesTest {
     // reason as passwordResetService above.
     @MockitoBean com.coc.docs.auth.RegistrationOtpService registrationOtpService;
 
-    // AuthController needs it to construct (ADR-028); mocked for the same
+    // AuthController needs it to construct (ADR-031); mocked for the same
     // reason as registrationOtpService above.
     @MockitoBean com.coc.docs.auth.TotpService totpService;
 

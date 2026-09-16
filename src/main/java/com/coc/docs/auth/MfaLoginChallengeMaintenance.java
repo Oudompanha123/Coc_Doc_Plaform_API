@@ -7,7 +7,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Sweeps out expired {@code mfa_login_challenge} rows (ADR-028). Mirrors
+ * Sweeps out expired {@code mfa_login_challenge} rows (ADR-031). Mirrors
  * {@link RegistrationOtpMaintenance} exactly, for the same reason: not a
  * security control — an expired row is already refused by {@link
  * MfaLoginChallenge#isUsable}, which checks the instant directly — this only

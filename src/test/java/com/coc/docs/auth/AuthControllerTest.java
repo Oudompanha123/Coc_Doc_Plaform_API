@@ -1034,7 +1034,7 @@ class AuthControllerTest {
     }
 
     /**
-     * ADR-028. The controller has two jobs here: pass through an ordinary
+     * ADR-031. The controller has two jobs here: pass through an ordinary
      * session unchanged, and — for an account with confirmed TOTP — issue a
      * pending-MFA cookie instead of a session, never both at once.
      */
@@ -1083,7 +1083,7 @@ class AuthControllerTest {
     }
 
     /**
-     * ADR-028. Redeems the pending-MFA cookie {@code /login-password} left
+     * ADR-031. Redeems the pending-MFA cookie {@code /login-password} left
      * behind; {@code TotpService}/{@code SessionService} are both mocked, so
      * this only proves the controller's own plumbing (cookie in, session
      * cookie + cleared pending cookie out) — code verification itself is

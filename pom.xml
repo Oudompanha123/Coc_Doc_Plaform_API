@@ -112,7 +112,7 @@
       <version>9.4.1</version>
     </dependency>
 
-    <!-- TOTP second factor (ADR-028): RFC 6238 code generation/verification
+    <!-- TOTP second factor (ADR-031): RFC 6238 code generation/verification
          with time-window tolerance. Don't hand-roll HMAC-based OTP crypto,
          same reasoning as reusing PasswordEncoder for bcrypt rather than a
          custom hash. -->
@@ -122,7 +122,7 @@
       <version>1.7.1</version>
     </dependency>
     <!-- QR code rendering that dev.samstevens.totp's QrGenerator delegates to
-         (ADR-028): the setup wizard's scannable QR image. -->
+         (ADR-031): the setup wizard's scannable QR image. -->
     <dependency>
       <groupId>com.google.zxing</groupId>
       <artifactId>core</artifactId>

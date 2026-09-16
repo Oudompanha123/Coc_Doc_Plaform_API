@@ -98,7 +98,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register/resend").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register/verify").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login-password").permitAll()
-                        // ADR-028: redeeming the pending-MFA cookie a correct password just
+                        // ADR-031: redeeming the pending-MFA cookie a correct password just
                         // left behind. Public by the same necessity as /login-password itself
                         // -- no session exists yet, and what stands in for one here is the
                         // pending cookie, not this route's own permissions.
@@ -135,7 +135,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/change-password")
                         .hasRole(AppRole.USER.name())
 
-                        // Self-service TOTP enrollment (ADR-028): same floor and reasoning
+                        // Self-service TOTP enrollment (ADR-031): same floor and reasoning
                         // as change-password above -- acts on the caller's own account,
                         // resolved from the session, and cannot name another.
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/mfa/setup/start").hasRole(AppRole.USER.name())

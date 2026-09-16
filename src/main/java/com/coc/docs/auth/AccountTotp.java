@@ -4,14 +4,14 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * One account's TOTP enrollment (ADR-028). At most one row per account
+ * One account's TOTP enrollment (ADR-031). At most one row per account
  * ({@code account_totp_account_uq}), whether pending or confirmed.
  *
  * <p>{@code secret} is plain text, not hashed — see {@code
- * V15__totp_mfa.sql}'s comment and ADR-028 Key Choice 2 for why a one-way
+ * V15__totp_mfa.sql}'s comment and ADR-031 Key Choice 2 for why a one-way
  * hash cannot be used here the way it is for {@code account.password_hash}.
  *
- * <p>// req: FR-AUTH-009, ADR-028
+ * <p>// req: FR-AUTH-009, ADR-031
  */
 public record AccountTotp(
         UUID id,

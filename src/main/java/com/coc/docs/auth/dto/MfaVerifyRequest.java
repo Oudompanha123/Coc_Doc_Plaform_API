@@ -6,7 +6,7 @@ import jakarta.validation.constraints.Pattern;
 
 /**
  * Redeems the pending-MFA cookie a successful {@code /login-password} call
- * left behind (ADR-028): the 6-digit code from the account's authenticator
+ * left behind (ADR-031): the 6-digit code from the account's authenticator
  * app — or the configured developer code, when {@code app.otp.enabled} is
  * false.
  */

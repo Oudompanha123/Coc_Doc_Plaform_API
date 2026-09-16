@@ -11,9 +11,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Reads and writes {@code mfa_login_challenge} rows (ADR-028).
+ * Reads and writes {@code mfa_login_challenge} rows (ADR-031).
  *
- * <p>// req: FR-AUTH-009, ADR-028
+ * <p>// req: FR-AUTH-009, ADR-031
  */
 @Repository
 public class MfaLoginChallengeRepository {

@@ -4,7 +4,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * The {@code app.otp.*} switch for TOTP second-factor login (ADR-028).
+ * The {@code app.otp.*} switch for TOTP second-factor login (ADR-031).
  *
  * <p><b>Deliberately {@code @Value}-defaulted, not a required {@code
  * @ConfigurationProperties} block like {@link AppProperties}.</b>
@@ -32,7 +32,7 @@ import org.springframework.stereotype.Component;
  * is active outside a {@code dev}/{@code test} Spring profile — see its
  * Javadoc.
  *
- * <p>// req: FR-AUTH-009, ADR-028
+ * <p>// req: FR-AUTH-009, ADR-031
  */
 @Component
 public class OtpProperties {

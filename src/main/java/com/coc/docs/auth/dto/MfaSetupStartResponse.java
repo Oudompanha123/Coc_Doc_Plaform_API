@@ -3,7 +3,7 @@ package com.coc.docs.auth.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
- * Returned by {@code POST /api/v1/auth/mfa/setup/start} (ADR-028): the raw
+ * Returned by {@code POST /api/v1/auth/mfa/setup/start} (ADR-031): the raw
  * material to scan or type into an authenticator app. Not returned again
  * once {@code POST /api/v1/auth/mfa/setup/verify} confirms the enrollment —
  * see {@code TotpService.startSetup}'s Javadoc for why the secret isn't

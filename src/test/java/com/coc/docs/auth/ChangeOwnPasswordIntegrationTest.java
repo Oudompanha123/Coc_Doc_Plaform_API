@@ -50,7 +50,7 @@ class ChangeOwnPasswordIntegrationTest extends PostgresTestBase {
     /**
      * Signs in with a real password and resolves the resulting token back into
      * a real {@code CurrentUser}. Cast is safe here: no fixture in this suite
-     * enrolls TOTP (ADR-028), so {@code signInWithPassword} always returns a
+     * enrolls TOTP (ADR-031), so {@code signInWithPassword} always returns a
      * real session, never {@code MfaRequired}.
      */
     private CurrentUser signInAndResolve(String email, String rawPassword) {

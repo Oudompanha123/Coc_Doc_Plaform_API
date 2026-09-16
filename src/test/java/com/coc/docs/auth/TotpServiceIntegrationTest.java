@@ -24,11 +24,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 /**
  * The TOTP setup, disable, and login-redemption flows against a real
- * PostgreSQL (ADR-028). Mirrors {@link RegistrationOtpServiceIntegrationTest}:
+ * PostgreSQL (ADR-031). Mirrors {@link RegistrationOtpServiceIntegrationTest}:
  * what is under test is the challenge/enrollment lifecycle and the replay
  * guard, not the TOTP library itself.
  *
- * <p>// req: FR-AUTH-009, ADR-028
+ * <p>// req: FR-AUTH-009, ADR-031
  */
 class TotpServiceIntegrationTest extends PostgresTestBase {
 
@@ -60,6 +60,12 @@ class TotpServiceIntegrationTest extends PostgresTestBase {
         return new CurrentUser(account, TestPermissions.of(AppRole.USER), new byte[] {1, 2, 3});
     }
 
+    /** A Google-only account: no password_hash at all (revision of ADR-031). */
+    private CurrentUser newGoogleOnlyUser(String email) {
+        Account account = accounts.insert(email, "Test User", AppRole.USER, null, AccountStatus.ACTIVE);
+        return new CurrentUser(account, TestPermissions.of(AppRole.USER), new byte[] {1, 2, 3});
+    }
+
     /** A real, currently-valid code for {@code secret} — what an authenticator app would show right now. */
     private static String currentCodeFor(String secret) {
         try {
@@ -69,6 +75,17 @@ class TotpServiceIntegrationTest extends PostgresTestBase {
         } catch (CodeGenerationException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    @Test
+    @DisplayName("startSetup refuses an account with no password (revision of ADR-031)")
+    void startSetupRefusesAGoogleOnlyAccount() {
+        CurrentUser caller = newGoogleOnlyUser("google.only@example.com");
+
+        assertThatThrownBy(() -> totp.startSetup(caller))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Set a password");
+        assertThat(totp.isEnabledFor(caller.id())).isFalse();
     }
 
     @Test

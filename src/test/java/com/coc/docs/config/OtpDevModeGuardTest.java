@@ -10,7 +10,7 @@ import org.springframework.mock.env.MockEnvironment;
  * No Spring context — pure unit tests of the fail-fast check, mirroring
  * {@code KeycloakIdTokenServiceTest}'s constructor-guard tests exactly.
  *
- * <p>// req: NFR-SEC-AUTH, ADR-028
+ * <p>// req: NFR-SEC-AUTH, ADR-031
  */
 class OtpDevModeGuardTest {
 

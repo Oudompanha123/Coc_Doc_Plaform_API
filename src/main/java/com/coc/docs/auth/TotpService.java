@@ -31,7 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Enrolls, confirms, disables, and verifies TOTP second-factor codes
- * (ADR-028). Mirrors {@link RegistrationOtpService}'s structure: a challenge
+ * (ADR-031). Mirrors {@link RegistrationOtpService}'s structure: a challenge
  * of sorts (here, the pending {@code account_totp} row and the separate
  * {@code mfa_login_challenge} row) that a code either confirms or doesn't.
  *
@@ -44,7 +44,7 @@ import org.springframework.transaction.annotation.Transactional;
  * mints the pending challenge this class redeems (in {@code
  * signInWithPassword}), and this class never calls back into it.
  *
- * <p>// req: FR-AUTH-009, ADR-028
+ * <p>// req: FR-AUTH-009, ADR-031
  */
 @Service
 public class TotpService {
@@ -104,9 +104,24 @@ public class TotpService {
      * Starts (or restarts) enrollment. Refuses if this account already has a
      * confirmed enrollment — disable it first, rather than silently
      * replacing a live secret out from under it.
+     *
+     * <p><b>Also refuses an account with no password (revision of
+     * ADR-031).</b> TOTP only ever gates {@code /login-password} — there is
+     * no password sign-in on a Google-only account for a second factor to
+     * protect yet. Enforced here, not only hidden in {@code SecurityTab}'s
+     * toggle: a client-side-only gate would still let a direct API call
+     * enroll TOTP on an account that could never actually use it to sign in,
+     * which is confusing state to be in, not a security hole to close —
+     * this is a product-clarity rule, matching how the rest of this backend
+     * never treats a UI omission as the actual control (CONST-TECH-07).
      */
     @Transactional
     public SetupMaterial startSetup(CurrentUser caller) {
+        if (!caller.account().hasPassword()) {
+            throw ApiException.badRequest(
+                    "Set a password before turning on two-factor authentication.");
+        }
+
         boolean alreadyConfirmed = totps.find(caller.id()).filter(AccountTotp::isConfirmed).isPresent();
         if (alreadyConfirmed) {
             throw ApiException.badRequest(
@@ -190,7 +205,7 @@ public class TotpService {
      * password submission. An expired one is deleted outright: it can't be
      * retried either way.
      *
-     * <p>// req: FR-AUTH-009, ADR-028
+     * <p>// req: FR-AUTH-009, ADR-031
      */
     @Transactional(noRollbackFor = ApiException.class)
     public Account verifyLoginChallenge(String rawChallengeToken, String code) {
@@ -244,7 +259,7 @@ public class TotpService {
      * <p>Otherwise, a real code is checked against every step in a +/-1
      * window (matching the app's own tolerance) and, on a match, {@code
      * last_used_step} both records the acceptance and refuses that same step
-     * a second time (ADR-028 Key Choice 3) — without this, a captured code
+     * a second time (ADR-031 Key Choice 3) — without this, a captured code
      * could be replayed for the rest of its ~90-second validity window.
      */
     private void verify(AccountTotp totp, String code) {

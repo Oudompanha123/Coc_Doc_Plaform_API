@@ -50,7 +50,7 @@ public class SessionService {
     public static final String COOKIE_NAME = "coc_session";
 
     /**
-     * How long a post-password MFA challenge (ADR-028) stays redeemable —
+     * How long a post-password MFA challenge (ADR-031) stays redeemable —
      * long enough to switch to an authenticator app and type a code, short
      * enough not to sit as a standing, password-already-proven credential.
      */
@@ -61,10 +61,10 @@ public class SessionService {
     private final AuditRepository audit;
     private final GoogleIdTokenVerifier google;
 
-    /** TOTP enrollment lookups for the password sign-in path (ADR-028) — no dependency the other direction: see {@link TotpService}'s class Javadoc. */
+    /** TOTP enrollment lookups for the password sign-in path (ADR-031) — no dependency the other direction: see {@link TotpService}'s class Javadoc. */
     private final AccountTotpRepository totps;
 
-    /** Mints the pending-MFA challenge {@link TotpService#verifyLoginChallenge} redeems (ADR-028). */
+    /** Mints the pending-MFA challenge {@link TotpService#verifyLoginChallenge} redeems (ADR-031). */
     private final MfaLoginChallengeRepository mfaChallenges;
 
     /**
@@ -137,7 +137,7 @@ public class SessionService {
     }
 
     /**
-     * What {@link #signInWithPassword} returns (ADR-028): either a real
+     * What {@link #signInWithPassword} returns (ADR-031): either a real
      * session, or notice that a TOTP code is still needed. Sealed rather
      * than a boolean-plus-nullable-field pair, so {@code AuthController}'s
      * {@code switch} is exhaustive and the compiler — not a runtime null
@@ -150,7 +150,7 @@ public class SessionService {
 
     /**
      * The password was correct, but this account has confirmed TOTP
-     * (ADR-028) — no session yet. {@code challengeToken} is the plaintext
+     * (ADR-031) — no session yet. {@code challengeToken} is the plaintext
      * value {@code AuthController} sets as the {@code coc_mfa_pending}
      * cookie; only its hash is persisted ({@link #mintMfaChallenge}).
      */
@@ -540,14 +540,14 @@ public class SessionService {
      * the miss path makes an unknown address answer measurably faster than a
      * known one, which is the same disclosure by another route.
      *
-     * <p><b>MFA (ADR-028).</b> A correct password does not always end here.
+     * <p><b>MFA (ADR-031).</b> A correct password does not always end here.
      * When the account has a confirmed TOTP enrollment, this returns {@link
      * MfaRequired} instead of issuing a session — {@code AuthController}
      * sets that as a short-lived pending-MFA cookie rather than the real
      * session cookie, and only {@code TotpService.verifyLoginChallenge}
      * (redeemed via {@link #issueForAccount}) finishes the sign-in.
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-007, FR-AUTH-009, ADR-014, ADR-028
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, FR-AUTH-009, ADR-014, ADR-031
      */
     // Same reason as signIn: the refusal is audited and then thrown, and a
     // rollback would erase the record of it. Nothing else here writes.
@@ -595,7 +595,7 @@ public class SessionService {
 
     /**
      * Issues a real session for an account that has already cleared both
-     * factors (ADR-028) — the second half of the password+TOTP sign-in,
+     * factors (ADR-031) — the second half of the password+TOTP sign-in,
      * called by {@code AuthController} once {@code
      * TotpService.verifyLoginChallenge} returns the account. A thin public
      * wrapper over {@link #issue}, which every other sign-in path already
@@ -610,7 +610,7 @@ public class SessionService {
      * Records a session for an already-authenticated account.
      *
      * <p>Shared by every sign-in path deliberately (Google, password, and —
-     * since ADR-028 — the second half of a password+TOTP sign-in via {@link
+     * since ADR-031 — the second half of a password+TOTP sign-in via {@link
      * #issueForAccount}): session lifetime, hashing, the audit entry and
      * device recognition are properties of a session, not of how someone
      * proved who they were.

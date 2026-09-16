@@ -4,7 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
  * Returned by {@code POST /api/v1/auth/login-password} instead of {@code
- * MeResponse} when the account has confirmed TOTP (ADR-028): the password
+ * MeResponse} when the account has confirmed TOTP (ADR-031): the password
  * was correct, but no session has been issued yet. The frontend switches to
  * the OTP step and calls {@code POST /api/v1/auth/mfa/verify}, sending along
  * the {@code coc_mfa_pending} cookie this response also sets.

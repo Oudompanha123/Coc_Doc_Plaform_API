@@ -397,7 +397,7 @@ public class AuthController {
     }
 
     /**
-     * The pending-MFA cookie (ADR-028) — same shape as {@link
+     * The pending-MFA cookie (ADR-031) — same shape as {@link
      * #nonceCookie}, and for the same reason: it proves nothing on its own
      * (only its hash is stored, and it grants no access by itself), so it
      * carries the same {@code httpOnly}/{@code secure}/{@code sameSite=Lax}
@@ -548,7 +548,7 @@ public class AuthController {
 
     /**
      * Exchanges an email and password for a session cookie — or, since
-     * ADR-028, a pending-MFA cookie when the account has confirmed TOTP.
+     * ADR-031, a pending-MFA cookie when the account has confirmed TOTP.
      *
      * <p>Refusals are deliberately indistinguishable — see
      * {@code SessionService.signInWithPassword}. This method adds nothing to
@@ -558,7 +558,7 @@ public class AuthController {
      * reason to hide it — this is the same account, mid-sign-in, being told
      * about its own second factor).
      *
-     * <p>// req: FR-AUTH-002, FR-AUTH-007, FR-AUTH-009, ADR-014, ADR-028
+     * <p>// req: FR-AUTH-002, FR-AUTH-007, FR-AUTH-009, ADR-014, ADR-031
      */
     @PostMapping("/login-password")
     ResponseEntity<?> signInWithPassword(
@@ -595,7 +595,7 @@ public class AuthController {
     }
 
     // -----------------------------------------------------------------------
-    // TOTP second factor (ADR-028)
+    // TOTP second factor (ADR-031)
     // -----------------------------------------------------------------------
 
     /**
@@ -608,7 +608,7 @@ public class AuthController {
      * cookie itself, proof that this browser already supplied a correct
      * password moments earlier ({@code SessionService.signInWithPassword}).
      *
-     * <p>// req: FR-AUTH-009, ADR-028
+     * <p>// req: FR-AUTH-009, ADR-031
      */
     @PostMapping("/mfa/verify")
     ResponseEntity<ApiDtos.MeResponse> verifyMfa(
@@ -645,7 +645,7 @@ public class AuthController {
      * Starts (or restarts) TOTP enrollment for the caller's own account —
      * the QR code and manual-entry secret a setup wizard needs.
      *
-     * <p>// req: FR-AUTH-009, ADR-028
+     * <p>// req: FR-AUTH-009, ADR-031
      */
     @PostMapping("/mfa/setup/start")
     MfaSetupStartResponse startMfaSetup(@AuthenticationPrincipal CurrentUser caller) {
@@ -662,7 +662,7 @@ public class AuthController {
      * from this point on, {@code /login-password} gates this account behind
      * it.
      *
-     * <p>// req: FR-AUTH-009, ADR-028
+     * <p>// req: FR-AUTH-009, ADR-031
      */
     @PostMapping("/mfa/setup/verify")
     MfaSetupVerifyResponse verifyMfaSetup(
@@ -678,7 +678,7 @@ public class AuthController {
      * Turns TOTP off — requires the current password (see {@code
      * TotpService.disable}'s Javadoc for why).
      *
-     * <p>// req: FR-AUTH-009, ADR-028
+     * <p>// req: FR-AUTH-009, ADR-031
      */
     @PostMapping("/mfa/disable")
     MfaDisableResponse disableMfa(
@@ -694,7 +694,7 @@ public class AuthController {
      * Whether the caller's own account currently has TOTP enrolled — what
      * {@code SecurityTab}'s toggle reflects on load.
      *
-     * <p>// req: FR-AUTH-009, ADR-028
+     * <p>// req: FR-AUTH-009, ADR-031
      */
     @GetMapping("/mfa/status")
     MfaStatusResponse mfaStatus(@AuthenticationPrincipal CurrentUser caller) {

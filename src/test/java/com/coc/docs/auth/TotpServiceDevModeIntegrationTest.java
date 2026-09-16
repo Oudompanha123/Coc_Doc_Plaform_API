@@ -19,7 +19,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * The developer/test fake-code bypass (ADR-028), against a real PostgreSQL,
+ * The developer/test fake-code bypass (ADR-031), against a real PostgreSQL,
  * under its own Spring context so {@code app.otp.enabled=false} applies only
  * here — every other test in this package runs with the secure default.
  *
@@ -27,7 +27,7 @@ import org.springframework.test.context.TestPropertySource;
  * ({@link PostgresTestBase}'s {@code @ActiveProfiles("test")}) is exactly
  * what {@link OtpDevModeGuard} requires for this bypass to be permitted.
  *
- * <p>// req: FR-AUTH-009, ADR-028
+ * <p>// req: FR-AUTH-009, ADR-031
  */
 @TestPropertySource(properties = {"app.otp.enabled=false", "app.otp.dev-code=654321"})
 class TotpServiceDevModeIntegrationTest extends PostgresTestBase {

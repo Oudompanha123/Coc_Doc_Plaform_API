@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component;
 /**
  * Refuses to start the application if the TOTP developer bypass
  * ({@code app.otp.enabled=false}, {@link OtpProperties#devCode()}) is active
- * outside a {@code dev} or {@code test} Spring profile (ADR-028).
+ * outside a {@code dev} or {@code test} Spring profile (ADR-031).
  *
  * <p>Mirrors {@code KeycloakIdTokenService}'s existing constructor-time
  * check almost exactly, and for the same reason: a security control that is
@@ -19,7 +19,7 @@ import org.springframework.stereotype.Component;
  * {@code SecurityConfig}'s {@code anyRequest()} default-deny rule already
  * takes for an unmatched route.
  *
- * <p>// req: NFR-SEC-AUTH, ADR-028
+ * <p>// req: NFR-SEC-AUTH, ADR-031
  */
 @Component
 public class OtpDevModeGuard {
