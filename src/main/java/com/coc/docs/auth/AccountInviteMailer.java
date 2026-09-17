@@ -119,14 +119,14 @@ public class AccountInviteMailer {
      * Inline-styled, matching {@link PasswordResetMailer}'s reasoning: a
      * {@code <style>} block is stripped by enough mail clients that it cannot
      * be relied on, and there is no asset host to point an {@code <img>} at
-     * (nor consistent-enough inline-SVG support), so the clipboard glyph next
-     * to the password is a plain character, not an {@code <svg>} icon or a
-     * script-driven Clipboard API button. It is intentionally decorative
-     * only — mail clients strip {@code <script>}, so no button in an email
-     * body can ever call the Clipboard API, in this template or any other.
-     * The caption below the password field carries the actual instruction:
-     * select the text to copy it, which is the one mechanism every mail
-     * client actually supports.
+     * (nor consistent-enough inline-SVG support). There is deliberately no
+     * copy icon or button next to the password — mail clients strip
+     * {@code <script>}, so no control in an email body can ever call the
+     * Clipboard API, in this template or any other, and a non-functional
+     * icon next to the field is worse than none. The caption below the
+     * password field carries the actual instruction: select the text to
+     * copy it, which is the one mechanism every mail client actually
+     * supports.
      */
     private static String htmlBody(String email, String temporaryPassword, String loginUrl) {
         String font = "-apple-system,BlinkMacSystemFont,'Segoe UI Variable','Segoe UI',"
@@ -164,12 +164,10 @@ public class AccountInviteMailer {
                 + "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" "
                 + "style=\"margin:0;border-radius:12px;background-color:#f7f7fc;\">"
                 + "<tr>"
-                + "<td style=\"padding:14px 0 14px 18px;border-left:3px solid #6d3ce0;border-radius:12px 0 0 12px;"
+                + "<td style=\"padding:14px 18px;border-left:3px solid #6d3ce0;border-radius:12px;"
                 + "font-family:'SFMono-Regular','Menlo','Consolas',monospace;"
                 + "font-size:19px;font-weight:700;color:#15131f;letter-spacing:.05em;text-align:left;\">"
                 + temporaryPassword + "</td>"
-                + "<td width=\"44\" style=\"padding:14px 18px 14px 0;border-radius:0 12px 12px 0;"
-                + "text-align:right;color:#6d3ce0;font-size:18px;\">&#128203;</td>"
                 + "</tr></table>"
                 + "<p style=\"margin:8px 0 28px;font-size:11px;line-height:1.5;color:#9b9bb0;text-align:left;\">"
                 + "Tap or select to copy the password above.</p>"
