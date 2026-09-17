@@ -42,8 +42,13 @@ class NotificationServiceTest {
     // a mock would only test that a mock was called. With no tab connected,
     // publish is a no-op, which is exactly the state these cases are in.
     private final NotificationStream stream = new NotificationStream();
+    // Mocked: this class is about who is chosen and what the transport is
+    // asked to do. Whether a row lands is NotificationPersistenceTest's
+    // claim, and it needs a real database to make it.
+    private final NotificationRepository notifications = mock(NotificationRepository.class);
 
-    private final NotificationService service = new NotificationService(accounts, devices, push, stream);
+    private final NotificationService service = new NotificationService(
+                    accounts, devices, push, stream, notifications, new com.fasterxml.jackson.databind.ObjectMapper());
 
     private static Account approver(String email) {
         return new Account(

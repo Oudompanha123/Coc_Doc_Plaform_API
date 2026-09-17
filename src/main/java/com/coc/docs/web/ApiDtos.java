@@ -604,4 +604,42 @@ public final class ApiDtos {
             return new TaskResponse(task.id(), task.title(), task.dueDate(), task.status(), task.createdAt());
         }
     }
+
+    /**
+     * One of the caller's own notifications (ADR-034).
+     *
+     * <p>{@code payload} is sent as it is stored. The client renders the
+     * sentence from {@code type} and these facts, so improving the wording
+     * applies to everything already sent rather than only to what comes next —
+     * which is why no rendered text is stored or returned here.
+     *
+     * <p>A client that does not recognise {@code type} — an older build, or
+     * one after a type was retired — falls back to {@code payload.body}, which
+     * every sender writes.
+     */
+    public record NotificationResponse(
+            UUID id,
+            String type,
+            String targetId,
+            com.fasterxml.jackson.databind.JsonNode payload,
+            Instant createdAt,
+            /** Null until the caller has seen it. */
+            Instant readAt) {
+
+        public static NotificationResponse of(com.coc.docs.notify.Notification n) {
+            return new NotificationResponse(
+                    n.id(), n.type(), n.targetId(), n.payload(), n.createdAt(), n.readAt());
+        }
+    }
+
+    /**
+     * The bell's whole state in one response.
+     *
+     * <p>The count travels with the list rather than coming from a second
+     * endpoint: they are read together on every poll, and two round trips can
+     * disagree with each other. {@code unreadCount} counts every unread
+     * notification, not only those in {@code items} — the badge must not drop
+     * because the list was capped.
+     */
+    public record NotificationInboxResponse(List<NotificationResponse> items, int unreadCount) {}
 }
