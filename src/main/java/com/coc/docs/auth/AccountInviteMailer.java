@@ -105,26 +105,28 @@ public class AccountInviteMailer {
     }
 
     private static String plainTextBody(String email, String temporaryPassword, String loginUrl) {
-        return "Hello,\n\n"
-                + "Your account has been created.\n\n"
-                + "Email: " + email + "\n"
-                + "Temporary Password: " + temporaryPassword + "\n\n"
-                + "Please use the temporary password to log in.\n\n"
-                + "For security reasons, you must create a new password after your first login.\n\n"
-                + "Login: " + loginUrl + "\n\n"
-                + "Thank you.";
+        return "ACCOUNT CREATED\n\n"
+                + "A single-use credential is ready for your first login.\n\n"
+                + "Account email: " + email + "\n"
+                + "Temporary password: " + temporaryPassword + "\n\n"
+                + "For security, please set a new personal password immediately after logging in.\n\n"
+                + "Log in: " + loginUrl + "\n\n"
+                + "This is a one-time password generated for your first login only. If you weren't "
+                + "expecting this, please contact your administrator immediately.";
     }
 
     /**
      * Inline-styled, matching {@link PasswordResetMailer}'s reasoning: a
      * {@code <style>} block is stripped by enough mail clients that it cannot
      * be relied on, and there is no asset host to point an {@code <img>} at
-     * (nor consistent-enough inline-SVG support), so the "copy" affordance
-     * next to the password is a plain clipboard glyph, not an {@code <svg>}
-     * icon or a script-driven Clipboard API button — mail clients strip
-     * {@code <script>}, so a real click-to-copy button cannot exist in an
-     * email at all. It is a visual cue that the field is meant to be
-     * selected/copied, nothing more.
+     * (nor consistent-enough inline-SVG support), so the clipboard glyph next
+     * to the password is a plain character, not an {@code <svg>} icon or a
+     * script-driven Clipboard API button. It is intentionally decorative
+     * only — mail clients strip {@code <script>}, so no button in an email
+     * body can ever call the Clipboard API, in this template or any other.
+     * The caption below the password field carries the actual instruction:
+     * select the text to copy it, which is the one mechanism every mail
+     * client actually supports.
      */
     private static String htmlBody(String email, String temporaryPassword, String loginUrl) {
         String font = "-apple-system,BlinkMacSystemFont,'Segoe UI Variable','Segoe UI',"
@@ -143,15 +145,18 @@ public class AccountInviteMailer {
                 + "background-color:#6d3ce0;background:linear-gradient(135deg,#6d3ce0,#4c6ff0);color:#ffffff;"
                 + "font-size:20px;font-weight:700;line-height:60px;font-family:" + font + ";"
                 + "box-shadow:0 8px 20px rgba(76,111,240,0.35);\">CD</div>"
-                + "<h1 style=\"margin:0 0 10px;font-size:23px;line-height:1.3;color:#15131f;font-weight:700;"
-                + "letter-spacing:-.01em;\">Your account has been created</h1>"
+                + "<h1 style=\"margin:0 0 10px;font-size:22px;line-height:1.3;color:#15131f;font-weight:800;"
+                + "letter-spacing:.02em;text-transform:uppercase;\">Account Created</h1>"
                 + "<p style=\"margin:0 0 28px;font-size:14px;line-height:1.6;color:#6b6b80;text-align:left;\">"
-                + "Use the credentials below to log in for the first time.</p>"
+                + "A single-use credential is ready for your first login.</p>"
                 + "<p style=\"margin:0 0 6px;font-size:11px;font-weight:700;color:#8b8ba7;text-align:left;"
-                + "letter-spacing:.06em;text-transform:uppercase;\">Email</p>"
+                + "letter-spacing:.06em;text-transform:uppercase;\">Account email</p>"
                 + "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" "
                 + "style=\"margin:0 0 20px;border-radius:12px;background-color:#f7f7fc;\">"
-                + "<tr><td style=\"padding:14px 18px;border-left:3px solid #4c6ff0;border-radius:12px;"
+                + "<tr>"
+                + "<td width=\"36\" style=\"padding:14px 0 14px 18px;border-left:3px solid #4c6ff0;"
+                + "border-radius:12px 0 0 12px;color:#4c6ff0;font-size:14px;\">&#128274;</td>"
+                + "<td style=\"padding:14px 18px 14px 0;border-radius:0 12px 12px 0;"
                 + "font-size:14px;font-weight:600;color:#15131f;text-align:left;\">"
                 + email + "</td></tr></table>"
                 + "<p style=\"margin:0 0 6px;font-size:11px;font-weight:700;color:#8b8ba7;text-align:left;"
@@ -164,20 +169,28 @@ public class AccountInviteMailer {
                 + "font-size:19px;font-weight:700;color:#15131f;letter-spacing:.05em;text-align:left;\">"
                 + temporaryPassword + "</td>"
                 + "<td width=\"44\" style=\"padding:14px 18px 14px 0;border-radius:0 12px 12px 0;"
-                + "text-align:right;color:#6d3ce0;font-size:18px;\" title=\"Copy\">&#128203;</td>"
+                + "text-align:right;color:#6d3ce0;font-size:18px;\">&#128203;</td>"
                 + "</tr></table>"
                 + "<p style=\"margin:8px 0 28px;font-size:11px;line-height:1.5;color:#9b9bb0;text-align:left;\">"
-                + "Tap and hold (or select) the password above to copy it.</p>"
-                + "<p style=\"margin:0 0 28px;font-size:14px;line-height:1.6;color:#6b6b80;text-align:left;\">"
-                + "For security reasons, you must create a new password after your first login.</p>"
+                + "Tap or select to copy the password above.</p>"
+                + "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0 0 28px;\">"
+                + "<tr>"
+                + "<td width=\"20\" valign=\"top\" style=\"padding-right:8px;\">"
+                + "<span style=\"display:inline-block;width:16px;height:16px;line-height:16px;border-radius:50%;"
+                + "background-color:#1f9d6b;color:#ffffff;font-size:10px;font-weight:700;text-align:center;\">"
+                + "&#10003;</span></td>"
+                + "<td style=\"font-size:14px;line-height:1.6;color:#6b6b80;text-align:left;\">"
+                + "For security, please set a new personal password immediately after logging in.</td>"
+                + "</tr></table>"
                 + "<a href=\"" + loginUrl + "\" "
                 + "style=\"display:inline-block;padding:15px 40px;border-radius:14px;background-color:#6d3ce0;"
                 + "background:linear-gradient(135deg,#6d3ce0,#4c6ff0);color:#ffffff;font-size:15px;font-weight:600;"
                 + "text-decoration:none;box-shadow:0 10px 24px rgba(109,60,224,0.30);\">Log in</a>"
                 + "<hr style=\"margin:32px 0 20px;border:none;border-top:1px solid #ececf2;\">"
                 + "<p style=\"margin:0;font-size:12px;line-height:1.6;color:#6b6b80;text-align:left;\">"
-                + "This temporary password is for your first login only. If you weren't expecting this "
-                + "account, contact your administrator.</p>"
+                + "A unique one-time password has been generated for your first login only. If you "
+                + "weren't expecting this, please <strong style=\"color:#4c6ff0;\">contact your "
+                + "administrator</strong> immediately.</p>"
                 + "</td></tr></table>"
                 + "<p style=\"margin:24px 0 0;font-size:12px;color:#9b9bb0;text-align:center;\">"
                 + "Coc Docs Platform &middot; this is an automated message, please don't reply.</p>"
