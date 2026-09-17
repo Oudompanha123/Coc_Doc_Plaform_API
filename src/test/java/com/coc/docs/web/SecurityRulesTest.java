@@ -125,6 +125,10 @@ class SecurityRulesTest {
     // floor while POST /api/v1/admin/notifications/digest stays super_admin.
     @MockitoBean com.coc.docs.notify.NotificationFeedService notificationFeedService;
 
+    // Same reasoning: this class asserts who may reach the inbox routes, not
+    // what they return. NotificationPersistenceTest owns the rows.
+    @MockitoBean com.coc.docs.notify.NotificationInboxService notificationInboxService;
+
     @TestConfiguration
     static class Beans {
 
@@ -632,5 +636,41 @@ class SecurityRulesTest {
         // both passes whatever the filters do, and a case written here would
         // pass with the bug present. Verified by reintroducing it.
         // NotificationStreamAuthIntegrationTest covers it over real HTTP.
+    }
+
+    @Nested
+    @DisplayName("the notification inbox")
+    class NotificationInbox {
+
+        @ParameterizedTest
+        @ValueSource(strings = {"USER", "ADMIN", "SUPER_ADMIN"})
+        void is_reachable_by_every_signed_in_role(String role) throws Exception {
+            // Every role receives notifications — a new-device sign-in alert
+            // goes to whoever was signed in to, whatever else they may do here
+            // (ADR-034). A floor above `user` would leave the people most
+            // likely to be targeted unable to read their own alerts.
+            mvc.perform(get("/api/v1/notifications/inbox").with(as(AppRole.valueOf(role))))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void is_refused_without_a_session() throws Exception {
+            // The rows are scoped to the resolved caller, so an anonymous form
+            // of this request could not mean anything.
+            mvc.perform(get("/api/v1/notifications/inbox")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void marking_read_is_refused_without_a_session() throws Exception {
+            mvc.perform(post("/api/v1/notifications/inbox/"
+                            + java.util.UUID.randomUUID() + "/read"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void marking_all_read_needs_a_session_and_nothing_more() throws Exception {
+            mvc.perform(post("/api/v1/notifications/inbox/read-all").with(as(AppRole.USER)))
+                    .andExpect(status().isNoContent());
+        }
     }
 }
