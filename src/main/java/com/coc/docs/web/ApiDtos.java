@@ -13,13 +13,19 @@ import com.coc.docs.notify.ActivityDigestService;
 import com.coc.docs.notify.NotificationFeedService;
 import com.coc.docs.page.PageVersionRepository;
 import com.coc.docs.section.Section;
+import com.coc.docs.claudeusage.ClaudeUsageDailyPoint;
+import com.coc.docs.claudeusage.ClaudeUsageDashboard;
+import com.coc.docs.claudeusage.ClaudeUsageMemberUsage;
+import com.coc.docs.claudeusage.ClaudeUsageTotals;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -642,4 +648,149 @@ public final class ApiDtos {
      * because the list was capped.
      */
     public record NotificationInboxResponse(List<NotificationResponse> items, int unreadCount) {}
+
+    // -----------------------------------------------------------------------
+    // Claude Usage (ADR-035)
+    // -----------------------------------------------------------------------
+
+    /** One roster member, rolled up over the requested period. */
+    public record ClaudeUsageMemberResponse(
+            UUID id,
+            String email,
+            String displayName,
+            String teamRole,
+            String status,
+            /** Null means "using the team default", never a stand-in for zero. */
+            Long budgetOverrideTokens,
+            long effectiveBudgetTokens,
+            int budgetPct,
+            List<String> modelsUsed,
+            Instant lastActiveAt,
+            long inputTokens,
+            long outputTokens,
+            long totalTokens,
+            BigDecimal costUsd) {
+
+        public static ClaudeUsageMemberResponse of(ClaudeUsageMemberUsage usage) {
+            var member = usage.member();
+            return new ClaudeUsageMemberResponse(
+                    member.id(),
+                    member.email(),
+                    member.displayName(),
+                    member.teamRole(),
+                    member.status(),
+                    member.budgetOverrideTokens(),
+                    usage.effectiveBudgetTokens(),
+                    usage.budgetPct(),
+                    usage.modelsUsed(),
+                    usage.lastActiveAt(),
+                    usage.inputTokens(),
+                    usage.outputTokens(),
+                    usage.totalTokens(),
+                    usage.costUsd());
+        }
+    }
+
+    /** One day of the dashboard's stacked chart, keyed by member id for the per-teammate segments. */
+    public record ClaudeUsageDailyPointResponse(LocalDate date, long total, Map<UUID, Long> byMember) {
+
+        public static ClaudeUsageDailyPointResponse of(ClaudeUsageDailyPoint point) {
+            return new ClaudeUsageDailyPointResponse(point.date(), point.total(), point.byMember());
+        }
+    }
+
+    public record ClaudeUsageTotalsResponse(
+            long inputTokens, long outputTokens, long cacheReadTokens, long cacheCreationTokens, long totalTokens, BigDecimal costUsd) {
+
+        public static ClaudeUsageTotalsResponse of(ClaudeUsageTotals totals) {
+            return new ClaudeUsageTotalsResponse(
+                    totals.inputTokens(),
+                    totals.outputTokens(),
+                    totals.cacheReadTokens(),
+                    totals.cacheCreationTokens(),
+                    totals.totalTokens(),
+                    totals.costUsd());
+        }
+    }
+
+    /** Everything the Claude Usage screen renders for one period, in one response — read together, so two round trips cannot disagree. */
+    public record ClaudeUsageDashboardResponse(
+            String period,
+            LocalDate from,
+            LocalDate to,
+            List<ClaudeUsageMemberResponse> members,
+            List<ClaudeUsageDailyPointResponse> daily,
+            ClaudeUsageTotalsResponse totals,
+            int activeUsers,
+            int nearLimit,
+            Instant lastUpdated) {
+
+        public static ClaudeUsageDashboardResponse of(ClaudeUsageDashboard dashboard) {
+            return new ClaudeUsageDashboardResponse(
+                    dashboard.period(),
+                    dashboard.from(),
+                    dashboard.to(),
+                    dashboard.members().stream().map(ClaudeUsageMemberResponse::of).toList(),
+                    dashboard.daily().stream().map(ClaudeUsageDailyPointResponse::of).toList(),
+                    ClaudeUsageTotalsResponse.of(dashboard.totals()),
+                    dashboard.activeUsers(),
+                    dashboard.nearLimit(),
+                    dashboard.lastUpdated());
+        }
+    }
+
+    /**
+     * A roster row on its own, with no usage figures — what a roster mutation
+     * (invite/role/budget/remove) returns. Deliberately not {@link
+     * ClaudeUsageMemberResponse}: that type is rolled up over a period this
+     * request has no notion of, and zero-filling it would look like real data
+     * for a period nobody asked about. The frontend re-fetches the dashboard
+     * for the figures, the same way `users-roles`' page reloads its list after
+     * a mutation rather than reading them off the mutation's own response.
+     */
+    public record ClaudeUsageMemberSummaryResponse(
+            UUID id,
+            String email,
+            String displayName,
+            String teamRole,
+            String status,
+            Long budgetOverrideTokens,
+            Instant createdAt) {
+
+        public static ClaudeUsageMemberSummaryResponse of(com.coc.docs.claudeusage.ClaudeUsageMember member) {
+            return new ClaudeUsageMemberSummaryResponse(
+                    member.id(),
+                    member.email(),
+                    member.displayName(),
+                    member.teamRole(),
+                    member.status(),
+                    member.budgetOverrideTokens(),
+                    member.createdAt());
+        }
+    }
+
+    public record InviteClaudeUsageMemberRequest(
+            @NotBlank @Email String email, String displayName, String teamRole) {}
+
+    public record UpdateClaudeUsageMemberRoleRequest(@NotBlank String teamRole) {}
+
+    /** The only field, so an explicit {@code null} and an absent field mean the same thing: clear the override. */
+    public record UpdateClaudeUsageBudgetRequest(Long budgetOverrideTokens) {}
+
+    /**
+     * The body {@code POST /api/ingest} accepts. No {@code cost_usd}, no
+     * {@code models} pricing role beyond display — both are derived
+     * server-side, never trusted from the reporter (ADR-035 decision 4).
+     */
+    public record ClaudeUsageIngestRequest(
+            @NotBlank @Email String email,
+            String displayName,
+            @NotNull LocalDate date,
+            long input,
+            long output,
+            long cacheRead,
+            long cacheCreation,
+            List<String> models) {}
+
+    public record ClaudeUsageIngestResponse(String action) {}
 }

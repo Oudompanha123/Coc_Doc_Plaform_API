@@ -79,4 +79,9 @@ public class ApiException extends RuntimeException {
     public static ApiException forbidden(String message) {
         return new ApiException(HttpStatus.FORBIDDEN, message);
     }
+
+    /** A missing or wrong bearer credential on a non-session route (e.g. {@code POST /api/ingest}). */
+    public static ApiException unauthorized(String message) {
+        return new ApiException(HttpStatus.UNAUTHORIZED, message);
+    }
 }

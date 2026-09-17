@@ -230,6 +230,18 @@ public class SecurityConfig {
                         .hasRole(AppRole.USER.name())
 
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
+
+                        // A Claude Code usage reporter script, not a browser with a
+                        // session -- there is no session to have. Outside /api/v1/**
+                        // by design (ClaudeUsageIngestController's own Javadoc) and
+                        // authorized by ClaudeUsageIngestController itself against a
+                        // single shared bearer secret, never by this filter chain.
+                        // This is the one deliberate exception to "every route is
+                        // enforced from a session" (ADR-011) -- NFR-SEC-CHANNEL says
+                        // in so many words that it is not a template for a second one.
+                        // // req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-035
+                        .requestMatchers(HttpMethod.POST, "/api/ingest").permitAll()
+
                         // Liveness only. Carries no version, no configuration and
                         // no dependency status, so it discloses nothing.
                         .requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll()
