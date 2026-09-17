@@ -41,7 +41,7 @@ import org.springframework.stereotype.Component;
  *
  * <p><b>Bodies are never fetched.</b> The fetch profile asks for envelopes,
  * and nothing here calls {@code getContent()}. See
- * {@code V19__hrms_notification.sql} for why the report's contents are not
+ * {@code V21__hrms_notification.sql} for why the report's contents are not
  * wanted: it names ~60 people and their working hours, and this platform has
  * no business holding that.
  *

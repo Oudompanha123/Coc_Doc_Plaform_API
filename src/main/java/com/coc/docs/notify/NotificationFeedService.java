@@ -127,7 +127,7 @@ public class NotificationFeedService {
      * higher floor than the rest of {@code /admin}. It is not a confidentiality
      * boundary: a subject line says a report arrived on a date and names
      * nobody, which is the whole reason the body was never stored
-     * ({@code V19__hrms_notification.sql}). If that ever stops being true, this
+     * ({@code V21__hrms_notification.sql}). If that ever stops being true, this
      * rule is no longer sufficient and the floor has to move to
      * {@code super_admin}.
      *

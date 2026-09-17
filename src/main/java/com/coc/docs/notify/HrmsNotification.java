@@ -9,7 +9,7 @@ import java.time.LocalDate;
  * <p>Everything this platform keeps about a report, which is deliberately not
  * much: that one arrived, what it called itself, and when. The body — who was
  * late, who missed a check-out, sixty people's working hours — is never read
- * and never stored. {@code V19__hrms_notification.sql} sets out why at length.
+ * and never stored. {@code V21__hrms_notification.sql} sets out why at length.
  *
  * @param id the surrogate key, {@code 0} for an instance not yet written
  * @param messageId the source email's RFC 5322 {@code Message-ID}; the dedupe

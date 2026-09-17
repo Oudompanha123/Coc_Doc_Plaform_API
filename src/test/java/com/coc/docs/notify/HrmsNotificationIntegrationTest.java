@@ -21,7 +21,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * repeatedly. That is a database behaviour, not a Java one, and a mock cannot
  * be wrong about it in the way a real constraint can.
  *
- * <p>This also applies {@code V19__hrms_notification.sql} — a migration that
+ * <p>This also applies {@code V21__hrms_notification.sql} — a migration that
  * does not apply cleanly fails every integration test at once.
  *
  * <p>// req: FR-OPS-001, NFR-SEC-PII

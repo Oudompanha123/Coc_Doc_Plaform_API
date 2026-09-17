@@ -10,7 +10,9 @@ import java.util.Map;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.env.EnvironmentPostProcessor;
 import org.springframework.core.env.ConfigurableEnvironment;
-import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.PropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 /**
  * Loads {@code backend/.env.local} (gitignored — see {@code backend/.env.example})
@@ -62,6 +64,32 @@ public class DotenvEnvironmentPostProcessor implements EnvironmentPostProcessor 
      */
     private static final String[] CANDIDATE_DIRS = {".", "..", "../..", "../../.."};
 
+    /**
+     * The property-source name, and the reason it ends the way it does.
+     *
+     * <p>A {@code .env} file is written in environment-variable spelling —
+     * {@code APP_HRMS_ENABLED}, not {@code app.hrms.enabled}. Spring only
+     * translates between those two spellings for a
+     * {@link SystemEnvironmentPropertySource} whose name is
+     * {@code systemEnvironment} or ends with {@code -systemEnvironment}. Every
+     * other property source is matched literally, character for character.
+     *
+     * <p>That distinction stayed invisible for as long as this file held only
+     * {@code DB_*}, because {@code application.yml} names those variables in
+     * placeholders — an exact match, which resolves from any source at all.
+     * The first setting bound by prefix instead, {@code @ConfigurationProperties}
+     * on {@code app.hrms}, therefore saw nothing: the file was correct, this
+     * class had read it, and the binder was looking up a key spelled another
+     * way. A feature configured that way reports itself as switched off, which
+     * sends whoever configured it back to re-checking the file that was never
+     * the problem.
+     *
+     * <p>With this name the file behaves like the environment variables it
+     * stands in for, both spellings included, for every binding style.
+     */
+    private static final String SOURCE_NAME =
+            "dotenvLocal-" + StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME;
+
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
         Path file = findEnvFile();
@@ -72,7 +100,19 @@ public class DotenvEnvironmentPostProcessor implements EnvironmentPostProcessor 
         if (values.isEmpty()) {
             return;
         }
-        environment.getPropertySources().addLast(new MapPropertySource("dotenvLocal", values));
+        environment.getPropertySources().addLast(propertySource(values));
+    }
+
+    /**
+     * The values above as a property source.
+     *
+     * <p>Package-private and separate from {@link #postProcessEnvironment}
+     * only so that a test can bind through the real thing. The name and the
+     * type are both load-bearing and neither is self-evident from the call
+     * site, which is how the binding broke silently once already.
+     */
+    static PropertySource<?> propertySource(Map<String, Object> values) {
+        return new SystemEnvironmentPropertySource(SOURCE_NAME, values);
     }
 
     /**

@@ -15,7 +15,7 @@ import org.springframework.stereotype.Repository;
  * Reads and writes {@code hrms_notification}.
  *
  * <p><b>Nothing here touches {@code audit_log}</b>, which is the point of the
- * table existing — see {@code V19__hrms_notification.sql}. Unlike the audit
+ * table existing — see {@code V21__hrms_notification.sql}. Unlike the audit
  * trail these rows may be deleted, and {@link #deleteReceivedBefore} is the
  * method that does it.
  *

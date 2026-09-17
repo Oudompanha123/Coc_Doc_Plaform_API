@@ -15,7 +15,7 @@ import java.util.List;
  *
  * <p><b>The contract is envelopes, not mail.</b> An implementation returns a
  * message id, a subject and a send time, and is expected not to fetch bodies
- * at all: see {@code V19__hrms_notification.sql} for why the report's contents
+ * at all: see {@code V21__hrms_notification.sql} for why the report's contents
  * are deliberately not in this system. An implementation that started
  * returning bodies would not break anything here, which is exactly why it is
  * written down.

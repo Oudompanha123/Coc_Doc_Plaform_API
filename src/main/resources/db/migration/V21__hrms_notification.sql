@@ -9,6 +9,29 @@
 --
 --   // req: FR-OPS-001, NFR-SEC-PII, NFR-OPS-AUDIT
 --
+-- WHY V21, WITH V19 AND V20 ABSENT FROM THIS REPOSITORY
+-- This was written as V19, against the files on disk. Starting the backend
+-- then produced:
+--
+--   Detected applied migration not resolved locally: 20.
+--
+-- A version 20 had already been applied to a development schema, from a file
+-- that is in no branch here -- renamed since, or never pushed. That made V19
+-- wrong twice over. Flyway will not apply a pending migration below the
+-- highest already applied (out of order), so the table would never have been
+-- created; and the message above is the `future` case, which application.yml's
+-- ignore-migration-patterns "*:missing" deliberately does not cover.
+--
+-- Taking the next number ABOVE the applied high-water mark fixes both at once:
+-- this migration applies in order, and the orphaned 20 becomes `missing`,
+-- which is already ignored.
+--
+-- Do not close the gap. 19 and 20 are real versions in at least one database,
+-- and renumbering into them recreates the collision. Flyway does not require
+-- contiguous versions. This is the third time this project has learnt it --
+-- see V16 for the previous one -- and the lesson is unchanged: take the next
+-- version when you write the file, and push it early.
+--
 -- WHY A TABLE OF ITS OWN AND NOT audit_log
 -- NotificationFeedService derives the bell feed from audit_log, so putting
 -- these rows there would have cost no schema change and no new query. Two
@@ -76,7 +99,7 @@ create index if not exists hrms_notification_received_idx
   on hrms_notification (received_at desc);
 
 comment on table hrms_notification is
-  'That an HRMS report email arrived -- subject, date and arrival time, never the body. Disposable: unlike audit_log these rows may be deleted, and HrmsMailPollJob prunes them on a retention window. See V19 for why the body is not here.';
+  'That an HRMS report email arrived -- subject, date and arrival time, never the body. Disposable: unlike audit_log these rows may be deleted, and HrmsMailPollJob prunes them on a retention window. See V21 for why the body is not here.';
 
 comment on column hrms_notification.message_id is
   'RFC 5322 Message-ID of the source email. The dedupe key: the poller re-reads a mailbox window each run and relies on this constraint rather than on remembering where it stopped.';

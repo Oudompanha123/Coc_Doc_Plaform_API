@@ -149,8 +149,15 @@ public class HrmsNotificationService {
      * <p>Empty rather than a guess when the subject does not match. A wrong
      * date on an attendance report is worse than no date: it is the one field
      * a reader would act on, and "no date shown" is visibly incomplete in a way
-     * "yesterday, probably" is not. A run of nulls in the column is also the
-     * signal that HRMS changed its wording.
+     * "yesterday, probably" is not.
+     *
+     * <p><b>A null is ordinary, not a fault.</b> The first real poll, on
+     * 2026-09-17, found that {@code noreply-hrms@wecambodia.com} also sends
+     * "[KOSIGN] Your leave request has been accepted" — three of the ten
+     * messages it returned. One sender, several kinds of notice, and only one
+     * of them carries a date. So nulls are expected in steady state, and a
+     * column that is <em>suddenly all</em> null is the signal worth noticing —
+     * not the presence of nulls at all.
      */
     static Optional<LocalDate> parseReportDate(String subject) {
         if (subject == null || subject.isBlank()) {
