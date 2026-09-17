@@ -275,6 +275,15 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/admin/audit/**")
                         .hasRole(AppRole.SUPER_ADMIN.name())
 
+                        // A task's title carries no other account's PII, unlike the
+                        // two prefixes above — so the read side is open to any
+                        // signed-in role, for the Member landing page's "Your
+                        // Tasks" list (ADR-033). Creating/completing a task stays
+                        // admin+ only, falling through to the generic /admin/**
+                        // rule below since this matcher is GET-only.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/tasks")
+                        .hasRole(AppRole.USER.name())
+
                         // --- editorial writes and admin reads ----------------
                         .requestMatchers("/api/v1/admin/**").hasRole(AppRole.ADMIN.name())
 

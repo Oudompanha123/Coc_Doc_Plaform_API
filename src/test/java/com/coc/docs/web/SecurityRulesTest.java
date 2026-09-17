@@ -500,8 +500,23 @@ class SecurityRulesTest {
     class TasksPath {
 
         @Test
-        void refuses_a_user() throws Exception {
+        void the_read_side_admits_a_plain_user() throws Exception {
+            // Open to any signed-in role: a task's title carries no other
+            // account's PII, and the Member landing page's "Your Tasks" list
+            // (ADR-033) reads this as a plain `user`.
+            org.mockito.Mockito.when(taskService.listOpen(org.mockito.ArgumentMatchers.anyInt()))
+                    .thenReturn(List.of());
+
             mvc.perform(get("/api/v1/admin/tasks").with(as(AppRole.USER)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void the_write_side_refuses_a_plain_user() throws Exception {
+            mvc.perform(post("/api/v1/admin/tasks")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"title\":\"x\"}"))
                     .andExpect(status().isForbidden());
         }
 
