@@ -84,6 +84,19 @@ public final class AuditAction {
     public static final String NAV_ITEM_CREATE = "nav.item_create";
     public static final String NAV_ITEM_DELETE = "nav.item_delete";
 
+    /**
+     * An admin invited a teammate onto the Claude Usage tracking roster (ADR-035).
+     * Not raised when {@code ClaudeUsageService.recordUsage} auto-creates a row for
+     * an email that reported before anyone invited it -- nobody here did that, a
+     * script on someone's own machine did (same reasoning as {@code
+     * hrms_notification} not living in this trail).
+     */
+    public static final String CLAUDE_USAGE_MEMBER_INVITE = "claude_usage_member.invite";
+
+    public static final String CLAUDE_USAGE_MEMBER_ROLE_CHANGE = "claude_usage_member.role_change";
+    public static final String CLAUDE_USAGE_MEMBER_BUDGET_CHANGE = "claude_usage_member.budget_change";
+    public static final String CLAUDE_USAGE_MEMBER_REMOVE = "claude_usage_member.remove";
+
     /** Target types, for the {@code target_type} column. */
     public static final String TARGET_PAGE = "page";
 
@@ -106,4 +119,6 @@ public final class AuditAction {
 
     public static final String TARGET_NAV_PRODUCT = "nav_product";
     public static final String TARGET_NAV_ITEM = "nav_item";
+
+    public static final String TARGET_CLAUDE_USAGE_MEMBER = "claude_usage_member";
 }
