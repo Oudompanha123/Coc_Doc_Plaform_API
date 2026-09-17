@@ -98,7 +98,11 @@ public class NotificationService {
         // is connected to, a push to a device that has gone — and none of it
         // can now lose the notification, because the record already exists
         // (ADR-034 decision 5).
-        notifications.insertFor(recipients, type, target.id(), payloadOf(target, type.body()));
+        int stored = notifications.insertFor(recipients, type, target.id(), payloadOf(target, type.body()));
+        // The one line that says the notification exists. Everything after this
+        // is delivery, and delivery failing is survivable; this failing is not,
+        // and it used to be invisible.
+        log.info("stored {} {} notification(s) for {} approver(s)", stored, type.key(), recipients.size());
 
         recipients.forEach(id -> stream.publish(id, type));
 
@@ -139,7 +143,8 @@ public class NotificationService {
             UUID accountId, NotificationType type, NotificationTarget target, String body) {
         // Persisted first, in the transaction that carries the event —
         // everything below is best-effort delivery and can no longer lose it.
-        notifications.insertFor(List.of(accountId), type, target.id(), payloadOf(target, body));
+        int stored = notifications.insertFor(List.of(accountId), type, target.id(), payloadOf(target, body));
+        log.info("stored {} {} notification(s) for account {}", stored, type.key(), accountId);
 
         // Before the push, and before the early return below: an open tab is
         // updated whether or not this person has ever granted notification
