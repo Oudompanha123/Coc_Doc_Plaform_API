@@ -21,11 +21,13 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 
 class ClaudeUsageServiceTest {
@@ -178,7 +180,7 @@ class ClaudeUsageServiceTest {
         @DisplayName("refuses a future date")
         void refusesFutureDate() {
             assertThatThrownBy(() -> service.recordUsage(
-                            "a@cocdocs.example", null, LocalDate.now().plusYears(1), 1, 1, 0, 0, List.of()))
+                            "a@cocdocs.example", null, LocalDate.now().plusYears(1), 1, 1, 0, 0, List.of(), Map.of()))
                     .isInstanceOf(ApiException.class)
                     .extracting(e -> ((ApiException) e).status())
                     .isEqualTo(HttpStatus.BAD_REQUEST);
@@ -188,7 +190,18 @@ class ClaudeUsageServiceTest {
         @DisplayName("refuses negative token counts")
         void refusesNegativeTokens() {
             assertThatThrownBy(() -> service.recordUsage(
-                            "a@cocdocs.example", null, LocalDate.now(), -1, 0, 0, 0, List.of()))
+                            "a@cocdocs.example", null, LocalDate.now(), -1, 0, 0, 0, List.of(), Map.of()))
+                    .isInstanceOf(ApiException.class)
+                    .extracting(e -> ((ApiException) e).status())
+                    .isEqualTo(HttpStatus.BAD_REQUEST);
+        }
+
+        @Test
+        @DisplayName("refuses negative token counts inside byModel too")
+        void refusesNegativeByModelTokens() {
+            assertThatThrownBy(() -> service.recordUsage(
+                            "a@cocdocs.example", null, LocalDate.now(), 10, 10, 0, 0, List.of(),
+                            Map.of("claude-sonnet-5", new ClaudeUsageModelTokens(-1, 0, 0, 0))))
                     .isInstanceOf(ApiException.class)
                     .extracting(e -> ((ApiException) e).status())
                     .isEqualTo(HttpStatus.BAD_REQUEST);
@@ -205,7 +218,8 @@ class ClaudeUsageServiceTest {
             when(daily.upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any()))
                     .thenReturn(true);
 
-            var outcome = service.recordUsage("new@cocdocs.example", null, LocalDate.now(), 100, 50, 0, 0, List.of("Sonnet 5"));
+            var outcome = service.recordUsage(
+                    "new@cocdocs.example", null, LocalDate.now(), 100, 50, 0, 0, List.of("Sonnet 5"), Map.of());
 
             assertThat(outcome.action()).isEqualTo(ClaudeUsageService.IngestOutcome.CREATED);
             verify(members, never()).updateStatus(any(), any());
@@ -222,7 +236,7 @@ class ClaudeUsageServiceTest {
             when(daily.upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any()))
                     .thenReturn(true);
 
-            service.recordUsage("inv@cocdocs.example", null, LocalDate.now(), 10, 10, 0, 0, List.of());
+            service.recordUsage("inv@cocdocs.example", null, LocalDate.now(), 10, 10, 0, 0, List.of(), Map.of());
 
             verify(members).updateStatus(id, ClaudeUsageMember.STATUS_ACTIVE);
         }
@@ -238,16 +252,53 @@ class ClaudeUsageServiceTest {
             when(daily.upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any()))
                     .thenReturn(false);
 
-            service.recordUsage("gone@cocdocs.example", null, LocalDate.now(), 10, 10, 0, 0, List.of());
+            service.recordUsage("gone@cocdocs.example", null, LocalDate.now(), 10, 10, 0, 0, List.of(), Map.of());
 
             verify(members, never()).updateStatus(any(), any());
         }
 
         @Test
-        @DisplayName("computes cost at the blended rate, server-side")
-        void computesCost() {
-            assertThat(ClaudeUsageService.costFor(1000, 0)).isEqualByComparingTo(new BigDecimal("0.0060"));
-            assertThat(ClaudeUsageService.costFor(0, 0)).isEqualByComparingTo(BigDecimal.ZERO);
+        @DisplayName("prices real per-model cost server-side, summed across models in the day")
+        void pricesPerModelCost() {
+            ClaudeUsageMember active = member("a@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findByEmail("a@cocdocs.example")).thenReturn(Optional.of(active));
+            when(daily.upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any()))
+                    .thenReturn(true);
+
+            // Sonnet 5: $2/M in, $10/M out. Opus 5: $5/M in, $25/M out.
+            Map<String, ClaudeUsageModelTokens> byModel = Map.of(
+                    "claude-sonnet-5", new ClaudeUsageModelTokens(1_000_000, 0, 0, 0),
+                    "claude-opus-5", new ClaudeUsageModelTokens(0, 1_000_000, 0, 0));
+
+            service.recordUsage("a@cocdocs.example", null, LocalDate.now(), 1_000_000, 1_000_000, 0, 0, List.of(), byModel);
+
+            ArgumentCaptor<BigDecimal> cost = ArgumentCaptor.forClass(BigDecimal.class);
+            ArgumentCaptor<String> models = ArgumentCaptor.forClass(String.class);
+            verify(daily).upsert(any(), any(), eq(1_000_000L), eq(1_000_000L), eq(0L), eq(0L), cost.capture(), models.capture());
+
+            // $2 (1M sonnet input) + $25 (1M opus output) = $27, never the old flat $0.006/1K blended rate.
+            assertThat(cost.getValue()).isEqualByComparingTo(new BigDecimal("27.0000"));
+            assertThat(models.getValue()).isEqualTo("claude-opus-5, claude-sonnet-5");
+        }
+
+        @Test
+        @DisplayName("prices $0, not a guess, when no byModel breakdown is sent")
+        void pricesZeroWithoutBreakdown() {
+            ClaudeUsageMember active = member("a@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findByEmail("a@cocdocs.example")).thenReturn(Optional.of(active));
+            when(daily.upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any()))
+                    .thenReturn(true);
+
+            service.recordUsage(
+                    "a@cocdocs.example", null, LocalDate.now(), 1_000_000, 1_000_000, 0, 0, List.of("Sonnet 5"), Map.of());
+
+            ArgumentCaptor<BigDecimal> cost = ArgumentCaptor.forClass(BigDecimal.class);
+            ArgumentCaptor<String> models = ArgumentCaptor.forClass(String.class);
+            verify(daily).upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), cost.capture(), models.capture());
+
+            assertThat(cost.getValue()).isEqualByComparingTo(BigDecimal.ZERO);
+            // Falls back to the flat names list when there is no byModel breakdown to derive it from.
+            assertThat(models.getValue()).isEqualTo("Sonnet 5");
         }
     }
 

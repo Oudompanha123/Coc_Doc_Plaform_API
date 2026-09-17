@@ -778,9 +778,22 @@ public final class ApiDtos {
     public record UpdateClaudeUsageBudgetRequest(Long budgetOverrideTokens) {}
 
     /**
-     * The body {@code POST /api/ingest} accepts. No {@code cost_usd}, no
-     * {@code models} pricing role beyond display — both are derived
-     * server-side, never trusted from the reporter (ADR-035 decision 4).
+     * One model's token counts within a day's ingest — the breakdown real
+     * per-model pricing needs (ADR-036, revision of ADR-035 decision 4).
+     */
+    public record ClaudeUsageModelTokensRequest(long input, long output, long cacheRead, long cacheCreation) {}
+
+    /**
+     * The body {@code POST /api/ingest} accepts. No {@code cost_usd} — always
+     * derived server-side, never trusted from the reporter.
+     *
+     * <p>{@code input}/{@code output}/{@code cacheRead}/{@code cacheCreation}
+     * are the day's totals and are always required. {@code byModel} is the
+     * optional per-model breakdown those totals are priced from (ADR-036); a
+     * reporter that predates it can still send the flat totals and {@code
+     * models} (names only, for display) and gets recorded correctly, just
+     * priced at $0 rather than a guessed number — see {@code
+     * ClaudeUsageService.recordUsage}.
      */
     public record ClaudeUsageIngestRequest(
             @NotBlank @Email String email,
@@ -790,7 +803,8 @@ public final class ApiDtos {
             long output,
             long cacheRead,
             long cacheCreation,
-            List<String> models) {}
+            List<String> models,
+            Map<String, ClaudeUsageModelTokensRequest> byModel) {}
 
     public record ClaudeUsageIngestResponse(String action) {}
 }
