@@ -793,4 +793,15 @@ public final class ApiDtos {
             List<String> models) {}
 
     public record ClaudeUsageIngestResponse(String action) {}
+
+    // -----------------------------------------------------------------------
+    // Docs content meta (product docs pages' "About this document" panel)
+    // -----------------------------------------------------------------------
+
+    /** A sibling of the plain content-body response (`GET
+     *  /api/v1/docs-content/{productKey}/{slug}`), not a replacement for it —
+     *  that endpoint's response IS the `DocContent` shape verbatim on the
+     *  frontend, and folding `updatedAt` into it would round-trip back into
+     *  the stored body the next time an admin saves through the editor. */
+    public record DocsContentMetaResponse(Instant updatedAt) {}
 }
