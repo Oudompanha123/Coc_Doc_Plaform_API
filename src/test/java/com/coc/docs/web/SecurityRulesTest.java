@@ -129,6 +129,13 @@ class SecurityRulesTest {
     // what they return. NotificationPersistenceTest owns the rows.
     @MockitoBean com.coc.docs.notify.NotificationInboxService notificationInboxService;
 
+    // AdminClaudeUsageController and ClaudeUsageIngestController are in this
+    // slice (ADR-035), so their dependency has to be too, same reasoning as
+    // the rest of this class: this test is about which routes the filter
+    // chain admits, not about roster management or ingestion themselves —
+    // that is ClaudeUsageServiceTest's job.
+    @MockitoBean com.coc.docs.claudeusage.ClaudeUsageService claudeUsageService;
+
     @TestConfiguration
     static class Beans {
 
@@ -173,6 +180,19 @@ class SecurityRulesTest {
         @Bean
         com.coc.docs.notify.NotificationStream notificationStream() {
             return new com.coc.docs.notify.NotificationStream();
+        }
+
+        /**
+         * Real, not mocked: it is a plain data holder, same treatment as
+         * {@link #appProperties()} above. Unconfigured (null secret) — this
+         * class is about which roles/sessions reach a route, not about the
+         * ingest secret's own check, which {@code ClaudeUsagePath.ingest_*}
+         * below relies on to tell "reached the controller" apart from
+         * "blocked by the filter chain".
+         */
+        @Bean
+        com.coc.docs.claudeusage.ClaudeUsageProperties claudeUsageProperties() {
+            return new com.coc.docs.claudeusage.ClaudeUsageProperties(null);
         }
     }
 
@@ -531,6 +551,82 @@ class SecurityRulesTest {
 
             mvc.perform(get("/api/v1/admin/tasks").with(as(AppRole.ADMIN)))
                     .andExpect(status().isOk());
+        }
+    }
+
+    @Nested
+    @DisplayName("Claude Usage (ADR-035)")
+    class ClaudeUsagePath {
+
+        @Test
+        void the_dashboard_refuses_a_plain_user() throws Exception {
+            // Falls through to the generic /api/v1/admin/** rule (admin
+            // floor) rather than carrying a floor of its own — this is a
+            // usage/cost monitor, not account authority (FR-AUTH-008 is
+            // about AppRole; team_role here is unrelated to it).
+            mvc.perform(get("/api/v1/admin/claude-usage").with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void the_dashboard_admits_an_admin() throws Exception {
+            org.mockito.Mockito.when(claudeUsageService.dashboard(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
+                    .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageDashboard(
+                            "week",
+                            java.time.LocalDate.now(),
+                            java.time.LocalDate.now(),
+                            List.of(),
+                            List.of(),
+                            new com.coc.docs.claudeusage.ClaudeUsageTotals(0, 0, 0, 0, java.math.BigDecimal.ZERO),
+                            0,
+                            0,
+                            null));
+
+            mvc.perform(get("/api/v1/admin/claude-usage").with(as(AppRole.ADMIN)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void the_dashboard_admits_a_super_admin_too() throws Exception {
+            // Not a fixed floor above admin (unlike /admin/accounts) — both
+            // roles manage this roster.
+            org.mockito.Mockito.when(claudeUsageService.dashboard(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
+                    .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageDashboard(
+                            "week",
+                            java.time.LocalDate.now(),
+                            java.time.LocalDate.now(),
+                            List.of(),
+                            List.of(),
+                            new com.coc.docs.claudeusage.ClaudeUsageTotals(0, 0, 0, 0, java.math.BigDecimal.ZERO),
+                            0,
+                            0,
+                            null));
+
+            mvc.perform(get("/api/v1/admin/claude-usage").with(as(AppRole.SUPER_ADMIN)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void the_dashboard_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(get("/api/v1/admin/claude-usage")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void ingest_is_reachable_without_a_session() throws Exception {
+            // permitAll() at the filter-chain level (ClaudeUsageIngestController
+            // is authorized by its own bearer-secret check, never by a
+            // session) — proven here by 503, not 401/403: with no ingest
+            // secret configured in this slice (see Beans.claudeUsageProperties),
+            // the controller itself refuses for that reason, which only
+            // happens if the filter chain let the request through to it.
+            mvc.perform(post("/api/ingest")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(
+                                    "{\"email\":\"a@example.com\",\"date\":\"2026-01-01\","
+                                            + "\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheCreation\":0}"))
+                    .andExpect(status().isServiceUnavailable());
         }
     }
 
