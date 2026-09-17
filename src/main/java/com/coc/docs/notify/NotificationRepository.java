@@ -46,13 +46,21 @@ public class NotificationRepository {
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
                 read == null ? null : read.toInstant());
     }
-
     /**
-     * Writes one row per recipient, in one statement.
+     * Writes one row per recipient.
      *
-     * <p>A registration notifies every active {@code super_admin}, so the fan
-     * out is the normal case rather than the exception — one round trip for
-     * five approvers instead of five.
+     * <p><b>One ordinary insert each, not one clever statement.</b> This was
+     * {@code select unnest(?::uuid[])} with the recipients bound as an array —
+     * a single round trip, and a binding this codebase uses nowhere else for a
+     * write. It was also a statement no test had ever executed: the integration
+     * suite needs Docker and skips without it, so the only coverage was a
+     * mocked repository, which will agree with anything.
+     *
+     * <p>The saving was imaginary. {@code notifyAccount} passes one recipient
+     * and {@code notifyApprovers} passes however many super admins exist —
+     * single digits either way. A loop of statements every other write in this
+     * package already uses is worth more than a round trip nobody would
+     * measure.
      *
      * @return how many were written
      */
@@ -62,18 +70,16 @@ public class NotificationRepository {
             return 0;
         }
         String body = jsonb.write(payload);
-        // unnest turns the recipient list into rows, so the fan-out is the
-        // database's job rather than a loop issuing one insert each.
-        return jdbc.sql("""
-                        insert into notification (account_id, type, target_id, payload)
-                        select unnest(?::uuid[]), ?, ?, ?::jsonb
-                        """)
-                .params(
-                        accountIds.stream().map(UUID::toString).toArray(String[]::new),
-                        type.key(),
-                        targetId,
-                        body)
-                .update();
+        int written = 0;
+        for (UUID accountId : accountIds) {
+            written += jdbc.sql("""
+                            insert into notification (account_id, type, target_id, payload)
+                            values (?, ?, ?, ?::jsonb)
+                            """)
+                    .params(accountId, type.key(), targetId, body)
+                    .update();
+        }
+        return written;
     }
 
     /**

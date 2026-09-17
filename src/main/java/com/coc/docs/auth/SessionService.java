@@ -40,6 +40,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class SessionService {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(SessionService.class);
+
     /**
      * 32 bytes of {@link SecureRandom}, base64url-encoded. Opaque and
      * unguessable; the token carries no claims, so there is nothing in it to
@@ -651,6 +654,16 @@ public class SessionService {
                         .put("newDevice", newDevice)
                         .put("expiresAt", expiresAt.toString()));
 
+        // Says which of the two questions decided it, because "no alert" has
+        // three innocent explanations — a device already known, an account
+        // with no known device yet (the first sign-in after V16 seeds rather
+        // than announces), and an alert that was raised and lost somewhere
+        // later. Guessing between them has cost a day.
+        log.info(
+                "sign-in for account {} from \"{}\": newDevice={}",
+                account.id(),
+                deviceKey,
+                newDevice);
         if (newDevice) {
             // Published, not sent. The listener runs after this transaction
             // commits and off the request thread, so nobody is warned about a
