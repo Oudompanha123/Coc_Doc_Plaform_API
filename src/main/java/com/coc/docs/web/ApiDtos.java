@@ -5,6 +5,19 @@ import com.coc.docs.account.AppRole;
 import com.coc.docs.account.Permission;
 import com.coc.docs.account.RoleRepository;
 import com.coc.docs.auth.CurrentUser;
+import com.coc.docs.axrenewal.AxRenewalAnalysis;
+import com.coc.docs.axrenewal.AxRenewalArchitecturePlan;
+import com.coc.docs.axrenewal.AxRenewalComment;
+import com.coc.docs.axrenewal.AxRenewalConfirmation;
+import com.coc.docs.axrenewal.AxRenewalDbChange;
+import com.coc.docs.axrenewal.AxRenewalDbConnection;
+import com.coc.docs.axrenewal.AxRenewalDestination;
+import com.coc.docs.axrenewal.AxRenewalImplementationRun;
+import com.coc.docs.axrenewal.AxRenewalPageMapping;
+import com.coc.docs.axrenewal.AxRenewalProject;
+import com.coc.docs.axrenewal.AxRenewalProjectDetail;
+import com.coc.docs.axrenewal.AxRenewalStackLayer;
+import com.coc.docs.capability.Capability;
 import com.coc.docs.page.Page;
 import com.coc.docs.page.PageRepository;
 import com.coc.docs.page.PageService;
@@ -26,6 +39,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -151,20 +165,41 @@ public final class ApiDtos {
              * Google-only account, which has nothing to prove and is instead
              * offered "Set a password".
              */
-            boolean hasPassword) {
+            boolean hasPassword,
+            /**
+             * Capabilities held in addition to {@code role} — layered on top of
+             * it, never replacing it (ADR-037). Always a list, never null, so
+             * the frontend can {@code .includes(...)} without a guard.
+             */
+            List<String> capabilities) {
 
         public static MeResponse of(CurrentUser user, Instant lastSignInAt) {
+            return of(user.account(), user.capabilities(), lastSignInAt);
+        }
+
+        /**
+         * For the six sign-in/self-service paths in {@code AuthController} that
+         * only have an {@code Account} in hand, not a full {@link CurrentUser}
+         * — three of those (a fresh Google/password/MFA sign-in) genuinely have
+         * no capability set resolved yet and must look one up; the other three
+         * (self-service profile/avatar edits) already hold the caller's {@link
+         * CurrentUser} and should pass {@code caller.capabilities()} straight
+         * through, since none of those actions can change what capabilities the
+         * account holds.
+         */
+        public static MeResponse of(Account account, Set<Capability> capabilities, Instant lastSignInAt) {
             return new MeResponse(
-                    user.id(),
-                    user.email(),
-                    user.account().displayName(),
-                    user.role().wire(),
-                    user.account().avatarUrl(),
+                    account.id(),
+                    account.email(),
+                    account.displayName(),
+                    account.role().wire(),
+                    account.avatarUrl(),
                     true,
-                    user.account().createdAt(),
+                    account.createdAt(),
                     lastSignInAt,
-                    user.account().mustChangePassword(),
-                    user.account().hasPassword());
+                    account.mustChangePassword(),
+                    account.hasPassword(),
+                    capabilities.stream().map(Capability::key).sorted().toList());
         }
 
         /**
@@ -176,7 +211,7 @@ public final class ApiDtos {
          * satisfied here or not at all. // req: NFR-SEC-PII
          */
         public static MeResponse anonymous() {
-            return new MeResponse(null, null, null, null, null, false, null, null, false, false);
+            return new MeResponse(null, null, null, null, null, false, null, null, false, false, List.of());
         }
     }
 
@@ -472,6 +507,20 @@ public final class ApiDtos {
 
     public record CreateAccountRequest(
             @NotBlank @Email String email, @NotBlank String role) {}
+
+    /**
+     * The capabilities one account holds — a second, rank-independent grant
+     * axis from {@code role}/{@code roles} above (ADR-037). Returned after
+     * every grant/revoke so the caller sees the resulting set without a
+     * second round trip.
+     */
+    public record CapabilitiesResponse(UUID accountId, List<String> capabilities) {
+
+        public static CapabilitiesResponse of(UUID accountId, Set<Capability> capabilities) {
+            return new CapabilitiesResponse(
+                    accountId, capabilities.stream().map(Capability::key).sorted().toList());
+        }
+    }
 
     // -----------------------------------------------------------------------
     // Nav structure
@@ -807,4 +856,204 @@ public final class ApiDtos {
             Map<String, ClaudeUsageModelTokensRequest> byModel) {}
 
     public record ClaudeUsageIngestResponse(String action) {}
+
+    // -----------------------------------------------------------------------
+    // AX Renewal (ADR-037)
+    // -----------------------------------------------------------------------
+
+    public record CreateAxRenewalProjectRequest(@NotBlank String name, String description) {}
+
+    public record AttachManifestRequest(@NotBlank String filename, String content) {}
+
+    public record AxRenewalStackLayerRequest(@NotBlank String layerKey, String oldTarget, String newTarget) {}
+
+    public record UpdateStackMoveRequest(@NotNull List<AxRenewalStackLayerRequest> layers) {}
+
+    public record UpdateArchitectureRequest(String summary, JsonNode diagram) {}
+
+    public record AxRenewalPageMappingRequest(String oldPath, String newPath, String notes) {}
+
+    public record UpdatePagesRequest(@NotNull List<AxRenewalPageMappingRequest> pages) {}
+
+    public record AxRenewalDbChangeRequest(
+            @NotBlank String changeType, @NotBlank String tableName, JsonNode detail, String rationale) {}
+
+    public record UpdateDatabasePlanRequest(@NotNull List<AxRenewalDbChangeRequest> changes) {}
+
+    public record ConnectDatabaseRequest(
+            String engine, String host, Integer port, String databaseName, String schemaName) {}
+
+    public record SetDestinationRequest(
+            @NotBlank String kind, @NotBlank String target, String branch, String notes) {}
+
+    public record AddAxRenewalCommentRequest(@NotBlank String body) {}
+
+    public record AxRenewalProjectResponse(
+            UUID id,
+            String name,
+            String description,
+            String status,
+            String manifestFilename,
+            Instant manifestAttachedAt,
+            Instant createdAt,
+            Instant updatedAt) {
+
+        public static AxRenewalProjectResponse of(AxRenewalProject project) {
+            return new AxRenewalProjectResponse(
+                    project.id(),
+                    project.name(),
+                    project.description(),
+                    project.status(),
+                    project.manifestFilename(),
+                    project.manifestAttachedAt(),
+                    project.createdAt(),
+                    project.updatedAt());
+        }
+    }
+
+    public record AxRenewalAnalysisResponse(
+            JsonNode stackDetected,
+            JsonNode findings,
+            JsonNode pagesDetected,
+            boolean modelConnected,
+            Instant analyzedAt) {
+
+        public static AxRenewalAnalysisResponse of(AxRenewalAnalysis analysis) {
+            return new AxRenewalAnalysisResponse(
+                    analysis.stackDetected(),
+                    analysis.findings(),
+                    analysis.pagesDetected(),
+                    analysis.modelConnected(),
+                    analysis.analyzedAt());
+        }
+    }
+
+    public record AxRenewalStackLayerResponse(String layerKey, String oldTarget, String newTarget, int position) {
+
+        public static AxRenewalStackLayerResponse of(AxRenewalStackLayer layer) {
+            return new AxRenewalStackLayerResponse(
+                    layer.layerKey(), layer.oldTarget(), layer.newTarget(), layer.position());
+        }
+    }
+
+    public record AxRenewalArchitectureResponse(String summary, JsonNode diagram, Instant updatedAt) {
+
+        public static AxRenewalArchitectureResponse of(AxRenewalArchitecturePlan architecture) {
+            return new AxRenewalArchitectureResponse(
+                    architecture.summary(), architecture.diagram(), architecture.updatedAt());
+        }
+    }
+
+    public record AxRenewalPageMappingResponse(String oldPath, String newPath, String notes, int position) {
+
+        public static AxRenewalPageMappingResponse of(AxRenewalPageMapping mapping) {
+            return new AxRenewalPageMappingResponse(
+                    mapping.oldPath(), mapping.newPath(), mapping.notes(), mapping.position());
+        }
+    }
+
+    public record AxRenewalDbChangeResponse(
+            String changeType, String tableName, JsonNode detail, String rationale, int position) {
+
+        public static AxRenewalDbChangeResponse of(AxRenewalDbChange change) {
+            return new AxRenewalDbChangeResponse(
+                    change.changeType(), change.tableName(), change.detail(), change.rationale(), change.position());
+        }
+    }
+
+    public record AxRenewalDbConnectionResponse(
+            String engine, String host, Integer port, String databaseName, String schemaName, Instant connectedAt) {
+
+        public static AxRenewalDbConnectionResponse of(AxRenewalDbConnection connection) {
+            return new AxRenewalDbConnectionResponse(
+                    connection.engine(),
+                    connection.host(),
+                    connection.port(),
+                    connection.databaseName(),
+                    connection.schemaName(),
+                    connection.connectedAt());
+        }
+    }
+
+    public record AxRenewalDestinationResponse(String kind, String target, String branch, String notes) {
+
+        public static AxRenewalDestinationResponse of(AxRenewalDestination destination) {
+            return new AxRenewalDestinationResponse(
+                    destination.kind(), destination.target(), destination.branch(), destination.notes());
+        }
+    }
+
+    public record AxRenewalConfirmationResponse(
+            String section, Instant confirmedAt, UUID confirmedBy, String confirmedVia) {
+
+        public static AxRenewalConfirmationResponse of(AxRenewalConfirmation confirmation) {
+            return new AxRenewalConfirmationResponse(
+                    confirmation.section().wire(),
+                    confirmation.confirmedAt(),
+                    confirmation.confirmedBy(),
+                    confirmation.confirmedVia());
+        }
+    }
+
+    public record AxRenewalImplementationRunResponse(
+            UUID id,
+            String status,
+            JsonNode beforeReport,
+            JsonNode afterReport,
+            Instant startedAt,
+            Instant completedAt) {
+
+        public static AxRenewalImplementationRunResponse of(AxRenewalImplementationRun run) {
+            return new AxRenewalImplementationRunResponse(
+                    run.id(), run.status(), run.beforeReport(), run.afterReport(), run.startedAt(), run.completedAt());
+        }
+    }
+
+    public record AxRenewalCommentResponse(UUID id, UUID authorId, String body, Instant createdAt) {
+
+        public static AxRenewalCommentResponse of(AxRenewalComment comment) {
+            return new AxRenewalCommentResponse(comment.id(), comment.authorId(), comment.body(), comment.createdAt());
+        }
+    }
+
+    /**
+     * Everything one AX Renewal project's screen renders, in one response
+     * (ADR-037). {@code confirmations} is keyed by section wire form (e.g.
+     * {@code "stack_move"}) — a section absent from it is unconfirmed.
+     */
+    public record AxRenewalProjectDetailResponse(
+            AxRenewalProjectResponse project,
+            AxRenewalAnalysisResponse analysis,
+            List<AxRenewalStackLayerResponse> stackLayers,
+            AxRenewalArchitectureResponse architecture,
+            List<AxRenewalPageMappingResponse> pageMappings,
+            List<AxRenewalDbChangeResponse> dbChanges,
+            AxRenewalDbConnectionResponse dbConnection,
+            AxRenewalDestinationResponse destination,
+            Map<String, AxRenewalConfirmationResponse> confirmations,
+            AxRenewalImplementationRunResponse latestImplementationRun,
+            List<AxRenewalCommentResponse> comments) {
+
+        public static AxRenewalProjectDetailResponse of(AxRenewalProjectDetail detail) {
+            Map<String, AxRenewalConfirmationResponse> confirmations = new java.util.LinkedHashMap<>();
+            detail.confirmations()
+                    .forEach((section, confirmation) ->
+                            confirmations.put(section.wire(), AxRenewalConfirmationResponse.of(confirmation)));
+
+            return new AxRenewalProjectDetailResponse(
+                    AxRenewalProjectResponse.of(detail.project()),
+                    detail.analysis() == null ? null : AxRenewalAnalysisResponse.of(detail.analysis()),
+                    detail.stackLayers().stream().map(AxRenewalStackLayerResponse::of).toList(),
+                    detail.architecture() == null ? null : AxRenewalArchitectureResponse.of(detail.architecture()),
+                    detail.pageMappings().stream().map(AxRenewalPageMappingResponse::of).toList(),
+                    detail.dbChanges().stream().map(AxRenewalDbChangeResponse::of).toList(),
+                    detail.dbConnection() == null ? null : AxRenewalDbConnectionResponse.of(detail.dbConnection()),
+                    detail.destination() == null ? null : AxRenewalDestinationResponse.of(detail.destination()),
+                    confirmations,
+                    detail.latestImplementationRun() == null
+                            ? null
+                            : AxRenewalImplementationRunResponse.of(detail.latestImplementationRun()),
+                    detail.comments().stream().map(AxRenewalCommentResponse::of).toList());
+        }
+    }
 }

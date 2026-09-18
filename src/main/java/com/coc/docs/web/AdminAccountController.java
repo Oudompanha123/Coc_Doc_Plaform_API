@@ -6,6 +6,8 @@ import com.coc.docs.account.dto.AccountSummary;
 import com.coc.docs.account.AppRole;
 import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.auth.SessionRepository;
+import com.coc.docs.capability.Capability;
+import com.coc.docs.capability.CapabilityService;
 import jakarta.validation.Valid;
 import java.net.URI;
 import java.time.Instant;
@@ -39,10 +41,13 @@ public class AdminAccountController {
 
     private final AccountService accounts;
     private final SessionRepository sessions;
+    private final CapabilityService capabilities;
 
-    public AdminAccountController(AccountService accounts, SessionRepository sessions) {
+    public AdminAccountController(
+            AccountService accounts, SessionRepository sessions, CapabilityService capabilities) {
         this.accounts = accounts;
         this.sessions = sessions;
+        this.capabilities = capabilities;
     }
 
     /**
@@ -188,5 +193,39 @@ public class AdminAccountController {
             @PathVariable UUID accountId, @AuthenticationPrincipal CurrentUser actor) {
         accounts.delete(accountId, actor);
         return ResponseEntity.noContent().build();
+    }
+
+    // -----------------------------------------------------------------------
+    // Capabilities (ADR-037) — a second, rank-independent grant, layered on
+    // top of the role above rather than replacing it. Nested here rather than
+    // a new controller: a capability grant is a sub-resource of the account
+    // it is granted to, and this inherits the surrounding super_admin floor
+    // for free, the same floor FR-AUTH-008 gives every other grant of
+    // authority in this controller.
+    // -----------------------------------------------------------------------
+
+    @GetMapping("/{accountId}/capabilities")
+    ApiDtos.CapabilitiesResponse listCapabilities(@PathVariable UUID accountId) {
+        return ApiDtos.CapabilitiesResponse.of(accountId, capabilities.currentFor(accountId));
+    }
+
+    @PostMapping("/{accountId}/capabilities/{key}")
+    ApiDtos.CapabilitiesResponse grantCapability(
+            @PathVariable UUID accountId,
+            @PathVariable String key,
+            @AuthenticationPrincipal CurrentUser actor) {
+        Capability capability = Capability.parse(key)
+                .orElseThrow(() -> ApiException.badRequest("unknown capability: " + key));
+        return ApiDtos.CapabilitiesResponse.of(accountId, capabilities.grant(accountId, capability, actor));
+    }
+
+    @DeleteMapping("/{accountId}/capabilities/{key}")
+    ApiDtos.CapabilitiesResponse revokeCapability(
+            @PathVariable UUID accountId,
+            @PathVariable String key,
+            @AuthenticationPrincipal CurrentUser actor) {
+        Capability capability = Capability.parse(key)
+                .orElseThrow(() -> ApiException.badRequest("unknown capability: " + key));
+        return ApiDtos.CapabilitiesResponse.of(accountId, capabilities.revoke(accountId, capability, actor));
     }
 }

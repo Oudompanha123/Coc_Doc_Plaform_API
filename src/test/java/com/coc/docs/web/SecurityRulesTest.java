@@ -12,6 +12,7 @@ import com.coc.docs.account.AppRole;
 import com.coc.docs.auth.SessionAuthenticationFilter;
 import com.coc.docs.auth.SessionService;
 import com.coc.docs.auth.TestCallers;
+import com.coc.docs.capability.Capability;
 import com.coc.docs.config.AppProperties;
 import com.coc.docs.config.ProblemResponses;
 import com.coc.docs.config.SecurityConfig;
@@ -105,6 +106,21 @@ class SecurityRulesTest {
     @MockitoBean com.coc.docs.auth.NonceService nonceService;
     @MockitoBean com.coc.docs.auth.SessionRepository sessionRepository;
     @MockitoBean com.coc.docs.account.RoleRepository roleRepository;
+
+    // AuthController needs it to construct, to resolve the caller's own
+    // capabilities for /auth/me (ADR-037); AdminAccountController needs
+    // CapabilityService for its capability grant/revoke endpoints. Mocked for
+    // the same reason as the rest of this class: this test is about which
+    // routes the filter chain admits, not about which capabilities anyone
+    // holds.
+    @MockitoBean com.coc.docs.capability.CapabilityRepository capabilityRepository;
+    @MockitoBean com.coc.docs.capability.CapabilityService capabilityService;
+
+    // AxRenewalController is in this slice (ADR-037), so its dependency has
+    // to be too, same reasoning as the rest of this class: this test is
+    // about which routes the filter chain admits, not about the workflow
+    // itself — that is a future AxRenewalServiceTest's job.
+    @MockitoBean com.coc.docs.axrenewal.AxRenewalService axRenewalService;
 
     // AuthController needs it to construct (ADR-021); mocked for the same
     // reason as passwordResetService above.
@@ -627,6 +643,105 @@ class SecurityRulesTest {
                                     "{\"email\":\"a@example.com\",\"date\":\"2026-01-01\","
                                             + "\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheCreation\":0}"))
                     .andExpect(status().isServiceUnavailable());
+        }
+    }
+
+    @Nested
+    @DisplayName("AX Renewal (ADR-037)")
+    class AxRenewalPath {
+
+        @Test
+        void the_read_side_admits_a_plain_user() throws Exception {
+            org.mockito.Mockito.when(axRenewalService.list()).thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/ax-renewal/projects").with(as(AppRole.USER)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void the_read_side_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(get("/api/v1/ax-renewal/projects")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void creating_a_project_refuses_a_plain_user() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"x\"}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void creating_a_project_admits_an_admin() throws Exception {
+            org.mockito.Mockito.when(axRenewalService.create(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any()))
+                    .thenThrow(ApiException.badRequest("stub"));
+
+            // 400 from the stub above, not 403/401 — proof the route was
+            // reached rather than refused at the security layer.
+            mvc.perform(post("/api/v1/ax-renewal/projects")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"x\"}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void confirming_a_section_refuses_a_plain_admin_without_the_developer_capability() throws Exception {
+            // The deliberate divergence from "admin-or-above" (ADR-037): an
+            // Admin may draft a plan but not sign off on or trigger it.
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/plan/stack_move/confirm")
+                            .with(as(AppRole.ADMIN)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void confirming_a_section_admits_a_super_admin() throws Exception {
+            // doThrow().when(...), not when(...).thenThrow(...): the mock is
+            // re-stubbed for this exact method across multiple tests in this
+            // class, and when(mock.method()) must invoke the method to
+            // record it -- which, once already stubbed to throw, throws
+            // immediately and never reaches thenThrow(). doThrow() configures
+            // the answer before the call, side-stepping that trap.
+            org.mockito.Mockito.doThrow(ApiException.notFound("project"))
+                    .when(axRenewalService)
+                    .confirmSection(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any());
+
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/plan/stack_move/confirm")
+                            .with(SecurityMockMvcRequestPostProcessors.authentication(
+                                    com.coc.docs.auth.TestCallers.authentication(AppRole.SUPER_ADMIN)))
+                            .contentType(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void confirming_a_section_admits_a_plain_user_holding_the_developer_capability() throws Exception {
+            org.mockito.Mockito.doThrow(ApiException.notFound("project"))
+                    .when(axRenewalService)
+                    .confirmSection(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any());
+
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/plan/stack_move/confirm")
+                            .with(SecurityMockMvcRequestPostProcessors.authentication(
+                                    com.coc.docs.auth.TestCallers.authentication(
+                                            AppRole.USER, java.util.Set.of(Capability.DEVELOPER))))
+                            .contentType(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void starting_implementation_refuses_a_plain_user_without_the_developer_capability() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/start")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
         }
     }
 

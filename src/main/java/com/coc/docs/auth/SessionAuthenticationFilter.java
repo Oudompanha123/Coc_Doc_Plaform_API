@@ -158,17 +158,19 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
 
         /**
          * Grants the caller's rank and every rank beneath it, plus every
-         * permission their roles carry.
+         * permission their roles carry, plus every capability held directly.
          *
          * <p>The rank ladder is kept so a {@code hasRole("USER")} rule still
-         * admits an admin without spelling out the ladder. Permissions are
-         * added as plain authorities with no {@code ROLE_} prefix, so a rule
-         * reads {@code hasAuthority("content.publish")} and cannot be confused
-         * with {@code hasRole()}, which prefixes silently.
+         * admits an admin without spelling out the ladder. Permissions and
+         * capabilities are both added as plain authorities with no {@code
+         * ROLE_} prefix, so a rule reads {@code hasAuthority("content.publish")}
+         * or {@code hasAuthority("capability.developer")} and cannot be
+         * confused with {@code hasRole()}, which prefixes silently.
          *
-         * <p>Both, because they answer different questions: {@code
-         * page.min_role} asks for a rank, an endpoint asks for a capability
-         * (ADR-016).
+         * <p>All three, because they answer different questions: {@code
+         * page.min_role} asks for a rank, most endpoints ask for a permission,
+         * and a capability (ADR-037) asks "was this account granted this
+         * specific thing directly" — independent of rank entirely.
          */
         private static List<GrantedAuthority> authorities(CurrentUser user) {
             List<GrantedAuthority> granted = new java.util.ArrayList<>(
@@ -179,6 +181,8 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
 
             user.permissions()
                     .forEach(permission -> granted.add(new SimpleGrantedAuthority(permission.key())));
+            user.capabilities()
+                    .forEach(capability -> granted.add(new SimpleGrantedAuthority(capability.authority())));
 
             return List.copyOf(granted);
         }

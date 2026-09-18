@@ -40,6 +40,15 @@ public final class AuditAction {
     public static final String ACCOUNT_APPROVE = "account.approve";
     public static final String ACCOUNT_REJECT = "account.reject";
 
+    /**
+     * A capability (e.g. {@code developer}) was granted or revoked on an
+     * account — a different, rank-independent axis from {@link
+     * #ACCOUNT_ROLE_CHANGE} (ADR-037).
+     */
+    public static final String ACCOUNT_CAPABILITY_GRANT = "account.capability_grant";
+
+    public static final String ACCOUNT_CAPABILITY_REVOKE = "account.capability_revoke";
+
     /** A registration code was minted and emailed — the first step of ADR-021, before any account row exists. */
     public static final String ACCOUNT_REGISTER_OTP_REQUEST = "account.register_otp_request";
 
@@ -97,6 +106,21 @@ public final class AuditAction {
     public static final String CLAUDE_USAGE_MEMBER_BUDGET_CHANGE = "claude_usage_member.budget_change";
     public static final String CLAUDE_USAGE_MEMBER_REMOVE = "claude_usage_member.remove";
 
+    /** AX Renewal actions (ADR-037) — a legacy-migration planning workspace, its plan and its implementation runs. */
+    public static final String AX_RENEWAL_PROJECT_CREATE = "ax_renewal.project_create";
+
+    public static final String AX_RENEWAL_MANIFEST_ATTACH = "ax_renewal.manifest_attach";
+    public static final String AX_RENEWAL_ANALYSIS_RUN = "ax_renewal.analysis_run";
+    public static final String AX_RENEWAL_STACK_MOVE_EDIT = "ax_renewal.stack_move_edit";
+    public static final String AX_RENEWAL_ARCHITECTURE_EDIT = "ax_renewal.architecture_edit";
+    public static final String AX_RENEWAL_PAGES_EDIT = "ax_renewal.pages_edit";
+    public static final String AX_RENEWAL_DATABASE_PLAN_EDIT = "ax_renewal.database_plan_edit";
+    public static final String AX_RENEWAL_DATABASE_CONNECT = "ax_renewal.database_connect";
+    public static final String AX_RENEWAL_DESTINATION_SET = "ax_renewal.destination_set";
+    public static final String AX_RENEWAL_SECTION_CONFIRM = "ax_renewal.section_confirm";
+    public static final String AX_RENEWAL_IMPLEMENTATION_START = "ax_renewal.implementation_start";
+    public static final String AX_RENEWAL_COMMENT_ADD = "ax_renewal.comment_add";
+
     /** Target types, for the {@code target_type} column. */
     public static final String TARGET_PAGE = "page";
 
@@ -121,4 +145,6 @@ public final class AuditAction {
     public static final String TARGET_NAV_ITEM = "nav_item";
 
     public static final String TARGET_CLAUDE_USAGE_MEMBER = "claude_usage_member";
+
+    public static final String TARGET_AX_RENEWAL_PROJECT = "ax_renewal_project";
 }

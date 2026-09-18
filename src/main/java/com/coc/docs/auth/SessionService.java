@@ -8,6 +8,7 @@ import com.coc.docs.account.AppRole;
 import com.coc.docs.account.AvatarStorage;
 import com.coc.docs.audit.AuditAction;
 import com.coc.docs.audit.AuditRepository;
+import com.coc.docs.capability.CapabilityRepository;
 import com.coc.docs.config.AppProperties;
 import com.coc.docs.web.ApiException;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -58,6 +59,7 @@ public class SessionService {
 
     private final SessionRepository sessions;
     private final AccountRepository accounts;
+    private final CapabilityRepository capabilities;
     private final AuditRepository audit;
     private final GoogleIdTokenVerifier google;
 
@@ -110,6 +112,7 @@ public class SessionService {
     public SessionService(
             SessionRepository sessions,
             AccountRepository accounts,
+            CapabilityRepository capabilities,
             AuditRepository audit,
             GoogleIdTokenVerifier google,
             ObjectProvider<KeycloakIdTokenService> keycloak,
@@ -123,6 +126,7 @@ public class SessionService {
             ApplicationEventPublisher events) {
         this.sessions = sessions;
         this.accounts = accounts;
+        this.capabilities = capabilities;
         this.audit = audit;
         this.google = google;
         this.keycloak = keycloak;
@@ -406,7 +410,11 @@ public class SessionService {
         return accounts
                 .findById(found.get().accountId())
                 .filter(Account::isActive)
-                .map(account -> new CurrentUser(account, accounts.findPermissions(account.id()), tokenHash));
+                .map(account -> new CurrentUser(
+                        account,
+                        accounts.findPermissions(account.id()),
+                        capabilities.findForAccount(account.id()),
+                        tokenHash));
     }
 
     // -----------------------------------------------------------------------

@@ -2,6 +2,7 @@ package com.coc.docs.config;
 
 import com.coc.docs.account.AppRole;
 import com.coc.docs.auth.SessionAuthenticationFilter;
+import com.coc.docs.capability.Capability;
 import java.util.List;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -305,6 +306,39 @@ public class SecurityConfig {
                         // rule below since this matcher is GET-only.
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/tasks")
                         .hasRole(AppRole.USER.name())
+
+                        // --- AX Renewal (ADR-037) ------------------------------
+                        // Deliberately its own prefix, not under /api/v1/admin/**:
+                        // a plain `user` holding the `developer` capability must
+                        // reach this surface, and the generic admin floor below
+                        // would lock them out before this class ever ran.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/ax-renewal/**").hasRole(AppRole.USER.name())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/comments")
+                        .hasRole(AppRole.USER.name())
+
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects").hasRole(AppRole.ADMIN.name())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/manifest")
+                        .hasRole(AppRole.ADMIN.name())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/analysis/run")
+                        .hasRole(AppRole.ADMIN.name())
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/ax-renewal/projects/*/plan/**")
+                        .hasRole(AppRole.ADMIN.name())
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/ax-renewal/projects/*/database/connect")
+                        .hasRole(AppRole.ADMIN.name())
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/ax-renewal/projects/*/destination")
+                        .hasRole(AppRole.ADMIN.name())
+
+                        // Confirming a section and starting implementation are
+                        // deliberately NOT "admin-or-above" -- an Admin who lacks
+                        // the developer capability may draft a plan but not sign
+                        // off on or trigger it. Super Admin or the developer
+                        // capability, nothing else (ADR-037).
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/plan/*/confirm")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), Capability.DEVELOPER.authority())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/plan/*/reopen")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), Capability.DEVELOPER.authority())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/start")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), Capability.DEVELOPER.authority())
 
                         // --- editorial writes and admin reads ----------------
                         .requestMatchers("/api/v1/admin/**").hasRole(AppRole.ADMIN.name())
