@@ -6,6 +6,7 @@ import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.web.ApiException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.stereotype.Service;
@@ -38,6 +39,10 @@ public class DocsContentService {
 
     public Optional<JsonNode> find(String productKey, String slug) {
         return repository.find(productKey, slug);
+    }
+
+    public Optional<Instant> findUpdatedAt(String productKey, String slug) {
+        return repository.findUpdatedAt(productKey, slug);
     }
 
     public JsonNode save(String productKey, String slug, JsonNode body, CurrentUser editor) {

@@ -27,9 +27,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Roster management, ingestion, and the dashboard rollup for Claude Usage
- * (ADR-035).
+ * (ADR-035). Cost is priced per model at real Anthropic API rates
+ * ({@link ClaudeUsagePricing}), not a single blended rate (ADR-036, revision
+ * of ADR-035 decision 4).
  *
- * <p>// req: FR-USAGE-001, FR-USAGE-002, FR-USAGE-003, NFR-SEC-PII, ADR-035
+ * <p>// req: FR-USAGE-001, FR-USAGE-002, FR-USAGE-003, NFR-SEC-PII, ADR-035, ADR-036
  */
 @Service
 public class ClaudeUsageService {
@@ -45,13 +47,8 @@ public class ClaudeUsageService {
     /** Percentage of the effective budget at or above which a member counts toward "Near Limit". */
     private static final int NEAR_LIMIT_PCT = 80;
 
-    /**
-     * $ per 1K tokens — a rough blended estimate across whatever models are in
-     * use, for the "API-Equivalent Cost" figure. Not a real invoice (ADR-035
-     * decision 4): a genuine per-model price table is a separate decision from
-     * making the data real, and is not made here.
-     */
-    private static final BigDecimal COST_PER_1K_TOKENS = new BigDecimal("0.006");
+    /** The storage column's scale — cost is summed across every model in a day at higher precision, then rounded once to this. */
+    private static final int COST_SCALE = 4;
 
     /** A day's tokens can't plausibly exceed this; anything larger is a bug or an abuse — same ceiling the reference tool's own ingest route uses. */
     private static final long MAX_TOKENS_PER_DAY = 5_000_000_000L;
@@ -218,7 +215,8 @@ public class ClaudeUsageService {
             long output,
             long cacheRead,
             long cacheCreation,
-            List<String> rawModels) {
+            List<String> rawModels,
+            Map<String, ClaudeUsageModelTokens> byModel) {
 
         String email = normalizeEmail(rawEmail);
 
@@ -236,6 +234,13 @@ public class ClaudeUsageService {
         }
         if (input + output > MAX_TOKENS_PER_DAY) {
             throw ApiException.badRequest("input + output must not exceed " + MAX_TOKENS_PER_DAY + " for a single day");
+        }
+        if (byModel != null) {
+            for (ClaudeUsageModelTokens t : byModel.values()) {
+                if (t.input() < 0 || t.output() < 0 || t.cacheReadTokens() < 0 || t.cacheCreationTokens() < 0) {
+                    throw ApiException.badRequest("byModel token counts must not be negative");
+                }
+            }
         }
 
         ClaudeUsageMember member = members.findByEmail(email).orElse(null);
@@ -259,25 +264,49 @@ public class ClaudeUsageService {
             }
         }
 
-        String models = joinModels(rawModels);
-        BigDecimal cost = costFor(input, output);
+        // byModel is the source of truth for both the display list and the
+        // price the moment it is present — it is strictly richer than the
+        // flat `models` names list, and pricing two sources against each
+        // other would just be two ways for them to disagree.
+        String models = (byModel != null && !byModel.isEmpty())
+                ? joinModels(byModel.keySet())
+                : joinModels(rawModels);
+        BigDecimal cost = costFor(byModel);
 
         boolean created = daily.upsert(member.id(), date, input, output, cacheRead, cacheCreation, cost, models);
         return new IngestOutcome(created ? IngestOutcome.CREATED : IngestOutcome.UPDATED);
     }
 
-    /** Never trusted from the client — computed here so a rate change applies without redeploying every reporter. */
-    static BigDecimal costFor(long input, long output) {
-        return BigDecimal.valueOf(input + output)
-                .multiply(COST_PER_1K_TOKENS)
-                .divide(BigDecimal.valueOf(1000), 4, RoundingMode.HALF_UP);
+    /**
+     * Sums each model's own real per-token cost (ADR-036). Never trusted from
+     * the client — computed here so a price-table change applies without
+     * redeploying every reporter.
+     *
+     * <p>$0 when {@code byModel} is absent or empty: a reporter that predates
+     * per-model reporting still has its tokens and history recorded correctly,
+     * just priced at $0 rather than a guessed number — the same trade-off the
+     * reference table this was ported from makes for exactly this case.
+     */
+    static BigDecimal costFor(Map<String, ClaudeUsageModelTokens> byModel) {
+        if (byModel == null || byModel.isEmpty()) {
+            return BigDecimal.ZERO.setScale(COST_SCALE, RoundingMode.HALF_UP);
+        }
+        BigDecimal total = BigDecimal.ZERO;
+        for (Map.Entry<String, ClaudeUsageModelTokens> entry : byModel.entrySet()) {
+            ClaudeUsageModelTokens t = entry.getValue();
+            total = total.add(ClaudeUsagePricing.costFor(
+                    entry.getKey(), t.input(), t.output(), t.cacheReadTokens(), t.cacheCreationTokens()));
+        }
+        return total.setScale(COST_SCALE, RoundingMode.HALF_UP);
     }
 
-    private static String joinModels(List<String> rawModels) {
+    private static String joinModels(Iterable<String> rawModels) {
         if (rawModels == null) {
             return "";
         }
-        return rawModels.stream()
+        List<String> collected = new ArrayList<>();
+        rawModels.forEach(collected::add);
+        return collected.stream()
                 .filter(java.util.Objects::nonNull)
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())

@@ -341,6 +341,14 @@ class SecurityRulesTest {
         }
 
         @Test
+        void the_meta_endpoint_is_also_reachable_without_a_session() throws Exception {
+            // Same public matcher (/api/v1/docs-content/**) as the read side
+            // above — the "About this document" panel's updatedAt lookup.
+            mvc.perform(get("/api/v1/docs-content/jex3-0/overview/meta"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
         void the_write_side_refuses_a_user() throws Exception {
             mvc.perform(put("/api/v1/admin/docs-content/jex3-0/overview")
                             .with(as(AppRole.USER))

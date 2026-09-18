@@ -39,4 +39,15 @@ public class DocsContentController {
         return content.find(productKey, slug)
                 .orElseThrow(() -> ApiException.notFound("docs content for " + productKey + "/" + slug));
     }
+
+    /** {@code updatedAt} for the product docs pages' "About this document"
+     *  panel — a separate call rather than a field on {@link #get}, so that
+     *  endpoint's response stays exactly the `DocContent` shape the frontend
+     *  reads it as (see {@link ApiDtos.DocsContentMetaResponse}). */
+    @GetMapping("/{productKey}/{slug}/meta")
+    ApiDtos.DocsContentMetaResponse meta(@PathVariable String productKey, @PathVariable String slug) {
+        return content.findUpdatedAt(productKey, slug)
+                .map(ApiDtos.DocsContentMetaResponse::new)
+                .orElseThrow(() -> ApiException.notFound("docs content for " + productKey + "/" + slug));
+    }
 }

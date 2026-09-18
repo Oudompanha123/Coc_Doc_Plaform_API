@@ -2,6 +2,7 @@ package com.coc.docs.docscontent;
 
 import com.coc.docs.web.Jsonb;
 import com.fasterxml.jackson.databind.JsonNode;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -30,6 +31,18 @@ public class DocsContentRepository {
         return jdbc.sql("select body::text as body from docs_content where product_key = ? and slug = ?")
                 .params(productKey, slug)
                 .query((rs, n) -> jsonb.read(rs.getString("body")))
+                .optional();
+    }
+
+    /** For the product docs pages' "About this document" panel — a separate
+     *  query rather than folded into {@link #find}, so that endpoint's
+     *  response shape (the raw content body, read straight back as
+     *  `DocContent` on the frontend) never gains a field that would round-trip
+     *  into a save. */
+    public Optional<Instant> findUpdatedAt(String productKey, String slug) {
+        return jdbc.sql("select updated_at from docs_content where product_key = ? and slug = ?")
+                .params(productKey, slug)
+                .query((rs, n) -> rs.getTimestamp("updated_at").toInstant())
                 .optional();
     }
 
