@@ -262,4 +262,66 @@ class NotificationFeedServiceTest {
                     .containsOnlyNulls();
         }
     }
+
+    /**
+     * Every action a reader can see has a sentence.
+     *
+     * <p>{@code summaryFor} falls back to the raw action key, and the fallback
+     * is deliberate — a build older than an action should render something true
+     * rather than a blank row. What was not deliberate is that nineteen actions
+     * lived on it, so the topbar showed lines reading
+     * {@code auth.password_change_complete} and
+     * {@code claude_usage_member.invite} to people who have never seen a log
+     * line. The PM found the first one by changing their own password.
+     *
+     * <p>Reflection over the constants rather than a list repeated here: a list
+     * would have to be updated by the same person, in the same commit, who
+     * forgot the {@code case}. This asks the vocabulary itself, so adding an
+     * action to {@link AuditAction} and nothing else fails here rather than in
+     * somebody's topbar.
+     */
+    @Nested
+    @DisplayName("wording")
+    class Wording {
+
+        /**
+         * Action constants, which is every {@code String} constant except the
+         * {@code TARGET_*} block — those name target types for the
+         * {@code target_type} column and never reach a summary.
+         */
+        private static List<String> visibleActions() {
+            return java.util.Arrays.stream(AuditAction.class.getDeclaredFields())
+                    .filter(f -> java.lang.reflect.Modifier.isStatic(f.getModifiers()))
+                    .filter(f -> f.getType() == String.class)
+                    .filter(f -> !f.getName().startsWith("TARGET_"))
+                    .map(f -> {
+                        try {
+                            return (String) f.get(null);
+                        } catch (IllegalAccessException e) {
+                            throw new AssertionError("could not read " + f.getName(), e);
+                        }
+                    })
+                    .filter(action -> !NotificationFeedService.HIDDEN_ACTIONS.contains(action))
+                    .toList();
+        }
+
+        @Test
+        @DisplayName("no action reaches the feed as its raw key")
+        void everyVisibleActionHasASentence() {
+            List<String> actions = visibleActions();
+            // A guard on the guard: a refactor that renamed the constants or
+            // moved them would leave this passing over an empty list.
+            assertThat(actions).hasSizeGreaterThan(20);
+
+            CurrentUser caller = TestCallers.user(AppRole.SUPER_ADMIN);
+            List<AuditEntry> rows = IntStream.range(0, actions.size())
+                    .mapToObj(i -> entry(i + 1, actions.get(i), "a@example.com"))
+                    .toList();
+            when(audit.recent(anyInt())).thenReturn(rows);
+
+            assertThat(service.feedFor(caller, 50))
+                    .extracting(NotificationFeedService.FeedItem::summary)
+                    .doesNotContainAnyElementsOf(actions);
+        }
+    }
 }

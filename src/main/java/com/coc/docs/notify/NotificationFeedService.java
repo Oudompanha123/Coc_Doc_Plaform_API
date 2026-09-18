@@ -60,7 +60,7 @@ public class NotificationFeedService {
      * a refused sign-in on your own account is precisely the kind of thing a
      * notification exists for.
      */
-    private static final Set<String> HIDDEN_ACTIONS = Set.of(AuditAction.AUTH_SIGN_IN, AuditAction.AUTH_SIGN_OUT);
+    static final Set<String> HIDDEN_ACTIONS = Set.of(AuditAction.AUTH_SIGN_IN, AuditAction.AUTH_SIGN_OUT);
 
     /**
      * Namespace for HRMS ids in the feed.
@@ -169,6 +169,16 @@ public class NotificationFeedService {
      * this is shown to people who never see log lines. An action with no case
      * here falls back to the raw key, which is ugly on purpose — it is meant to
      * be noticed and given a sentence, not to pass unremarked.
+     *
+     * <p><b>"Noticed" now means at build time.</b> It did not, and nineteen
+     * actions accumulated without one — including
+     * {@code auth.password_change_complete}, which is raised by the everyday
+     * act of changing your own password and so appeared in the topbar, in that
+     * spelling, to the person who had just done it. The fallback stays, because
+     * a build older than an action should still render something true rather
+     * than a blank row, but {@code NotificationFeedServiceTest} now fails when
+     * a visible action reaches it. A default case is a reasonable thing to have
+     * and an unreasonable thing to rely on.
      */
     private static String summaryFor(AuditEntry entry) {
         return switch (entry.action()) {
@@ -189,6 +199,25 @@ public class NotificationFeedService {
             case AuditAction.ACCOUNT_APPROVE -> "Approved a registration";
             case AuditAction.ACCOUNT_REJECT -> "Rejected a registration";
             case AuditAction.AUTH_REJECTED -> "A sign-in attempt was refused";
+            case AuditAction.PASSWORD_RESET_REQUEST -> "Requested a password reset";
+            case AuditAction.PASSWORD_RESET_COMPLETE -> "Reset a password";
+            case AuditAction.PASSWORD_CHANGE_COMPLETE -> "Changed a password";
+            case AuditAction.MFA_ENABLED -> "Turned on two-factor authentication";
+            case AuditAction.MFA_DISABLED -> "Turned off two-factor authentication";
+            case AuditAction.NOTIFICATION_DIGEST_SEND -> "Sent the activity digest";
+            case AuditAction.DOCS_CONTENT_SAVE -> "Saved a documentation section";
+            case AuditAction.NAV_PRODUCT_CREATE -> "Added a product";
+            case AuditAction.NAV_PRODUCT_DELETE -> "Removed a product";
+            case AuditAction.NAV_ITEM_CREATE -> "Added a navigation item";
+            case AuditAction.NAV_ITEM_DELETE -> "Removed a navigation item";
+            case AuditAction.INTEGRATION_CONNECT -> "Connected an integration";
+            case AuditAction.INTEGRATION_UPDATE -> "Updated an integration";
+            case AuditAction.INTEGRATION_ROTATE_SECRET -> "Rotated an integration's signing secret";
+            case AuditAction.INTEGRATION_DISCONNECT -> "Disconnected an integration";
+            case AuditAction.CLAUDE_USAGE_MEMBER_INVITE -> "Invited someone to Claude Usage";
+            case AuditAction.CLAUDE_USAGE_MEMBER_ROLE_CHANGE -> "Changed a Claude Usage member's role";
+            case AuditAction.CLAUDE_USAGE_MEMBER_BUDGET_CHANGE -> "Changed a Claude Usage member's budget";
+            case AuditAction.CLAUDE_USAGE_MEMBER_REMOVE -> "Removed a Claude Usage member";
             default -> entry.action();
         };
     }
