@@ -1,5 +1,6 @@
 package com.coc.docs.auth;
 
+import com.coc.docs.mail.EmailLayout;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import java.time.Duration;
@@ -39,12 +40,15 @@ public class RegistrationOtpMailer {
     private static final Logger log = LoggerFactory.getLogger(RegistrationOtpMailer.class);
 
     private final ObjectProvider<JavaMailSender> mailSender;
+    private final EmailLayout layout;
     private final String fromAddress;
 
     public RegistrationOtpMailer(
             ObjectProvider<JavaMailSender> mailSender,
+            EmailLayout layout,
             @Value("${app.mail.from:Coc Docs Platform <noreply@cocdocsplatform.com>}") String fromAddress) {
         this.mailSender = mailSender;
+        this.layout = layout;
         this.fromAddress = fromAddress;
     }
 
@@ -110,38 +114,20 @@ public class RegistrationOtpMailer {
     }
 
     /**
-     * Inline-styled on purpose, same reasoning as {@code
-     * PasswordResetMailer.htmlBody}: a {@code <style>} block is stripped by
-     * enough mail clients (Outlook desktop chief among them) that it cannot
-     * be relied on.
+     * Rendered through {@link EmailLayout}, which owns the brand mark, card
+     * and typography all three mailers share. This one has no button — the
+     * code is typed back into the page the reader already has open, and a
+     * link here would be a second, unnecessary way in.
      */
-    private static String htmlBody(String code, Duration ttl) {
-        return "<!doctype html>"
-                + "<html><body style=\"margin:0;padding:32px 16px;background-color:#eef0f8;"
-                + "font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;\">"
-                + "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"center\">"
-                + "<table role=\"presentation\" width=\"480\" cellpadding=\"0\" cellspacing=\"0\" "
-                + "style=\"max-width:480px;width:100%;background-color:#ffffff;border-radius:16px;"
-                + "box-shadow:0 4px 24px rgba(40,34,109,0.08);\">"
-                + "<tr><td style=\"padding:40px 40px 32px;text-align:center;\">"
-                + "<div style=\"width:56px;height:56px;margin:0 auto 24px;border-radius:16px;"
-                + "background:linear-gradient(135deg,#6d3ce0,#4c6ff0);color:#ffffff;font-size:20px;"
-                + "font-weight:700;line-height:56px;font-family:inherit;\">CD</div>"
-                + "<h1 style=\"margin:0 0 12px;font-size:22px;line-height:1.3;color:#16141f;font-weight:800;\">"
-                + "Verify your email</h1>"
-                + "<p style=\"margin:0 0 24px;font-size:14px;line-height:1.6;color:#6b6b80;\">"
-                + "Enter this code to finish creating your Coc Docs Platform account.</p>"
-                + "<div style=\"display:inline-block;padding:16px 28px;border-radius:12px;background-color:#f4f2fd;"
-                + "font-size:32px;font-weight:800;letter-spacing:8px;color:#16141f;font-family:'SFMono-Regular',"
-                + "Consolas,Menlo,monospace;\">" + code + "</div>"
-                + "<hr style=\"margin:32px 0 20px;border:none;border-top:1px solid #ececf2;\">"
-                + "<p style=\"margin:0;font-size:12px;line-height:1.6;color:#6b6b80;\">"
-                + "This code expires in " + ttl.toMinutes() + " minutes and can only be used once. "
-                + "If you didn't request this, you can safely ignore this email — no account will be created.</p>"
-                + "</td></tr></table>"
-                + "<p style=\"margin:20px 0 0;font-size:12px;color:#6b6b80;text-align:center;\">"
-                + "Coc Docs Platform — this is an automated message, please don't reply.</p>"
-                + "</td></tr></table>"
-                + "</body></html>";
+    private String htmlBody(String code, Duration ttl) {
+        return layout.page(
+                "Your verification code is " + code + " — it expires in " + ttl.toMinutes() + " minutes.",
+                EmailLayout.heading("Verify your email")
+                        + EmailLayout.lead(
+                                "Enter this code to finish creating your Coc Docs Platform account.")
+                        + EmailLayout.code(code)
+                        + EmailLayout.footnote("This code expires in " + ttl.toMinutes()
+                                + " minutes and can only be used once. If you didn't request this, you can "
+                                + "safely ignore this email — no account will be created."));
     }
 }

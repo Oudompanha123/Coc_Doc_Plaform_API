@@ -7,6 +7,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.coc.docs.config.AppProperties;
+import com.coc.docs.mail.EmailLayout;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import java.time.Duration;
@@ -41,7 +43,17 @@ class RegistrationOtpMailerTest {
 
     private final JavaMailSender sender = mock(JavaMailSender.class);
     private final RegistrationOtpMailer mailer =
-            new RegistrationOtpMailer(provider, "Coc Docs Platform <noreply@example.com>");
+            new RegistrationOtpMailer(provider, layout(), "Coc Docs Platform <noreply@example.com>");
+
+    /** The layout only needs a frontend origin, to build the logo URL from. */
+    private static EmailLayout layout() {
+        return new EmailLayout(new AppProperties(
+                Duration.ofDays(1),
+                "https://docs.example.com",
+                true,
+                "",
+                new AppProperties.Storage("", "", "", "", "")));
+    }
 
     /** A real, if disconnected, message -- {@code MimeMessageHelper} needs a genuine {@code Session}, not a bare mock. */
     private static MimeMessage newMessage() {
