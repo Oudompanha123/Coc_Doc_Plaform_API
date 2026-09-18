@@ -1,6 +1,7 @@
 package com.coc.docs.auth;
 
 import com.coc.docs.config.AppProperties;
+import com.coc.docs.mail.EmailLayout;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import java.net.URLEncoder;
@@ -40,14 +41,17 @@ public class AccountInviteMailer {
 
     private final ObjectProvider<JavaMailSender> mailSender;
     private final AppProperties properties;
+    private final EmailLayout layout;
     private final String fromAddress;
 
     public AccountInviteMailer(
             ObjectProvider<JavaMailSender> mailSender,
             AppProperties properties,
+            EmailLayout layout,
             @Value("${app.mail.from:Coc Docs Platform <noreply@cocdocsplatform.com>}") String fromAddress) {
         this.mailSender = mailSender;
         this.properties = properties;
+        this.layout = layout;
         this.fromAddress = fromAddress;
     }
 
@@ -116,83 +120,32 @@ public class AccountInviteMailer {
     }
 
     /**
-     * Inline-styled, matching {@link PasswordResetMailer}'s reasoning: a
-     * {@code <style>} block is stripped by enough mail clients that it cannot
-     * be relied on, and there is no asset host to point an {@code <img>} at
-     * (nor consistent-enough inline-SVG support). There is deliberately no
-     * copy icon or button next to the password — mail clients strip
-     * {@code <script>}, so no control in an email body can ever call the
-     * Clipboard API, in this template or any other, and a non-functional
-     * icon next to the field is worse than none. The caption below the
-     * password field carries the actual instruction: select the text to
-     * copy it, which is the one mechanism every mail client actually
+     * Rendered through {@link EmailLayout}, which owns the brand mark, card
+     * and typography all three mailers share.
+     *
+     * <p>There is deliberately no copy button beside the password: mail
+     * clients strip {@code <script>}, so no control in an email body can
+     * ever reach the Clipboard API, and a non-functional icon is worse than
+     * none. The caption under the field carries the instruction that does
+     * work — select the text — which is the one mechanism every client
      * supports.
      */
-    private static String htmlBody(String email, String temporaryPassword, String loginUrl) {
-        String font = "-apple-system,BlinkMacSystemFont,'Segoe UI Variable','Segoe UI',"
-                + "'Helvetica Neue',Roboto,Helvetica,Arial,sans-serif";
-        return "<!doctype html>"
-                + "<html><body style=\"margin:0;padding:40px 16px;background-color:#f1f2fa;"
-                + "font-family:" + font + ";-webkit-font-smoothing:antialiased;\">"
-                + "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"center\">"
-                + "<table role=\"presentation\" width=\"480\" cellpadding=\"0\" cellspacing=\"0\" "
-                + "style=\"max-width:480px;width:100%;background-color:#ffffff;border-radius:20px;"
-                + "border:1px solid #edeef8;box-shadow:0 12px 32px rgba(45,32,120,0.10);overflow:hidden;\">"
-                + "<tr><td style=\"height:5px;line-height:5px;font-size:0;"
-                + "background-color:#6d3ce0;background:linear-gradient(90deg,#6d3ce0,#4c6ff0);\">&nbsp;</td></tr>"
-                + "<tr><td style=\"padding:36px 40px 32px;text-align:center;\">"
-                + "<div style=\"width:60px;height:60px;margin:0 auto 24px;border-radius:18px;"
-                + "background-color:#6d3ce0;background:linear-gradient(135deg,#6d3ce0,#4c6ff0);color:#ffffff;"
-                + "font-size:20px;font-weight:700;line-height:60px;font-family:" + font + ";"
-                + "box-shadow:0 8px 20px rgba(76,111,240,0.35);\">CD</div>"
-                + "<h1 style=\"margin:0 0 10px;font-size:22px;line-height:1.3;color:#15131f;font-weight:800;"
-                + "letter-spacing:.02em;text-transform:uppercase;\">Account Created</h1>"
-                + "<p style=\"margin:0 0 28px;font-size:14px;line-height:1.6;color:#6b6b80;text-align:left;\">"
-                + "A single-use credential is ready for your first login.</p>"
-                + "<p style=\"margin:0 0 6px;font-size:11px;font-weight:700;color:#8b8ba7;text-align:left;"
-                + "letter-spacing:.06em;text-transform:uppercase;\">Account email</p>"
-                + "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" "
-                + "style=\"margin:0 0 20px;border-radius:12px;background-color:#f7f7fc;\">"
-                + "<tr>"
-                + "<td width=\"36\" style=\"padding:14px 0 14px 18px;border-left:3px solid #4c6ff0;"
-                + "border-radius:12px 0 0 12px;color:#4c6ff0;font-size:14px;\">&#128274;</td>"
-                + "<td style=\"padding:14px 18px 14px 0;border-radius:0 12px 12px 0;"
-                + "font-size:14px;font-weight:600;color:#15131f;text-align:left;\">"
-                + email + "</td></tr></table>"
-                + "<p style=\"margin:0 0 6px;font-size:11px;font-weight:700;color:#8b8ba7;text-align:left;"
-                + "letter-spacing:.06em;text-transform:uppercase;\">Temporary password</p>"
-                + "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" "
-                + "style=\"margin:0;border-radius:12px;background-color:#f7f7fc;\">"
-                + "<tr>"
-                + "<td style=\"padding:14px 18px;border-left:3px solid #6d3ce0;border-radius:12px;"
-                + "font-family:'SFMono-Regular','Menlo','Consolas',monospace;"
-                + "font-size:19px;font-weight:700;color:#15131f;letter-spacing:.05em;text-align:left;\">"
-                + temporaryPassword + "</td>"
-                + "</tr></table>"
-                + "<p style=\"margin:8px 0 28px;font-size:11px;line-height:1.5;color:#9b9bb0;text-align:left;\">"
-                + "Tap or select to copy the password above.</p>"
-                + "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0 0 28px;\">"
-                + "<tr>"
-                + "<td width=\"20\" valign=\"top\" style=\"padding-right:8px;\">"
-                + "<span style=\"display:inline-block;width:16px;height:16px;line-height:16px;border-radius:50%;"
-                + "background-color:#1f9d6b;color:#ffffff;font-size:10px;font-weight:700;text-align:center;\">"
-                + "&#10003;</span></td>"
-                + "<td style=\"font-size:14px;line-height:1.6;color:#6b6b80;text-align:left;\">"
-                + "For security, please set a new personal password immediately after logging in.</td>"
-                + "</tr></table>"
-                + "<a href=\"" + loginUrl + "\" "
-                + "style=\"display:inline-block;padding:15px 40px;border-radius:14px;background-color:#6d3ce0;"
-                + "background:linear-gradient(135deg,#6d3ce0,#4c6ff0);color:#ffffff;font-size:15px;font-weight:600;"
-                + "text-decoration:none;box-shadow:0 10px 24px rgba(109,60,224,0.30);\">Log in</a>"
-                + "<hr style=\"margin:32px 0 20px;border:none;border-top:1px solid #ececf2;\">"
-                + "<p style=\"margin:0;font-size:12px;line-height:1.6;color:#6b6b80;text-align:left;\">"
-                + "A unique one-time password has been generated for your first login only. If you "
-                + "weren't expecting this, please <strong style=\"color:#4c6ff0;\">contact your "
-                + "administrator</strong> immediately.</p>"
-                + "</td></tr></table>"
-                + "<p style=\"margin:24px 0 0;font-size:12px;color:#9b9bb0;text-align:center;\">"
-                + "Coc Docs Platform &middot; this is an automated message, please don't reply.</p>"
-                + "</td></tr></table>"
-                + "</body></html>";
+    private String htmlBody(String email, String temporaryPassword, String loginUrl) {
+        return layout.page(
+                "Your account is ready — a temporary password is inside.",
+                EmailLayout.heading("Account created")
+                        + EmailLayout.lead("A single-use credential is ready for your first login.")
+                        + EmailLayout.field("Account email", email, false, EmailLayout.accentBlue())
+                        + EmailLayout.spacer(20)
+                        + EmailLayout.field("Temporary password", temporaryPassword, true, EmailLayout.accentPurple())
+                        + "<p style=\"margin:8px 0 0;font-size:11px;line-height:1.5;color:#9b9bb0;text-align:left;\">"
+                        + "Tap or select to copy the password above.</p>"
+                        + EmailLayout.reassurance(
+                                "For security, please set a new personal password immediately after logging in.")
+                        + EmailLayout.button(loginUrl, "Log in")
+                        + EmailLayout.footnote("A unique one-time password has been generated for your first "
+                                + "login only. If you weren't expecting this, please "
+                                + "<strong style=\"color:#4c6ff0;\">contact your administrator</strong> "
+                                + "immediately."));
     }
 }
