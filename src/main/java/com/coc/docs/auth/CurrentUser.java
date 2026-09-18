@@ -3,6 +3,7 @@ package com.coc.docs.auth;
 import com.coc.docs.account.Account;
 import com.coc.docs.account.AppRole;
 import com.coc.docs.account.Permission;
+import com.coc.docs.capability.Capability;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Set;
@@ -22,14 +23,27 @@ import java.util.UUID;
  * which is the reason this system issues an opaque session token instead of a
  * JWT carrying claims (ADR-011, ADR-016).
  *
- * <p>// req: FR-AUTH-005, FR-AUTH-007, TM-003
+ * <p>Capabilities are resolved the same way, from {@code account_capability}
+ * — a second, rank-independent grant (ADR-037). They live here rather than on
+ * {@link Account} for the same reason permissions do: both are facts about
+ * what this caller may do this request, not facts about the account row
+ * itself, and putting them on {@code Account} would force every
+ * account-only code path (the row mapper, audit payloads, {@code
+ * AccountResponse}) to know about a mechanism that must stay decoupled from
+ * it.
+ *
+ * <p>// req: FR-AUTH-005, FR-AUTH-007, TM-003, ADR-037
  */
-public record CurrentUser(Account account, Set<Permission> permissions, byte[] sessionTokenHash) {
+public record CurrentUser(
+        Account account, Set<Permission> permissions, Set<Capability> capabilities, byte[] sessionTokenHash) {
 
     public CurrentUser {
         permissions = (permissions == null || permissions.isEmpty())
                 ? Collections.unmodifiableSet(EnumSet.noneOf(Permission.class))
                 : Collections.unmodifiableSet(EnumSet.copyOf(permissions));
+        capabilities = (capabilities == null || capabilities.isEmpty())
+                ? Collections.unmodifiableSet(EnumSet.noneOf(Capability.class))
+                : Collections.unmodifiableSet(EnumSet.copyOf(capabilities));
     }
 
     public UUID id() {
@@ -70,5 +84,13 @@ public record CurrentUser(Account account, Set<Permission> permissions, byte[] s
      */
     public boolean can(Permission permission) {
         return permissions.contains(permission);
+    }
+
+    /**
+     * Whether this caller has been granted a capability directly, independent
+     * of any role they hold (ADR-037).
+     */
+    public boolean hasCapability(Capability capability) {
+        return capabilities.contains(capability);
     }
 }

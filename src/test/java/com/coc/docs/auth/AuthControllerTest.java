@@ -96,6 +96,13 @@ class AuthControllerTest {
     // needs one to build. Untouched by these tests.
     @MockitoBean com.coc.docs.auth.SessionRepository sessionRepository;
 
+    // AuthController resolves the caller's own capabilities for /auth/me and
+    // the sign-in responses (ADR-037). Untouched here — Mockito's default
+    // answer for a Set-returning method is an empty set, which is exactly
+    // "no capabilities", the same as every other mocked-dependency default
+    // in this class.
+    @MockitoBean com.coc.docs.capability.CapabilityRepository capabilities;
+
     @TestConfiguration
     static class Beans {
 

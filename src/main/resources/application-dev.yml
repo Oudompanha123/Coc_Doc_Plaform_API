@@ -18,6 +18,7 @@ app:
     enabled: false
     dev-code: 123456
 
+
 # Swagger UI at http://localhost:8081/swagger-ui.html, and the contract it
 # renders at /v3/api-docs. Both are disabled in application.yml and enabled
 # only here, so they exist on a developer machine and nowhere else.

@@ -218,6 +218,20 @@ public class NotificationFeedService {
             case AuditAction.CLAUDE_USAGE_MEMBER_ROLE_CHANGE -> "Changed a Claude Usage member's role";
             case AuditAction.CLAUDE_USAGE_MEMBER_BUDGET_CHANGE -> "Changed a Claude Usage member's budget";
             case AuditAction.CLAUDE_USAGE_MEMBER_REMOVE -> "Removed a Claude Usage member";
+            case AuditAction.AX_RENEWAL_PROJECT_CREATE -> "Started an AX Renewal project";
+            case AuditAction.AX_RENEWAL_MANIFEST_ATTACH -> "Attached a codebase manifest";
+            case AuditAction.AX_RENEWAL_ANALYSIS_RUN -> "Analysed a codebase";
+            case AuditAction.AX_RENEWAL_STACK_MOVE_EDIT -> "Changed a stack move target";
+            case AuditAction.AX_RENEWAL_ARCHITECTURE_EDIT -> "Edited a renewal architecture plan";
+            case AuditAction.AX_RENEWAL_PAGES_EDIT -> "Edited a page mapping";
+            case AuditAction.AX_RENEWAL_DATABASE_PLAN_EDIT -> "Edited a database change plan";
+            case AuditAction.AX_RENEWAL_DATABASE_CONNECT -> "Connected a database to a renewal project";
+            case AuditAction.AX_RENEWAL_DESTINATION_SET -> "Set where renewed code is written";
+            case AuditAction.AX_RENEWAL_SECTION_CONFIRM -> "Confirmed a renewal plan section";
+            case AuditAction.AX_RENEWAL_IMPLEMENTATION_START -> "Started a renewal implementation";
+            case AuditAction.AX_RENEWAL_COMMENT_ADD -> "Commented on a renewal project";
+            case AuditAction.ACCOUNT_CAPABILITY_GRANT -> "Granted a capability";
+            case AuditAction.ACCOUNT_CAPABILITY_REVOKE -> "Revoked a capability";
             default -> entry.action();
         };
     }

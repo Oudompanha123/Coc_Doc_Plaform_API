@@ -1,0 +1,26 @@
+package com.coc.docs.axrenewal;
+
+import java.time.Instant;
+import java.util.UUID;
+
+/** A row of {@code ax_renewal_project} — one legacy-renewal planning workspace (ADR-037). */
+public record AxRenewalProject(
+        UUID id,
+        String name,
+        String description,
+        String status,
+        String manifestFilename,
+        String manifestContent,
+        Instant manifestAttachedAt,
+        UUID manifestAttachedBy,
+        UUID createdBy,
+        Instant createdAt,
+        Instant updatedAt) {
+
+    public static final String STATUS_DRAFT = "draft";
+    public static final String STATUS_ANALYZED = "analyzed";
+    public static final String STATUS_PLANNING = "planning";
+    public static final String STATUS_READY = "ready";
+    public static final String STATUS_IMPLEMENTING = "implementing";
+    public static final String STATUS_COMPLETED = "completed";
+}

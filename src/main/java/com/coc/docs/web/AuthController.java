@@ -2,6 +2,7 @@ package com.coc.docs.web;
 
 import com.coc.docs.account.Account;
 import com.coc.docs.auth.CurrentUser;
+import com.coc.docs.capability.CapabilityRepository;
 import com.coc.docs.auth.PasswordResetService;
 import com.coc.docs.auth.RegistrationChallenge;
 import com.coc.docs.auth.RegistrationOtpService;
@@ -73,6 +74,7 @@ public class AuthController {
     private final PasswordResetService passwordResets;
     private final RegistrationOtpService registrationOtp;
     private final TotpService totp;
+    private final CapabilityRepository capabilities;
 
     public AuthController(
             SessionService sessions,
@@ -81,7 +83,8 @@ public class AuthController {
             NonceService nonces,
             PasswordResetService passwordResets,
             RegistrationOtpService registrationOtp,
-            TotpService totp) {
+            TotpService totp,
+            CapabilityRepository capabilities) {
         this.sessions = sessions;
         this.properties = properties;
         this.passwordEncoder = passwordEncoder;
@@ -89,6 +92,7 @@ public class AuthController {
         this.passwordResets = passwordResets;
         this.registrationOtp = registrationOtp;
         this.totp = totp;
+        this.capabilities = capabilities;
     }
 
     /**
@@ -148,17 +152,10 @@ public class AuthController {
                 // replayed for the rest of the nonce's five minutes, which is
                 // most of what the nonce exists to prevent.
                 .header(HttpHeaders.SET_COOKIE, expiredNonceCookie().toString())
-                .body(new ApiDtos.MeResponse(
-                        issued.account().id(),
-                        issued.account().email(),
-                        issued.account().displayName(),
-                        issued.account().role().wire(),
-                        issued.account().avatarUrl(),
-                        true,
-                        issued.account().createdAt(),
-                        sessions.lastSignInForAccount(issued.account().id()).orElse(null),
-                        issued.account().mustChangePassword(),
-                        issued.account().hasPassword()));
+                .body(ApiDtos.MeResponse.of(
+                        issued.account(),
+                        capabilities.findForAccount(issued.account().id()),
+                        sessions.lastSignInForAccount(issued.account().id()).orElse(null)));
     }
 
     /**
@@ -197,17 +194,8 @@ public class AuthController {
             throw ApiException.forbidden("sign in first");
         }
         Account updated = sessions.renameSelf(caller, request.displayName());
-        return new ApiDtos.MeResponse(
-                updated.id(),
-                updated.email(),
-                updated.displayName(),
-                updated.role().wire(),
-                updated.avatarUrl(),
-                true,
-                updated.createdAt(),
-                sessions.lastSignInForAccount(updated.id()).orElse(null),
-                updated.mustChangePassword(),
-                updated.hasPassword());
+        return ApiDtos.MeResponse.of(
+                updated, caller.capabilities(), sessions.lastSignInForAccount(updated.id()).orElse(null));
     }
 
     /**
@@ -231,17 +219,8 @@ public class AuthController {
             throw ApiException.forbidden("sign in first");
         }
         Account updated = sessions.uploadOwnAvatar(caller, file);
-        return new ApiDtos.MeResponse(
-                updated.id(),
-                updated.email(),
-                updated.displayName(),
-                updated.role().wire(),
-                updated.avatarUrl(),
-                true,
-                updated.createdAt(),
-                sessions.lastSignInForAccount(updated.id()).orElse(null),
-                updated.mustChangePassword(),
-                updated.hasPassword());
+        return ApiDtos.MeResponse.of(
+                updated, caller.capabilities(), sessions.lastSignInForAccount(updated.id()).orElse(null));
     }
 
     /**
@@ -257,17 +236,8 @@ public class AuthController {
             throw ApiException.forbidden("sign in first");
         }
         Account updated = sessions.removeOwnAvatar(caller);
-        return new ApiDtos.MeResponse(
-                updated.id(),
-                updated.email(),
-                updated.displayName(),
-                updated.role().wire(),
-                updated.avatarUrl(),
-                true,
-                updated.createdAt(),
-                sessions.lastSignInForAccount(updated.id()).orElse(null),
-                updated.mustChangePassword(),
-                updated.hasPassword());
+        return ApiDtos.MeResponse.of(
+                updated, caller.capabilities(), sessions.lastSignInForAccount(updated.id()).orElse(null));
     }
 
     /**
@@ -577,17 +547,10 @@ public class AuthController {
         return switch (result) {
             case SessionService.IssuedSession issued -> ResponseEntity.ok()
                     .header(HttpHeaders.SET_COOKIE, sessionCookie(issued).toString())
-                    .body(new ApiDtos.MeResponse(
-                            issued.account().id(),
-                            issued.account().email(),
-                            issued.account().displayName(),
-                            issued.account().role().wire(),
-                            issued.account().avatarUrl(),
-                            true,
-                            issued.account().createdAt(),
-                            sessions.lastSignInForAccount(issued.account().id()).orElse(null),
-                            issued.account().mustChangePassword(),
-                            issued.account().hasPassword()));
+                    .body(ApiDtos.MeResponse.of(
+                            issued.account(),
+                            capabilities.findForAccount(issued.account().id()),
+                            sessions.lastSignInForAccount(issued.account().id()).orElse(null)));
             case SessionService.MfaRequired mfaRequired -> ResponseEntity.ok()
                     .header(HttpHeaders.SET_COOKIE, mfaPendingCookie(mfaRequired).toString())
                     .body(new MfaRequiredResponse(true, mfaChallengeTtlSeconds(mfaRequired)));
@@ -628,17 +591,10 @@ public class AuthController {
                 // Spent — the same "don't leave a used one-shot cookie lying
                 // around" reasoning /google already applies to the nonce.
                 .header(HttpHeaders.SET_COOKIE, expiredMfaPendingCookie().toString())
-                .body(new ApiDtos.MeResponse(
-                        issued.account().id(),
-                        issued.account().email(),
-                        issued.account().displayName(),
-                        issued.account().role().wire(),
-                        issued.account().avatarUrl(),
-                        true,
-                        issued.account().createdAt(),
-                        sessions.lastSignInForAccount(issued.account().id()).orElse(null),
-                        issued.account().mustChangePassword(),
-                        issued.account().hasPassword()));
+                .body(ApiDtos.MeResponse.of(
+                        issued.account(),
+                        capabilities.findForAccount(issued.account().id()),
+                        sessions.lastSignInForAccount(issued.account().id()).orElse(null)));
     }
 
     /**

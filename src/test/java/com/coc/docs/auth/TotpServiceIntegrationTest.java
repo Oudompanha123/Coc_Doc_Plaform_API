@@ -57,13 +57,13 @@ class TotpServiceIntegrationTest extends PostgresTestBase {
         Account account = accounts.insert(
                 email, "Test User", AppRole.USER, null, AccountStatus.ACTIVE,
                 passwordEncoder.encode(PASSWORD), false);
-        return new CurrentUser(account, TestPermissions.of(AppRole.USER), new byte[] {1, 2, 3});
+        return new CurrentUser(account, TestPermissions.of(AppRole.USER), java.util.Set.of(), new byte[] {1, 2, 3});
     }
 
     /** A Google-only account: no password_hash at all (revision of ADR-031). */
     private CurrentUser newGoogleOnlyUser(String email) {
         Account account = accounts.insert(email, "Test User", AppRole.USER, null, AccountStatus.ACTIVE);
-        return new CurrentUser(account, TestPermissions.of(AppRole.USER), new byte[] {1, 2, 3});
+        return new CurrentUser(account, TestPermissions.of(AppRole.USER), java.util.Set.of(), new byte[] {1, 2, 3});
     }
 
     /** A real, currently-valid code for {@code secret} — what an authenticator app would show right now. */

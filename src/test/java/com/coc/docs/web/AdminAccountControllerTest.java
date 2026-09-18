@@ -66,6 +66,10 @@ class AdminAccountControllerTest {
     @MockitoBean PageService pageService;
     @MockitoBean BlockBodyValidator validator;
 
+    // AdminAccountController needs it for the new capability grant/revoke
+    // endpoints (ADR-037). Untouched by the tests below.
+    @MockitoBean com.coc.docs.capability.CapabilityService capabilityService;
+
     @org.springframework.boot.test.context.TestConfiguration
     static class Beans {
 
