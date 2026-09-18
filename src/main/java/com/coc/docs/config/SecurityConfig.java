@@ -297,6 +297,21 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/admin/audit/**")
                         .hasRole(AppRole.SUPER_ADMIN.name())
 
+                        // Outgoing webhook integrations (ADR-037). Every write
+                        // stores, rotates or discards a signing secret, or
+                        // makes a live outbound call to an admin-supplied URL
+                        // -- the "touches credentials, grants authority" class
+                        // this file already puts at super_admin for accounts
+                        // and roles above, not the ordinary admin floor
+                        // /admin/** carries below. The two GETs are listed
+                        // separately, ahead of this, at the ordinary floor.
+                        // // req: FR-INTEG-001, FR-INTEG-002, FR-INTEG-003, FR-INTEG-004, FR-INTEG-006
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/integrations/**")
+                        .hasRole(AppRole.ADMIN.name())
+
+                        .requestMatchers("/api/v1/admin/integrations/**")
+                        .hasRole(AppRole.SUPER_ADMIN.name())
+
                         // A task's title carries no other account's PII, unlike the
                         // two prefixes above — so the read side is open to any
                         // signed-in role, for the Member landing page's "Your

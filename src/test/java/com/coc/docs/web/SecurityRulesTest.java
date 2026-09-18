@@ -1,5 +1,6 @@
 package com.coc.docs.web;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -17,10 +18,12 @@ import com.coc.docs.config.ProblemResponses;
 import com.coc.docs.config.SecurityConfig;
 import com.coc.docs.content.BlockBodyValidator;
 import com.coc.docs.docscontent.DocsContentService;
+import com.coc.docs.integration.Integration;
 import com.coc.docs.nav.NavProduct;
 import com.coc.docs.nav.NavService;
 import com.coc.docs.page.PageService;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -135,6 +138,12 @@ class SecurityRulesTest {
     // chain admits, not about roster management or ingestion themselves —
     // that is ClaudeUsageServiceTest's job.
     @MockitoBean com.coc.docs.claudeusage.ClaudeUsageService claudeUsageService;
+
+    // AdminIntegrationController is in this slice (ADR-037), so its
+    // dependency has to be too, same reasoning as the rest of this class:
+    // this test is about which routes the filter chain admits, not about
+    // connect/test/rotate/disconnect themselves.
+    @MockitoBean com.coc.docs.integration.IntegrationService integrationService;
 
     @TestConfiguration
     static class Beans {
@@ -635,6 +644,62 @@ class SecurityRulesTest {
                                     "{\"email\":\"a@example.com\",\"date\":\"2026-01-01\","
                                             + "\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheCreation\":0}"))
                     .andExpect(status().isServiceUnavailable());
+        }
+    }
+
+    @Nested
+    @DisplayName("integrations (ADR-037)")
+    class IntegrationsPath {
+
+        @Test
+        void the_read_side_refuses_a_plain_user() throws Exception {
+            mvc.perform(get("/api/v1/admin/integrations").with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void the_read_side_admits_an_admin() throws Exception {
+            Mockito.when(integrationService.list()).thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/admin/integrations").with(as(AppRole.ADMIN)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void connecting_refuses_an_admin() throws Exception {
+            // Above the admin floor deliberately: connecting stores a signing
+            // secret, and rotating/disconnecting/testing touch or use one —
+            // the same "touches credentials" class of action /admin/accounts
+            // and /admin/roles already carry at this floor.
+            mvc.perform(post("/api/v1/admin/integrations")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"provider\":\"webhook\",\"name\":\"x\","
+                                    + "\"targetUrl\":\"https://example.com\",\"events\":[\"account.registered\"]}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void connecting_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(post("/api/v1/admin/integrations")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"provider\":\"webhook\",\"name\":\"x\","
+                                    + "\"targetUrl\":\"https://example.com\",\"events\":[\"account.registered\"]}"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void disconnecting_admits_a_super_admin() throws Exception {
+            UUID id = UUID.randomUUID();
+            Instant now = Instant.now();
+            Integration disabled = new Integration(
+                    id, "webhook", "x", "https://example.com", null, null, (short) 1,
+                    List.of("account.registered"), "disabled", null, null, null, now, now);
+            Mockito.when(integrationService.disconnect(ArgumentMatchers.eq(id), ArgumentMatchers.any()))
+                    .thenReturn(disabled);
+
+            mvc.perform(delete("/api/v1/admin/integrations/" + id).with(as(AppRole.SUPER_ADMIN)))
+                    .andExpect(status().isOk());
         }
     }
 

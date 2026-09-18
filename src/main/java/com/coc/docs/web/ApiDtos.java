@@ -809,6 +809,81 @@ public final class ApiDtos {
     public record ClaudeUsageIngestResponse(String action) {}
 
     // -----------------------------------------------------------------------
+    // Integrations (ADR-037)
+    // -----------------------------------------------------------------------
+
+    /**
+     * One connected integration, without its secret — no field here can ever
+     * carry it, by construction, the same "absent from the DTO, not merely
+     * unpopulated" shape every other secret in this codebase already uses.
+     */
+    public record IntegrationResponse(
+            UUID id,
+            String provider,
+            String name,
+            String targetUrl,
+            List<String> events,
+            String status,
+            Instant lastTestedAt,
+            String lastTestStatus,
+            Instant createdAt) {
+
+        public static IntegrationResponse of(com.coc.docs.integration.Integration integration) {
+            return new IntegrationResponse(
+                    integration.id(),
+                    integration.provider(),
+                    integration.name(),
+                    integration.targetUrl(),
+                    integration.events(),
+                    integration.status(),
+                    integration.lastTestedAt(),
+                    integration.lastTestStatus(),
+                    integration.createdAt());
+        }
+    }
+
+    /**
+     * The signing secret, shown exactly once — the response shape only
+     * {@code connect} and {@code rotate-secret} return; every other
+     * integration response uses {@link IntegrationResponse}, which has no
+     * field for it at all.
+     */
+    public record IntegrationSecretResponse(IntegrationResponse integration, String signingSecret) {
+
+        public static IntegrationSecretResponse of(com.coc.docs.integration.Integration integration, String plaintextSecret) {
+            return new IntegrationSecretResponse(IntegrationResponse.of(integration), plaintextSecret);
+        }
+    }
+
+    public record ConnectIntegrationRequest(
+            @NotBlank String provider, @NotBlank String name, @NotBlank String targetUrl, @NotNull List<String> events) {}
+
+    public record UpdateIntegrationRequest(@NotBlank String name, @NotNull List<String> events) {}
+
+    /** One delivery attempt — a real event or the synthetic {@code integration.test}. */
+    public record IntegrationDeliveryResponse(
+            long id, String eventType, Integer httpStatus, boolean success, String error, Integer latencyMs, Instant attemptedAt) {
+
+        public static IntegrationDeliveryResponse of(com.coc.docs.integration.IntegrationDelivery delivery) {
+            return new IntegrationDeliveryResponse(
+                    delivery.id(),
+                    delivery.eventType(),
+                    delivery.httpStatus(),
+                    delivery.success(),
+                    delivery.error(),
+                    delivery.latencyMs(),
+                    delivery.attemptedAt());
+        }
+    }
+
+    public record TestIntegrationResponse(IntegrationDeliveryResponse result) {
+
+        public static TestIntegrationResponse of(com.coc.docs.integration.IntegrationDelivery delivery) {
+            return new TestIntegrationResponse(IntegrationDeliveryResponse.of(delivery));
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Docs content meta (product docs pages' "About this document" panel)
     // -----------------------------------------------------------------------
 
