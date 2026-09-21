@@ -546,6 +546,34 @@ class SecurityRulesTest {
             mvc.perform(get("/api/v1/admin/audit/recent").with(as(AppRole.SUPER_ADMIN)))
                     .andExpect(status().isOk());
         }
+
+        @Test
+        void the_ax_renewal_project_trail_refuses_an_admin_and_a_developer_capability_user() throws Exception {
+            // Same PII reasoning as the two tests above — this sits under
+            // /api/v1/admin/audit/** on purpose, not under /api/v1/ax-renewal/**,
+            // so it must not inherit that surface's lower (developer-capability)
+            // floor even though the project itself is reachable there.
+            UUID projectId = UUID.randomUUID();
+            mvc.perform(get("/api/v1/admin/audit/ax-renewal/" + projectId).with(as(AppRole.ADMIN)))
+                    .andExpect(status().isForbidden());
+            mvc.perform(get("/api/v1/admin/audit/ax-renewal/" + projectId)
+                            .with(SecurityMockMvcRequestPostProcessors.authentication(
+                                    TestCallers.authentication(AppRole.USER, java.util.Set.of(Capability.DEVELOPER)))))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void the_ax_renewal_project_trail_admits_a_super_admin() throws Exception {
+            UUID projectId = UUID.randomUUID();
+            org.mockito.Mockito.when(auditRepository.forTarget(
+                            org.mockito.ArgumentMatchers.eq(com.coc.docs.audit.AuditAction.TARGET_AX_RENEWAL_PROJECT),
+                            org.mockito.ArgumentMatchers.eq(projectId),
+                            org.mockito.ArgumentMatchers.anyInt()))
+                    .thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/admin/audit/ax-renewal/" + projectId).with(as(AppRole.SUPER_ADMIN)))
+                    .andExpect(status().isOk());
+        }
     }
 
     @Nested

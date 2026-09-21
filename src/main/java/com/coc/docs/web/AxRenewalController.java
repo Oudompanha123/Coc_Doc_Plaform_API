@@ -66,7 +66,7 @@ public class AxRenewalController {
             @Valid @RequestBody ApiDtos.AttachManifestRequest request,
             @AuthenticationPrincipal CurrentUser actor) {
         return ApiDtos.AxRenewalProjectResponse.of(
-                projects.attachManifest(projectId, request.filename(), request.content(), actor));
+                projects.attachManifest(projectId, request.filename(), request.content(), request.stats(), actor));
     }
 
     @PostMapping("/projects/{projectId}/analysis/run")

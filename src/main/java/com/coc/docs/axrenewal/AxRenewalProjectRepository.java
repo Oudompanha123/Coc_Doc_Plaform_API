@@ -1,5 +1,7 @@
 package com.coc.docs.axrenewal;
 
+import com.coc.docs.web.Jsonb;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
@@ -15,16 +17,20 @@ public class AxRenewalProjectRepository {
 
     private static final String COLUMNS =
             "id, name, description, status, manifest_filename, manifest_content, "
-                    + "manifest_attached_at, manifest_attached_by, created_by, created_at, updated_at";
+                    + "manifest_attached_at, manifest_attached_by, attach_stats::text as attach_stats, "
+                    + "created_by, created_at, updated_at";
 
     private final JdbcClient jdbc;
+    private final Jsonb jsonb;
 
-    public AxRenewalProjectRepository(JdbcClient jdbc) {
+    public AxRenewalProjectRepository(JdbcClient jdbc, Jsonb jsonb) {
         this.jdbc = jdbc;
+        this.jsonb = jsonb;
     }
 
     private AxRenewalProject map(ResultSet rs, int rowNum) throws SQLException {
         OffsetDateTime manifestAttachedAt = rs.getObject("manifest_attached_at", OffsetDateTime.class);
+        String attachStats = rs.getString("attach_stats");
         return new AxRenewalProject(
                 rs.getObject("id", UUID.class),
                 rs.getString("name"),
@@ -34,6 +40,7 @@ public class AxRenewalProjectRepository {
                 rs.getString("manifest_content"),
                 manifestAttachedAt == null ? null : manifestAttachedAt.toInstant(),
                 rs.getObject("manifest_attached_by", UUID.class),
+                attachStats == null ? null : jsonb.read(attachStats),
                 rs.getObject("created_by", UUID.class),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
                 rs.getObject("updated_at", OffsetDateTime.class).toInstant());
@@ -64,15 +71,15 @@ public class AxRenewalProjectRepository {
                 .single();
     }
 
-    public void attachManifest(UUID id, String filename, String content, UUID attachedBy) {
+    public void attachManifest(UUID id, String filename, String content, JsonNode stats, UUID attachedBy) {
         jdbc.sql("""
                         update ax_renewal_project
-                        set manifest_filename = ?, manifest_content = ?,
+                        set manifest_filename = ?, manifest_content = ?, attach_stats = ?::jsonb,
                             manifest_attached_at = now(), manifest_attached_by = ?,
                             updated_at = now()
                         where id = ?
                         """)
-                .params(filename, content, attachedBy, id)
+                .params(filename, content, stats == null ? null : jsonb.write(stats), attachedBy, id)
                 .update();
     }
 
