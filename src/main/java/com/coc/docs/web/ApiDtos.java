@@ -17,7 +17,6 @@ import com.coc.docs.axrenewal.AxRenewalPageMapping;
 import com.coc.docs.axrenewal.AxRenewalProject;
 import com.coc.docs.axrenewal.AxRenewalProjectDetail;
 import com.coc.docs.axrenewal.AxRenewalStackLayer;
-import com.coc.docs.capability.Capability;
 import com.coc.docs.page.Page;
 import com.coc.docs.page.PageRepository;
 import com.coc.docs.page.PageService;
@@ -39,7 +38,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -167,27 +165,20 @@ public final class ApiDtos {
              */
             boolean hasPassword,
             /**
-             * Capabilities held in addition to {@code role} — layered on top of
-             * it, never replacing it (ADR-037). Always a list, never null, so
-             * the frontend can {@code .includes(...)} without a guard.
+             * Every role held, not just the highest ({@code role} above) — an
+             * account can hold more than one (ADR-016). Always a list, never
+             * null, so the frontend can {@code .includes(...)} without a
+             * guard; e.g. checking for the exact-membership {@code developer}
+             * role (ADR-039) the way AX Renewal's confirm action does
+             * server-side.
              */
-            List<String> capabilities) {
+            List<String> roles) {
 
         public static MeResponse of(CurrentUser user, Instant lastSignInAt) {
-            return of(user.account(), user.capabilities(), lastSignInAt);
+            return of(user.account(), lastSignInAt);
         }
 
-        /**
-         * For the six sign-in/self-service paths in {@code AuthController} that
-         * only have an {@code Account} in hand, not a full {@link CurrentUser}
-         * — three of those (a fresh Google/password/MFA sign-in) genuinely have
-         * no capability set resolved yet and must look one up; the other three
-         * (self-service profile/avatar edits) already hold the caller's {@link
-         * CurrentUser} and should pass {@code caller.capabilities()} straight
-         * through, since none of those actions can change what capabilities the
-         * account holds.
-         */
-        public static MeResponse of(Account account, Set<Capability> capabilities, Instant lastSignInAt) {
+        public static MeResponse of(Account account, Instant lastSignInAt) {
             return new MeResponse(
                     account.id(),
                     account.email(),
@@ -199,7 +190,7 @@ public final class ApiDtos {
                     lastSignInAt,
                     account.mustChangePassword(),
                     account.hasPassword(),
-                    capabilities.stream().map(Capability::key).sorted().toList());
+                    account.roles().stream().map(AppRole::wire).sorted().toList());
         }
 
         /**
@@ -469,8 +460,14 @@ public final class ApiDtos {
     /**
      * A change to a role, an activation state, a display name, or any
      * combination. An absent field means "leave alone".
+     *
+     * <p>{@code roles} replaces the account's whole role set (ADR-016 —
+     * "highest rank held" is already the effective-role rule; this is just
+     * the API finally exposing the set {@code AccountService.setRoles}
+     * always accepted). {@code role} is kept as the single-role convenience
+     * most callers still use; when both are present, {@code roles} wins.
      */
-    public record UpdateAccountRequest(String role, Boolean active, String displayName) {}
+    public record UpdateAccountRequest(String role, java.util.List<String> roles, Boolean active, String displayName) {}
 
     /**
      * One role and what it grants.
@@ -507,20 +504,6 @@ public final class ApiDtos {
 
     public record CreateAccountRequest(
             @NotBlank @Email String email, @NotBlank String role) {}
-
-    /**
-     * The capabilities one account holds — a second, rank-independent grant
-     * axis from {@code role}/{@code roles} above (ADR-037). Returned after
-     * every grant/revoke so the caller sees the resulting set without a
-     * second round trip.
-     */
-    public record CapabilitiesResponse(UUID accountId, List<String> capabilities) {
-
-        public static CapabilitiesResponse of(UUID accountId, Set<Capability> capabilities) {
-            return new CapabilitiesResponse(
-                    accountId, capabilities.stream().map(Capability::key).sorted().toList());
-        }
-    }
 
     // -----------------------------------------------------------------------
     // Nav structure

@@ -43,7 +43,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
-import com.coc.docs.capability.Capability;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
@@ -145,15 +144,6 @@ class SecurityRulesTest {
     // this test is about which routes the filter chain admits, not about
     // connect/test/rotate/disconnect themselves.
     @MockitoBean com.coc.docs.integration.IntegrationService integrationService;
-
-    // AuthController needs it to construct, to resolve the caller's own
-    // capabilities for /auth/me (ADR-038); AdminAccountController needs
-    // CapabilityService for its capability grant/revoke endpoints. Mocked for
-    // the same reason as the rest of this class: this test is about which
-    // routes the filter chain admits, not about which capabilities anyone
-    // holds.
-    @MockitoBean com.coc.docs.capability.CapabilityRepository capabilityRepository;
-    @MockitoBean com.coc.docs.capability.CapabilityService capabilityService;
 
     @MockitoBean com.coc.docs.axrenewal.AxRenewalService axRenewalService;
 
@@ -548,17 +538,17 @@ class SecurityRulesTest {
         }
 
         @Test
-        void the_ax_renewal_project_trail_refuses_an_admin_and_a_developer_capability_user() throws Exception {
+        void the_ax_renewal_project_trail_refuses_an_admin_and_a_developer_role_user() throws Exception {
             // Same PII reasoning as the two tests above — this sits under
             // /api/v1/admin/audit/** on purpose, not under /api/v1/ax-renewal/**,
-            // so it must not inherit that surface's lower (developer-capability)
+            // so it must not inherit that surface's lower (developer-role)
             // floor even though the project itself is reachable there.
             UUID projectId = UUID.randomUUID();
             mvc.perform(get("/api/v1/admin/audit/ax-renewal/" + projectId).with(as(AppRole.ADMIN)))
                     .andExpect(status().isForbidden());
             mvc.perform(get("/api/v1/admin/audit/ax-renewal/" + projectId)
                             .with(SecurityMockMvcRequestPostProcessors.authentication(
-                                    TestCallers.authentication(AppRole.USER, java.util.Set.of(Capability.DEVELOPER)))))
+                                    TestCallers.authentication(java.util.Set.of(AppRole.USER, AppRole.DEVELOPER)))))
                     .andExpect(status().isForbidden());
         }
 
@@ -927,9 +917,12 @@ class SecurityRulesTest {
         }
 
         @Test
-        void confirming_a_section_refuses_a_plain_admin_without_the_developer_capability() throws Exception {
-            // The deliberate divergence from "admin-or-above" (ADR-037): an
-            // Admin may draft a plan but not sign off on or trigger it.
+        void confirming_a_section_refuses_a_plain_admin_who_does_not_also_hold_developer() throws Exception {
+            // The deliberate divergence from "admin-or-above" (ADR-037,
+            // roles revised by ADR-039): an Admin may draft a plan but not
+            // sign off on or trigger it, unless they also hold Developer
+            // specifically. hasRole(DEVELOPER) would have let this through by
+            // rank alone -- exactAuthority() is what keeps this refused.
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/plan/stack_move/confirm")
                             .with(as(AppRole.ADMIN)))
                     .andExpect(status().isForbidden());
@@ -958,7 +951,7 @@ class SecurityRulesTest {
         }
 
         @Test
-        void confirming_a_section_admits_a_plain_user_holding_the_developer_capability() throws Exception {
+        void confirming_a_section_admits_a_caller_holding_only_the_developer_role() throws Exception {
             org.mockito.Mockito.doThrow(ApiException.notFound("project"))
                     .when(axRenewalService)
                     .confirmSection(
@@ -969,13 +962,13 @@ class SecurityRulesTest {
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/plan/stack_move/confirm")
                             .with(SecurityMockMvcRequestPostProcessors.authentication(
                                     com.coc.docs.auth.TestCallers.authentication(
-                                            AppRole.USER, java.util.Set.of(Capability.DEVELOPER))))
+                                            java.util.Set.of(AppRole.DEVELOPER))))
                             .contentType(MediaType.APPLICATION_JSON))
                     .andExpect(status().isNotFound());
         }
 
         @Test
-        void starting_implementation_refuses_a_plain_user_without_the_developer_capability() throws Exception {
+        void starting_implementation_refuses_a_plain_user_who_does_not_hold_developer() throws Exception {
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/start")
                             .with(as(AppRole.USER)))
                     .andExpect(status().isForbidden());

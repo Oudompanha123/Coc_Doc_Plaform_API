@@ -87,7 +87,7 @@ class ActivityDigestServiceTest {
                 // This caller is a fixture for the digest; it holds no
                 // password and does not need one.
                 false);
-        return new CurrentUser(account, Set.of(), Set.of(), new byte[] {1});
+        return new CurrentUser(account, Set.of(), new byte[] {1});
     }
 
     @Nested

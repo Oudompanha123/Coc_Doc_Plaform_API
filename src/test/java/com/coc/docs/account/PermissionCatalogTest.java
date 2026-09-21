@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -35,47 +36,64 @@ import org.junit.jupiter.api.Test;
  */
 class PermissionCatalogTest {
 
-    private static final Path MIGRATION =
-            Path.of("src/main/resources/db/migration/V4__roles_and_permissions.sql");
+    /**
+     * Every migration that seeds {@code permission} or {@code role_permission}
+     * rows. V4 is the original catalogue; V29 adds Reviewer/Lead's grants and
+     * V31 adds Developer's (ADR-039), without editing V4, which is already
+     * applied everywhere and must stay exactly what it was.
+     */
+    private static final List<Path> MIGRATIONS = List.of(
+            Path.of("src/main/resources/db/migration/V4__roles_and_permissions.sql"),
+            Path.of("src/main/resources/db/migration/V29__seed_lead_reviewer_roles.sql"),
+            Path.of("src/main/resources/db/migration/V31__migrate_developer_capability_to_role.sql"));
 
-    private static String sql() {
+    private static String read(Path path) {
         try {
-            return Files.readString(MIGRATION, StandardCharsets.UTF_8);
+            return Files.readString(path, StandardCharsets.UTF_8);
         } catch (IOException e) {
-            throw new UncheckedIOException("cannot read " + MIGRATION.toAbsolutePath(), e);
+            throw new UncheckedIOException("cannot read " + path.toAbsolutePath(), e);
         }
     }
 
     /** The {@code insert into permission ... values ('key', 'description'), ...} block. */
     private static Set<String> seededPermissionKeys() {
-        String block = block("insert into permission (key, description) values");
         Set<String> keys = new TreeSet<>();
-        Matcher m = Pattern.compile("\\('([^']+)'\\s*,").matcher(block);
-        while (m.find()) {
-            keys.add(m.group(1));
+        for (String block : blocks("insert into permission (key, description) values")) {
+            Matcher m = Pattern.compile("\\('([^']+)'\\s*,").matcher(block);
+            while (m.find()) {
+                keys.add(m.group(1));
+            }
         }
         return keys;
     }
 
-    /** The {@code insert into role_permission ... values ('role', 'permission'), ...} block. */
+    /** The {@code insert into role_permission ... values ('role', 'permission'), ...} block(s), across every migration in {@link #MIGRATIONS}. */
     private static TreeMap<String, Set<String>> seededGrants() {
-        String block = block("insert into role_permission (role_key, permission_key) values");
         TreeMap<String, Set<String>> grants = new TreeMap<>();
-        Matcher m = Pattern.compile("\\('([^']+)'\\s*,\\s*'([^']+)'\\)").matcher(block);
-        while (m.find()) {
-            grants.computeIfAbsent(m.group(1), k -> new LinkedHashSet<>()).add(m.group(2));
+        for (String block : blocks("insert into role_permission (role_key, permission_key) values")) {
+            Matcher m = Pattern.compile("\\('([^']+)'\\s*,\\s*'([^']+)'\\)").matcher(block);
+            while (m.find()) {
+                grants.computeIfAbsent(m.group(1), k -> new LinkedHashSet<>()).add(m.group(2));
+            }
         }
         return grants;
     }
 
-    /** From the marker to the statement's terminating semicolon. */
-    private static String block(String marker) {
-        String sql = sql();
-        int start = sql.indexOf(marker);
-        assertThat(start).as("migration should contain: %s", marker).isNotNegative();
-        int end = sql.indexOf(';', start);
-        assertThat(end).as("statement after '%s' should be terminated", marker).isNotNegative();
-        return sql.substring(start, end);
+    /** From each migration that contains {@code marker}, the text from the marker to that statement's terminating semicolon. */
+    private static List<String> blocks(String marker) {
+        List<String> found = new java.util.ArrayList<>();
+        for (Path path : MIGRATIONS) {
+            String sql = read(path);
+            int start = sql.indexOf(marker);
+            if (start < 0) {
+                continue;
+            }
+            int end = sql.indexOf(';', start);
+            assertThat(end).as("statement after '%s' in %s should be terminated", marker, path).isNotNegative();
+            found.add(sql.substring(start, end));
+        }
+        assertThat(found).as("some migration should contain: %s", marker).isNotEmpty();
+        return found;
     }
 
     @Test

@@ -157,20 +157,28 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
         }
 
         /**
-         * Grants the caller's rank and every rank beneath it, plus every
-         * permission their roles carry, plus every capability held directly.
+         * Grants the caller's rank and every rank beneath it, every permission
+         * their roles carry, and an exact-membership authority per role
+         * literally held.
          *
          * <p>The rank ladder is kept so a {@code hasRole("USER")} rule still
-         * admits an admin without spelling out the ladder. Permissions and
-         * capabilities are both added as plain authorities with no {@code
-         * ROLE_} prefix, so a rule reads {@code hasAuthority("content.publish")}
-         * or {@code hasAuthority("capability.developer")} and cannot be
-         * confused with {@code hasRole()}, which prefixes silently.
+         * admits an admin without spelling out the ladder. Permissions are
+         * added as plain authorities with no {@code ROLE_} prefix, so a rule
+         * reads {@code hasAuthority("content.publish")} and cannot be confused
+         * with {@code hasRole()}, which prefixes silently.
          *
-         * <p>All three, because they answer different questions: {@code
-         * page.min_role} asks for a rank, most endpoints ask for a permission,
-         * and a capability (ADR-037) asks "was this account granted this
-         * specific thing directly" — independent of rank entirely.
+         * <p>Exact-membership authorities ({@link AppRole#exactAuthority()},
+         * e.g. {@code role.exact.developer}) answer a different question than
+         * the rank ladder does: "does this account literally hold role X",
+         * true or false regardless of how it ranks against anything else. A
+         * higher-ranked role does not imply holding a lower one exactly —
+         * {@code ADMIN} is always "at least developer" by rank, but is not
+         * granted {@code role.exact.developer} unless the account holds
+         * {@code DEVELOPER} too. This is what lets {@code SecurityConfig}'s AX
+         * Renewal confirm/reopen/start-implementation gate keep admitting a
+         * plain Developer while refusing an Admin who lacks that role — the
+         * same behaviour the retired {@code developer} capability (ADR-037)
+         * had, now expressed as a role (ADR-039).
          */
         private static List<GrantedAuthority> authorities(CurrentUser user) {
             List<GrantedAuthority> granted = new java.util.ArrayList<>(
@@ -181,8 +189,8 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
 
             user.permissions()
                     .forEach(permission -> granted.add(new SimpleGrantedAuthority(permission.key())));
-            user.capabilities()
-                    .forEach(capability -> granted.add(new SimpleGrantedAuthority(capability.authority())));
+            user.roles()
+                    .forEach(role -> granted.add(new SimpleGrantedAuthority(role.exactAuthority())));
 
             return List.copyOf(granted);
         }
