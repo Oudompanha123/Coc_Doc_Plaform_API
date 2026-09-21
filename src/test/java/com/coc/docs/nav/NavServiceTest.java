@@ -15,9 +15,7 @@ import com.coc.docs.auth.TestCallers;
 import com.coc.docs.docscontent.DocsContentRepository;
 import com.coc.docs.web.ApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.TextNode;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -66,27 +64,24 @@ class NavServiceTest {
     }
 
     @Test
-    @DisplayName("refuses to delete a sub-item that still has saved content")
-    void blocksItemDeletionWithContent() {
+    @DisplayName("deleting a sub-item also deletes its saved content, if any")
+    void deletingItemCascadesToItsContent() {
         when(repository.itemExists("jex3-0", "overview")).thenReturn(true);
-        when(contentRepository.find("jex3-0", "overview")).thenReturn(Optional.of(TextNode.valueOf("x")));
 
-        assertThatThrownBy(() -> service.deleteItem("jex3-0", "overview", EDITOR))
-                .isInstanceOf(ApiException.class)
-                .extracting(e -> ((ApiException) e).status())
-                .isEqualTo(HttpStatus.CONFLICT);
+        service.deleteItem("jex3-0", "overview", EDITOR);
 
-        verify(repository, never()).deleteItem(any(), any());
+        verify(contentRepository).delete("jex3-0", "overview");
+        verify(repository).deleteItem("jex3-0", "overview");
     }
 
     @Test
-    @DisplayName("deletes a sub-item once its content is gone")
+    @DisplayName("deletes a sub-item that never had saved content")
     void deletesItemWithNoContent() {
         when(repository.itemExists("jex3-0", "prerequisites")).thenReturn(true);
-        when(contentRepository.find("jex3-0", "prerequisites")).thenReturn(Optional.empty());
 
         service.deleteItem("jex3-0", "prerequisites", EDITOR);
 
+        verify(contentRepository).delete("jex3-0", "prerequisites");
         verify(repository).deleteItem("jex3-0", "prerequisites");
     }
 

@@ -87,9 +87,9 @@ public class NavService {
 
     /**
      * Refuses to delete a product that still has sub-items — each of those
-     * has to be removed first (which itself refuses while it has saved
-     * content), so a product can never disappear out from under content
-     * still reachable through it.
+     * has to be removed first (which cascades to its own saved content, if
+     * any — see {@link #deleteItem}), so a product can never disappear out
+     * from under content still reachable through it.
      */
     public void deleteProduct(String key, CurrentUser editor) {
         if (!repository.productExists(key)) {
@@ -150,15 +150,17 @@ public class NavService {
         }
     }
 
-    /** Refuses to delete a sub-item that still has a saved docs_content row. */
+    /**
+     * Removing a sub-item also removes its saved content, if any — the two
+     * are inseparable from an admin's point of view (there is no separate
+     * "delete content" action anywhere in this app), and leaving the content
+     * row behind would just orphan it under a slug nothing points at anymore.
+     */
     public void deleteItem(String productKey, String slug, CurrentUser editor) {
         if (!repository.itemExists(productKey, slug)) {
             throw ApiException.notFound("item " + productKey + "/" + slug);
         }
-        if (contentRepository.find(productKey, slug).isPresent()) {
-            throw ApiException.conflict(
-                    "\"" + productKey + "/" + slug + "\" still has saved content — delete that first");
-        }
+        contentRepository.delete(productKey, slug);
         repository.deleteItem(productKey, slug);
         audit.append(
                 editor.id(),

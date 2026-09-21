@@ -54,6 +54,16 @@ public class DocsContentRepository {
      * row, no history), so there is nothing an overwrite could silently lose
      * beyond what {@code updated_at}/{@code updated_by} already record.
      */
+    /** Used only when the sub-item it belongs to is removed (see
+     *  {@code NavService#deleteItem}) — this table has no standalone delete
+     *  path of its own, since an admin only ever clears content by
+     *  overwriting it via {@link #upsert}. */
+    public int delete(String productKey, String slug) {
+        return jdbc.sql("delete from docs_content where product_key = ? and slug = ?")
+                .params(productKey, slug)
+                .update();
+    }
+
     public JsonNode upsert(String productKey, String slug, String kind, JsonNode body, UUID updatedBy) {
         return jdbc.sql("""
                         insert into docs_content (product_key, slug, kind, body, updated_by, updated_at)
