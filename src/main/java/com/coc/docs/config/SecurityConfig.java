@@ -208,6 +208,14 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/notifications/inbox/**")
                         .hasRole(AppRole.USER.name())
 
+                        // The caller's own notification preferences (ADR-041).
+                        // Same reasoning as the inbox rule above: every role
+                        // can receive some notification type, and the account
+                        // is the resolved caller's, never one from the URL, so
+                        // there is nothing here to point at anybody else.
+                        .requestMatchers("/api/v1/notifications/preferences/**")
+                        .hasRole(AppRole.USER.name())
+
                         // The topbar's activity feed. Read-only, and a `user`
                         // floor rather than anything higher because every role
                         // is entitled to their own history.

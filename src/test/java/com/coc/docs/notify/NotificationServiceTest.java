@@ -46,9 +46,25 @@ class NotificationServiceTest {
     // asked to do. Whether a row lands is NotificationPersistenceTest's
     // claim, and it needs a real database to make it.
     private final NotificationRepository notifications = mock(NotificationRepository.class);
+    // Mocked, with every recipient passed straight through by default: these
+    // tests are about who is resolved and what the transport is asked to do,
+    // and ADR-041 opt-outs are NotificationPreferenceRepositoryIntegrationTest's
+    // claim against a real database, not this class's.
+    private final NotificationPreferenceRepository preferences = mock(NotificationPreferenceRepository.class);
 
     private final NotificationService service = new NotificationService(
-                    accounts, devices, push, stream, notifications, new com.fasterxml.jackson.databind.ObjectMapper());
+                    accounts,
+                    devices,
+                    push,
+                    stream,
+                    notifications,
+                    preferences,
+                    new com.fasterxml.jackson.databind.ObjectMapper());
+
+    {
+        when(preferences.filterEnabled(any(), any())).thenAnswer(inv -> inv.getArgument(0));
+        when(preferences.isEnabled(any(), any())).thenReturn(true);
+    }
 
     private static Account approver(String email) {
         return new Account(
