@@ -1,5 +1,6 @@
 package com.coc.docs.axrenewal;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -13,6 +14,7 @@ public record AxRenewalProject(
         String manifestContent,
         Instant manifestAttachedAt,
         UUID manifestAttachedBy,
+        JsonNode attachStats,
         UUID createdBy,
         Instant createdAt,
         Instant updatedAt) {

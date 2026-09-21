@@ -18,10 +18,19 @@ import java.util.Optional;
  * account} is the ladder's home; a capability that lived there would invite
  * the exact coupling this mechanism exists to avoid (ADR-037).
  *
- * <p>// req: ADR-016, ADR-037
+ * <p>Started with one value ({@code developer}); {@code tech_lead} and
+ * {@code reviewer} were added by ADR-039 as the "AX Role" choices on the
+ * account details screen. All three are AX-Renewal-specific role tags today,
+ * surfaced together in the UI, but remain independent, non-exclusive grants —
+ * an account may hold more than one. Declared after {@code DEVELOPER} so its
+ * ordinal, and anything that iterates {@link #values()}, is undisturbed.
+ *
+ * <p>// req: ADR-016, ADR-037, ADR-039
  */
 public enum Capability {
-    DEVELOPER("developer");
+    DEVELOPER("developer"),
+    TECH_LEAD("tech_lead"),
+    REVIEWER("reviewer");
 
     private final String key;
 

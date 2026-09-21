@@ -949,7 +949,14 @@ public final class ApiDtos {
 
     public record CreateAxRenewalProjectRequest(@NotBlank String name, String description) {}
 
-    public record AttachManifestRequest(@NotBlank String filename, String content) {}
+    // filename is nullable, not @NotBlank: a folder with no recognized
+    // dependency manifest is a legitimate project to attach (e.g. a static
+    // site), not a rejected request — see AxRenewalService#attachManifest.
+    // stats is the browser's own computed facts about the picked folder
+    // (file count, size, extensions, lockfile/secrets/build-output checks,
+    // largest file) — optional, since a manual re-attach without picking a
+    // folder again has nothing new to report.
+    public record AttachManifestRequest(String filename, String content, JsonNode stats) {}
 
     public record AxRenewalStackLayerRequest(@NotBlank String layerKey, String oldTarget, String newTarget) {}
 
@@ -981,6 +988,7 @@ public final class ApiDtos {
             String status,
             String manifestFilename,
             Instant manifestAttachedAt,
+            JsonNode attachStats,
             Instant createdAt,
             Instant updatedAt) {
 
@@ -992,6 +1000,7 @@ public final class ApiDtos {
                     project.status(),
                     project.manifestFilename(),
                     project.manifestAttachedAt(),
+                    project.attachStats(),
                     project.createdAt(),
                     project.updatedAt());
         }
@@ -1095,10 +1104,11 @@ public final class ApiDtos {
         }
     }
 
-    public record AxRenewalCommentResponse(UUID id, UUID authorId, String body, Instant createdAt) {
+    public record AxRenewalCommentResponse(UUID id, UUID authorId, String authorName, String body, Instant createdAt) {
 
         public static AxRenewalCommentResponse of(AxRenewalComment comment) {
-            return new AxRenewalCommentResponse(comment.id(), comment.authorId(), comment.body(), comment.createdAt());
+            return new AxRenewalCommentResponse(
+                    comment.id(), comment.authorId(), comment.authorName(), comment.body(), comment.createdAt());
         }
     }
 

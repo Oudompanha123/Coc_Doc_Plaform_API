@@ -117,14 +117,34 @@ public class AxRenewalService {
     // Attach
     // -----------------------------------------------------------------------
 
+    /** Serialised size limit for {@code attach_stats} — a defensive cap, not a real-world size (see {@link #attachManifest}). */
+    private static final int MAX_ATTACH_STATS_LENGTH = 20_000;
+
     /**
      * Records a manifest against this project. Text only — file contents, not
      * parsed structure; {@link #runAnalysis} is the step that reads it.
+     *
+     * <p>{@code filename}/{@code content} are both null when the attached
+     * folder had no recognized dependency manifest — that is a fact about the
+     * project (e.g. a static site with no {@code package.json}), not a
+     * reason to refuse the attach. {@code manifest_attached_at} is set
+     * either way, so the project's attach state is never "not attached" just
+     * because it has nothing {@link #runAnalysis} can key off of.
+     *
+     * <p>{@code stats} is the browser's own real computation over the picked
+     * folder (file count, size, extensions, lockfile/secrets/build-output
+     * checks, largest file) — never fabricated content, so it is trusted and
+     * persisted as-is, only capped in size as a defensive limit against an
+     * oversized payload.
      */
     @Transactional
-    public AxRenewalProject attachManifest(UUID projectId, String filename, String content, CurrentUser actor) {
+    public AxRenewalProject attachManifest(
+            UUID projectId, String filename, String content, JsonNode stats, CurrentUser actor) {
         requireProject(projectId);
-        projects.attachManifest(projectId, filename, content, actor.id());
+        if (stats != null && stats.toString().length() > MAX_ATTACH_STATS_LENGTH) {
+            throw ApiException.badRequest("attach stats payload is too large");
+        }
+        projects.attachManifest(projectId, filename, content, stats, actor.id());
         audit.append(
                 actor.id(),
                 actor.email(),
@@ -471,7 +491,8 @@ public class AxRenewalService {
         if (body == null || body.isBlank()) {
             throw ApiException.badRequest("a comment needs a body");
         }
-        AxRenewalComment created = comments.insert(projectId, actor.id(), body.trim());
+        AxRenewalComment created =
+                comments.insert(projectId, actor.id(), actor.account().displayName(), body.trim());
 
         audit.append(
                 actor.id(),
