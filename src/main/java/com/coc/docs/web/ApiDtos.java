@@ -801,9 +801,6 @@ public final class ApiDtos {
         }
     }
 
-    public record InviteClaudeUsageMemberRequest(
-            @NotBlank @Email String email, String displayName, String teamRole) {}
-
     public record UpdateClaudeUsageMemberRoleRequest(@NotBlank String teamRole) {}
 
     /** The only field, so an explicit {@code null} and an absent field mean the same thing: clear the override. */

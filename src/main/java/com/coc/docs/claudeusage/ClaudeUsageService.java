@@ -85,29 +85,18 @@ public class ClaudeUsageService {
     // Roster management
     // -----------------------------------------------------------------------
 
-    /** Adds someone to the tracking roster, {@code invited} until their first report. */
-    public ClaudeUsageMember invite(String rawEmail, String rawDisplayName, String rawTeamRole, CurrentUser actor) {
-        String email = normalizeEmail(rawEmail);
-        String teamRole = normalizeTeamRole(rawTeamRole);
-
-        if (members.findByEmail(email).isPresent()) {
-            throw ApiException.conflict(email + " is already tracked on this dashboard");
-        }
-
-        String displayName = displayNameOrFallback(rawDisplayName, email);
-        ClaudeUsageMember created =
-                members.insert(email, displayName, teamRole, ClaudeUsageMember.STATUS_INVITED, actor.id());
-
-        audit.append(
-                actor.id(),
-                actor.email(),
-                AuditAction.CLAUDE_USAGE_MEMBER_INVITE,
-                AuditAction.TARGET_CLAUDE_USAGE_MEMBER,
-                created.id(),
-                json.createObjectNode().put("email", email).put("teamRole", teamRole));
-
-        return created;
-    }
+    /*
+     * There is no invite(). Adding an address by hand created a row in
+     * STATUS_INVITED that did nothing until that person ran the reporter —
+     * and {@link #recordUsage} creates the row on first report anyway, so the
+     * invite was a placeholder for an event that supplies its own. Reporting
+     * is the opt-in; that was always the real rule, and this removes the
+     * second path that pretended otherwise.
+     *
+     * <p>{@link ClaudeUsageMember#STATUS_INVITED} stays: rows created before
+     * this still hold it, recordUsage still promotes them to active on a
+     * first report, and the badge still renders it.
+     */
 
     /** Changes the dashboard-scoped role (`admin`/`member`) — not {@code AppRole}, see {@link ClaudeUsageMember}. */
     public ClaudeUsageMember updateTeamRole(UUID id, String rawTeamRole, CurrentUser actor) {
