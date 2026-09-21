@@ -3,8 +3,8 @@ package com.coc.docs.auth;
 import com.coc.docs.account.Account;
 import com.coc.docs.account.AccountStatus;
 import com.coc.docs.account.AppRole;
-import com.coc.docs.capability.Capability;
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.security.core.Authentication;
@@ -42,20 +42,22 @@ public final class TestCallers {
      * Google-only caller.
      */
     public static CurrentUser user(AppRole role, boolean mustChangePassword, boolean hasPassword) {
-        return user(role, mustChangePassword, hasPassword, Set.of());
+        return user(EnumSet.of(role), mustChangePassword, hasPassword);
     }
 
     /**
-     * As {@link #user(AppRole, boolean, boolean)}, also holding the given
-     * capabilities (ADR-037) — for testing a rule that admits {@code
-     * hasAnyAuthority(ROLE_X, capability.developer)} regardless of rank.
+     * As {@link #user(AppRole, boolean, boolean)}, holding the given roles all
+     * at once (ADR-016) rather than exactly one — for testing a rule that
+     * distinguishes exact role membership from rank (e.g. {@code
+     * AppRole.DEVELOPER.exactAuthority()}, ADR-039), where an account ranked
+     * above {@code DEVELOPER} must not automatically pass.
      */
-    public static CurrentUser user(AppRole role, boolean mustChangePassword, boolean hasPassword, Set<Capability> capabilities) {
+    public static CurrentUser user(Set<AppRole> roles, boolean mustChangePassword, boolean hasPassword) {
         Account account = new Account(
                 UUID.randomUUID(),
-                role.wire() + "@example.com",
-                "Test " + role.wire(),
-                java.util.EnumSet.of(role),
+                roles.iterator().next().wire() + "@example.com",
+                "Test " + roles,
+                EnumSet.copyOf(roles),
                 null,
                 null,
                 AccountStatus.ACTIVE,
@@ -64,8 +66,12 @@ public final class TestCallers {
                 Instant.now(),
                 mustChangePassword,
                 hasPassword);
-        return new CurrentUser(
-                account, com.coc.docs.account.TestPermissions.of(role), capabilities, new byte[] {1, 2, 3});
+        return new CurrentUser(account, com.coc.docs.account.TestPermissions.of(roles), new byte[] {1, 2, 3});
+    }
+
+    /** As {@link #user(Set, boolean, boolean)}, active and with a password. */
+    public static CurrentUser user(Set<AppRole> roles) {
+        return user(roles, false, true);
     }
 
     /** The same authentication the real filter installs, for a caller of this role. */
@@ -73,9 +79,9 @@ public final class TestCallers {
         return new SessionAuthenticationFilter.SessionAuthentication(user(role));
     }
 
-    /** As {@link #authentication(AppRole)}, also holding the given capabilities (ADR-037). */
-    public static Authentication authentication(AppRole role, Set<Capability> capabilities) {
-        return new SessionAuthenticationFilter.SessionAuthentication(user(role, false, true, capabilities));
+    /** As {@link #authentication(AppRole)}, for a caller holding every one of these roles at once (ADR-016). */
+    public static Authentication authentication(Set<AppRole> roles) {
+        return new SessionAuthenticationFilter.SessionAuthentication(user(roles));
     }
 
     /** As {@link #authentication(AppRole)}, for a caller still under the first-login gate. */

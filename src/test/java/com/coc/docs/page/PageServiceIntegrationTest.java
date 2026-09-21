@@ -57,7 +57,7 @@ class PageServiceIntegrationTest extends PostgresTestBase {
 
         Account account = accounts.insert(
                 "editor@example.com", "Editor", AppRole.ADMIN, null, AccountStatus.ACTIVE);
-        editor = new CurrentUser(account, accounts.findPermissions(account.id()), java.util.Set.of(), new byte[] {1});
+        editor = new CurrentUser(account, accounts.findPermissions(account.id()), new byte[] {1});
 
         section = sections.insert("jex2.0", 2, true);
         page = pages.insert(section.id(), "usage", 1, null, AppRole.USER);
@@ -75,7 +75,7 @@ class PageServiceIntegrationTest extends PostgresTestBase {
     private CurrentUser caller(AppRole role) {
         Account account = accounts.insert(
                 role.wire() + "@example.com", "Test", role, null, AccountStatus.ACTIVE);
-        return new CurrentUser(account, accounts.findPermissions(account.id()), java.util.Set.of(), new byte[] {2});
+        return new CurrentUser(account, accounts.findPermissions(account.id()), new byte[] {2});
     }
 
     /**

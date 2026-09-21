@@ -45,7 +45,7 @@ class ApprovalGateTest extends PostgresTestBase {
     private CurrentUser superAdmin() {
         Account admin = accounts.insert(
                 "boss@example.com", "Boss", AppRole.SUPER_ADMIN, null, AccountStatus.ACTIVE);
-        return new CurrentUser(admin, accounts.findPermissions(admin.id()), java.util.Set.of(), new byte[] {9});
+        return new CurrentUser(admin, accounts.findPermissions(admin.id()), new byte[] {9});
     }
 
     @Test

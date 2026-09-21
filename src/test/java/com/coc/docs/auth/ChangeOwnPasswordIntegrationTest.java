@@ -9,7 +9,6 @@ import com.coc.docs.account.AccountRepository;
 import com.coc.docs.account.AccountStatus;
 import com.coc.docs.account.AppRole;
 import com.coc.docs.account.Permission;
-import com.coc.docs.capability.Capability;
 import com.coc.docs.web.ApiException;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
@@ -183,8 +182,7 @@ class ChangeOwnPasswordIntegrationTest extends PostgresTestBase {
     void setsInitialPasswordForGoogleOnlyAccount() {
         Account googleOnly = accounts.insert("google.only@example.com", "Google Only", AppRole.USER, null, AccountStatus.ACTIVE);
         assertThat(googleOnly.hasPassword()).isFalse();
-        CurrentUser caller =
-                new CurrentUser(googleOnly, Set.<Permission>of(), Set.<Capability>of(), new byte[] {9, 9, 9});
+        CurrentUser caller = new CurrentUser(googleOnly, Set.<Permission>of(), new byte[] {9, 9, 9});
 
         // No current password supplied at all — there is none to prove.
         sessions.changeOwnPassword(caller, null, "NewPassword456!");
@@ -198,8 +196,7 @@ class ChangeOwnPasswordIntegrationTest extends PostgresTestBase {
     @DisplayName("a Google-only account still cannot reuse a wrong or irrelevant 'current' password as an excuse to skip the rule for others")
     void initialPasswordSetIgnoresAnyCurrentPasswordSupplied() {
         Account googleOnly = accounts.insert("google.only2@example.com", "Google Only", AppRole.USER, null, AccountStatus.ACTIVE);
-        CurrentUser caller =
-                new CurrentUser(googleOnly, Set.<Permission>of(), Set.<Capability>of(), new byte[] {9, 9, 9});
+        CurrentUser caller = new CurrentUser(googleOnly, Set.<Permission>of(), new byte[] {9, 9, 9});
 
         // Whatever is sent here is simply irrelevant — there is no hash to
         // check it against — so this still succeeds rather than being

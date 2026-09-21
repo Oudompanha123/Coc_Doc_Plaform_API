@@ -2,7 +2,6 @@ package com.coc.docs.web;
 
 import com.coc.docs.account.Account;
 import com.coc.docs.auth.CurrentUser;
-import com.coc.docs.capability.CapabilityRepository;
 import com.coc.docs.auth.PasswordResetService;
 import com.coc.docs.auth.RegistrationChallenge;
 import com.coc.docs.auth.RegistrationOtpService;
@@ -74,7 +73,6 @@ public class AuthController {
     private final PasswordResetService passwordResets;
     private final RegistrationOtpService registrationOtp;
     private final TotpService totp;
-    private final CapabilityRepository capabilities;
 
     public AuthController(
             SessionService sessions,
@@ -83,8 +81,7 @@ public class AuthController {
             NonceService nonces,
             PasswordResetService passwordResets,
             RegistrationOtpService registrationOtp,
-            TotpService totp,
-            CapabilityRepository capabilities) {
+            TotpService totp) {
         this.sessions = sessions;
         this.properties = properties;
         this.passwordEncoder = passwordEncoder;
@@ -92,7 +89,6 @@ public class AuthController {
         this.passwordResets = passwordResets;
         this.registrationOtp = registrationOtp;
         this.totp = totp;
-        this.capabilities = capabilities;
     }
 
     /**
@@ -154,7 +150,6 @@ public class AuthController {
                 .header(HttpHeaders.SET_COOKIE, expiredNonceCookie().toString())
                 .body(ApiDtos.MeResponse.of(
                         issued.account(),
-                        capabilities.findForAccount(issued.account().id()),
                         sessions.lastSignInForAccount(issued.account().id()).orElse(null)));
     }
 
@@ -195,7 +190,7 @@ public class AuthController {
         }
         Account updated = sessions.renameSelf(caller, request.displayName());
         return ApiDtos.MeResponse.of(
-                updated, caller.capabilities(), sessions.lastSignInForAccount(updated.id()).orElse(null));
+                updated, sessions.lastSignInForAccount(updated.id()).orElse(null));
     }
 
     /**
@@ -220,7 +215,7 @@ public class AuthController {
         }
         Account updated = sessions.uploadOwnAvatar(caller, file);
         return ApiDtos.MeResponse.of(
-                updated, caller.capabilities(), sessions.lastSignInForAccount(updated.id()).orElse(null));
+                updated, sessions.lastSignInForAccount(updated.id()).orElse(null));
     }
 
     /**
@@ -237,7 +232,7 @@ public class AuthController {
         }
         Account updated = sessions.removeOwnAvatar(caller);
         return ApiDtos.MeResponse.of(
-                updated, caller.capabilities(), sessions.lastSignInForAccount(updated.id()).orElse(null));
+                updated, sessions.lastSignInForAccount(updated.id()).orElse(null));
     }
 
     /**
@@ -549,7 +544,6 @@ public class AuthController {
                     .header(HttpHeaders.SET_COOKIE, sessionCookie(issued).toString())
                     .body(ApiDtos.MeResponse.of(
                             issued.account(),
-                            capabilities.findForAccount(issued.account().id()),
                             sessions.lastSignInForAccount(issued.account().id()).orElse(null)));
             case SessionService.MfaRequired mfaRequired -> ResponseEntity.ok()
                     .header(HttpHeaders.SET_COOKIE, mfaPendingCookie(mfaRequired).toString())
@@ -593,7 +587,6 @@ public class AuthController {
                 .header(HttpHeaders.SET_COOKIE, expiredMfaPendingCookie().toString())
                 .body(ApiDtos.MeResponse.of(
                         issued.account(),
-                        capabilities.findForAccount(issued.account().id()),
                         sessions.lastSignInForAccount(issued.account().id()).orElse(null)));
     }
 

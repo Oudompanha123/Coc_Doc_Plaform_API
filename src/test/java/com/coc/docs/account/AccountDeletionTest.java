@@ -39,7 +39,7 @@ class AccountDeletionTest extends PostgresTestBase {
     void setUp() {
         jdbc.sql("truncate audit_log, app_session, account restart identity cascade").update();
         boss = accounts.insert("boss@example.com", "Boss", AppRole.SUPER_ADMIN, null, AccountStatus.ACTIVE);
-        actor = new CurrentUser(boss, accounts.findPermissions(boss.id()), java.util.Set.of(), new byte[] {9});
+        actor = new CurrentUser(boss, accounts.findPermissions(boss.id()), new byte[] {9});
     }
 
     private Account member(String email) {
@@ -114,7 +114,7 @@ class AccountDeletionTest extends PostgresTestBase {
     void auditEntriesSurviveWithTheirEmail() {
         Account victim = member("actor@example.com");
         CurrentUser victimActor =
-                new CurrentUser(victim, accounts.findPermissions(victim.id()), java.util.Set.of(), new byte[] {1});
+                new CurrentUser(victim, accounts.findPermissions(victim.id()), new byte[] {1});
         // Something they did, recorded before they are removed.
         accountService.setActive(member("other@example.com").id(), false, victimActor);
 
@@ -165,13 +165,12 @@ class AccountDeletionTest extends PostgresTestBase {
         Account other = accounts.insert(
                 "second@example.com", "Second", AppRole.SUPER_ADMIN, null, AccountStatus.ACTIVE);
         CurrentUser otherActor =
-                new CurrentUser(other, accounts.findPermissions(other.id()), java.util.Set.of(), new byte[] {2});
+                new CurrentUser(other, accounts.findPermissions(other.id()), new byte[] {2});
         // Leaves `other` as the only active super admin.
         accountService.delete(boss.id(), otherActor);
 
         CurrentUser adminActor = new CurrentUser(
                 accounts.insert("plain@example.com", "Plain", AppRole.ADMIN, null, AccountStatus.ACTIVE),
-                java.util.Set.of(),
                 java.util.Set.of(),
                 new byte[] {3});
 
