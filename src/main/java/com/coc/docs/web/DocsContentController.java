@@ -2,9 +2,12 @@ package com.coc.docs.web;
 
 import com.coc.docs.docscontent.DocsContentService;
 import com.fasterxml.jackson.databind.JsonNode;
+import java.util.Arrays;
+import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -38,6 +41,48 @@ public class DocsContentController {
     JsonNode get(@PathVariable String productKey, @PathVariable String slug) {
         return content.find(productKey, slug)
                 .orElseThrow(() -> ApiException.notFound("docs content for " + productKey + "/" + slug));
+    }
+
+    /**
+     * Bulk existence check — which of the given slugs already have a saved
+     * admin row, in one round trip. Exists so {@code ProductContentTable} can
+     * render every row's "Has content"/"Not written" status without issuing
+     * one 404-prone {@link #get} per row: each row that has never been saved
+     * 404s there by design (see this class's own javadoc above), which is
+     * harmless but noisy in the browser's network tab at N rows per page
+     * load.
+     *
+     * <p>Always {@code 200}, even when none of the requested slugs have been
+     * saved — that is the ordinary "nothing written yet" case, not an error.
+     * {@code slugs} is a comma-separated list; a missing, blank, or
+     * all-blank value is treated as "no candidates" and answered with an
+     * empty result rather than a {@code 400}, matching the resilient-by-
+     * default style the frontend's own read helpers already use for this
+     * content (see {@code docs-content-api.ts}).
+     *
+     * <p>Never returns seed content as saved — this reads only {@code
+     * docs_content} itself, which is the one thing {@link DocsContentService}
+     * can see; the frontend's placeholder seed text lives entirely on its
+     * side and never reaches this table.
+     *
+     * <p>// req: ADR-012 investigation, 2026-09-15
+     */
+    @GetMapping("/{productKey}")
+    ApiDtos.DocsContentExistenceResponse existence(
+            @PathVariable String productKey, @RequestParam(required = false) String slugs) {
+        return new ApiDtos.DocsContentExistenceResponse(
+                List.copyOf(content.findSavedSlugs(productKey, parseSlugs(slugs))));
+    }
+
+    private static List<String> parseSlugs(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(raw.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .distinct()
+                .toList();
     }
 
     /** {@code updatedAt} for the product docs pages' "About this document"
