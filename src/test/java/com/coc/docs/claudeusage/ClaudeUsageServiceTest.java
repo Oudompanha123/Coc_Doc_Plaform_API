@@ -49,48 +49,12 @@ class ClaudeUsageServiceTest {
     // Roster management
     // -------------------------------------------------------------------
 
-    @Nested
-    class Invite {
-
-        @Test
-        @DisplayName("refuses to invite an email that is already tracked")
-        void refusesDuplicateEmail() {
-            when(members.findByEmail("dev@cocdocs.example"))
-                    .thenReturn(Optional.of(member("dev@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null)));
-
-            assertThatThrownBy(() -> service.invite("Dev@CocDocs.example", null, null, ACTOR))
-                    .isInstanceOf(ApiException.class)
-                    .extracting(e -> ((ApiException) e).status())
-                    .isEqualTo(HttpStatus.CONFLICT);
-
-            verify(members, never()).insert(any(), any(), any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("refuses an unknown teamRole")
-        void refusesUnknownTeamRole() {
-            when(members.findByEmail(any())).thenReturn(Optional.empty());
-
-            assertThatThrownBy(() -> service.invite("new@cocdocs.example", null, "owner", ACTOR))
-                    .isInstanceOf(ApiException.class)
-                    .extracting(e -> ((ApiException) e).status())
-                    .isEqualTo(HttpStatus.BAD_REQUEST);
-        }
-
-        @Test
-        @DisplayName("lower-cases the email, defaults the role to member, and falls back to the local part for the name")
-        void createsInvitedMember() {
-            when(members.findByEmail("new@cocdocs.example")).thenReturn(Optional.empty());
-            when(members.insert(eq("new@cocdocs.example"), eq("new"), eq(ClaudeUsageMember.ROLE_MEMBER),
-                            eq(ClaudeUsageMember.STATUS_INVITED), eq(ACTOR.id())))
-                    .thenReturn(member("new@cocdocs.example", ClaudeUsageMember.STATUS_INVITED, null));
-
-            ClaudeUsageMember created = service.invite("New@CocDocs.example", "  ", null, ACTOR);
-
-            assertThat(created.status()).isEqualTo(ClaudeUsageMember.STATUS_INVITED);
-            verify(audit).append(eq(ACTOR.id()), eq(ACTOR.email()), eq("claude_usage_member.invite"), any(), any(), any());
-        }
-    }
+    /*
+     * There was an Invite nest here. It went with the endpoint: the roster is
+     * filled by recordUsage on a first report, which the ReportUsage tests
+     * below still cover, including the promotion of a member left in
+     * STATUS_INVITED before the feature was removed.
+     */
 
     @Nested
     class Remove {

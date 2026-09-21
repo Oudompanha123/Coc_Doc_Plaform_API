@@ -36,7 +36,7 @@ public class ClaudeUsageMemberRepository {
     private static final String COLUMNS =
             "id, email, display_name, team_role, status, budget_override_tokens, invited_by, created_at, updated_at";
 
-    /** Every tracked member, newest invite first. Includes {@code removed} rows -- the dashboard shows them, badged. */
+    /** Every tracked member, newest first. Includes {@code removed} rows -- the dashboard shows them, badged. */
     public List<ClaudeUsageMember> list() {
         return jdbc.sql("select " + COLUMNS + " from claude_usage_member order by created_at desc")
                 .query(this::map)

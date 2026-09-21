@@ -4,9 +4,7 @@ import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.claudeusage.ClaudeUsageMember;
 import com.coc.docs.claudeusage.ClaudeUsageService;
 import jakarta.validation.Valid;
-import java.net.URI;
 import java.util.UUID;
-import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -20,7 +18,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * The Claude Usage dashboard's own admin surface: the rollup, and roster
- * management (invite, dashboard-scoped role, budget override, remove).
+ * management (dashboard-scoped role, budget override, remove).
+ *
+ * <p>Nothing here adds a member. Rows appear when somebody runs the reporter
+ * and {@code recordUsage} creates one — reporting is the opt-in, and it always
+ * was, so the invite endpoint that also created them has gone.
  *
  * <p>Sits under {@code /api/v1/admin/**}, already covered by {@code
  * SecurityConfig}'s generic {@code admin}-role rule for that prefix — unlike
@@ -57,22 +59,13 @@ public class AdminClaudeUsageController {
         return ApiDtos.ClaudeUsageDashboardResponse.of(usage.dashboard(period, offset));
     }
 
-    /**
-     * Adds someone to the tracking roster, {@code invited} until their own
-     * machine reports for the first time.
-     *
-     * <p>201 with a {@code Location} header — this makes a new roster row at a
-     * new address, unlike the mutations below, which change one that exists.
+    /*
+     * There is no POST /members. The roster is filled by people running the
+     * reporter on their own machines — recordUsage creates the row on first
+     * report — so adding an address here only ever made a placeholder waiting
+     * for that same event, and one more way to get the address wrong. Rows
+     * still holding STATUS_INVITED predate its removal.
      */
-    @PostMapping("/members")
-    ResponseEntity<ApiDtos.ClaudeUsageMemberSummaryResponse> invite(
-            @Valid @RequestBody ApiDtos.InviteClaudeUsageMemberRequest request,
-            @AuthenticationPrincipal CurrentUser actor) {
-
-        ClaudeUsageMember created = usage.invite(request.email(), request.displayName(), request.teamRole(), actor);
-        return ResponseEntity.created(URI.create("/api/v1/admin/claude-usage/members/" + created.id()))
-                .body(ApiDtos.ClaudeUsageMemberSummaryResponse.of(created));
-    }
 
     /** Changes the dashboard-scoped role — never {@code AppRole}; see the class Javadoc. */
     @PatchMapping("/members/{id}")
