@@ -3,7 +3,11 @@ package com.coc.docs.docscontent;
 import com.coc.docs.web.Jsonb;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Instant;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -32,6 +36,36 @@ public class DocsContentRepository {
                 .params(productKey, slug)
                 .query((rs, n) -> jsonb.read(rs.getString("body")))
                 .optional();
+    }
+
+    /**
+     * Which of the given candidate slugs already have a saved admin row for
+     * this product — the bulk sibling of {@link #find}, used by {@code
+     * ProductContentTable} to render every row's status in one round trip
+     * instead of one 404-prone {@link #find} per slug (see {@code
+     * DocsContentController}'s javadoc for why a lone {@link #find} 404s when
+     * nothing has been saved yet — harmless, but noisy in the browser's
+     * network tab at N rows per page load).
+     *
+     * <p>An empty candidate list is answered without a round trip, since
+     * {@code slug in ()} is invalid SQL and there is nothing to look up
+     * anyway.
+     */
+    public Set<String> findSavedSlugs(String productKey, List<String> slugs) {
+        if (slugs.isEmpty()) {
+            return Set.of();
+        }
+        String placeholders = String.join(", ", Collections.nCopies(slugs.size(), "?"));
+        Object[] params = new Object[slugs.size() + 1];
+        params[0] = productKey;
+        for (int i = 0; i < slugs.size(); i++) {
+            params[i + 1] = slugs.get(i);
+        }
+        return new LinkedHashSet<>(jdbc.sql(
+                        "select slug from docs_content where product_key = ? and slug in (" + placeholders + ")")
+                .params(params)
+                .query(String.class)
+                .list());
     }
 
     /** For the product docs pages' "About this document" panel — a separate

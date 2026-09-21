@@ -926,6 +926,13 @@ public final class ApiDtos {
      *  the stored body the next time an admin saves through the editor. */
     public record DocsContentMetaResponse(Instant updatedAt) {}
 
+    /** Bulk existence check (see {@code DocsContentController#existence}) —
+     *  the slugs, out of the ones asked about, that actually have a saved
+     *  admin row. Order is whatever the query returned, not the caller's
+     *  request order; the frontend only ever tests membership, never reads
+     *  this positionally. */
+    public record DocsContentExistenceResponse(List<String> savedSlugs) {}
+
     // -----------------------------------------------------------------------
     // AX Renewal (ADR-037)
     // -----------------------------------------------------------------------

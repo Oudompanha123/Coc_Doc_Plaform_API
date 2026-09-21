@@ -7,6 +7,7 @@ import com.coc.docs.web.ApiException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.stereotype.Service;
@@ -43,6 +44,11 @@ public class DocsContentService {
 
     public Optional<Instant> findUpdatedAt(String productKey, String slug) {
         return repository.findUpdatedAt(productKey, slug);
+    }
+
+    /** Bulk sibling of {@link #find} — see {@link DocsContentRepository#findSavedSlugs}. */
+    public Set<String> findSavedSlugs(String productKey, List<String> slugs) {
+        return repository.findSavedSlugs(productKey, slugs);
     }
 
     public JsonNode save(String productKey, String slug, JsonNode body, CurrentUser editor) {
