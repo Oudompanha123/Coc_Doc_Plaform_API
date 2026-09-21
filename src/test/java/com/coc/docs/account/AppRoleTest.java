@@ -21,7 +21,13 @@ class AppRoleTest {
     void the_ladder_is_in_ascending_privilege_order() {
         assertThat(AppRole.values())
                 .containsExactly(
-                        AppRole.GUEST, AppRole.USER, AppRole.ADMIN, AppRole.SUPER_ADMIN);
+                        AppRole.GUEST,
+                        AppRole.USER,
+                        AppRole.DEVELOPER,
+                        AppRole.REVIEWER,
+                        AppRole.LEAD,
+                        AppRole.ADMIN,
+                        AppRole.SUPER_ADMIN);
     }
 
     @Test
@@ -29,6 +35,13 @@ class AppRoleTest {
         assertThat(AppRole.ADMIN.isAtLeast(AppRole.GUEST)).isTrue();
         assertThat(AppRole.ADMIN.isAtLeast(AppRole.USER)).isTrue();
         assertThat(AppRole.ADMIN.isAtLeast(AppRole.ADMIN)).isTrue();
+        assertThat(AppRole.LEAD.isAtLeast(AppRole.REVIEWER)).isTrue();
+        assertThat(AppRole.LEAD.isAtLeast(AppRole.USER)).isTrue();
+        assertThat(AppRole.REVIEWER.isAtLeast(AppRole.DEVELOPER)).isTrue();
+        // Rank alone -- isAtLeast/authority() -- says an Admin is "at least
+        // developer". SecurityConfig's AX Renewal confirm gate deliberately
+        // does NOT use this for that reason; see exactAuthority() below.
+        assertThat(AppRole.ADMIN.isAtLeast(AppRole.DEVELOPER)).isTrue();
     }
 
     @Test
@@ -38,15 +51,31 @@ class AppRoleTest {
         assertThat(AppRole.ADMIN.isAtLeast(AppRole.SUPER_ADMIN)).isFalse();
         assertThat(AppRole.USER.isAtLeast(AppRole.ADMIN)).isFalse();
         assertThat(AppRole.GUEST.isAtLeast(AppRole.USER)).isFalse();
+        assertThat(AppRole.REVIEWER.isAtLeast(AppRole.LEAD)).isFalse();
+        assertThat(AppRole.LEAD.isAtLeast(AppRole.ADMIN)).isFalse();
+        assertThat(AppRole.USER.isAtLeast(AppRole.DEVELOPER)).isFalse();
     }
 
     @Test
     void the_wire_form_matches_the_postgres_enum_labels() {
-        // V1__initial_schema.sql declares: guest, user, admin, super_admin.
+        // V1__initial_schema.sql declares guest/user/admin/super_admin;
+        // V28 adds reviewer and lead; V30 adds developer.
         assertThat(AppRole.GUEST.wire()).isEqualTo("guest");
         assertThat(AppRole.USER.wire()).isEqualTo("user");
+        assertThat(AppRole.DEVELOPER.wire()).isEqualTo("developer");
+        assertThat(AppRole.REVIEWER.wire()).isEqualTo("reviewer");
+        assertThat(AppRole.LEAD.wire()).isEqualTo("lead");
         assertThat(AppRole.ADMIN.wire()).isEqualTo("admin");
         assertThat(AppRole.SUPER_ADMIN.wire()).isEqualTo("super_admin");
+    }
+
+    @Test
+    void exact_authority_is_distinct_from_the_rank_authority() {
+        // The whole reason exactAuthority() exists: an Admin outranks
+        // Developer (authority()/hasRole would admit them), but must not be
+        // treated as if they hold the Developer role itself.
+        assertThat(AppRole.DEVELOPER.exactAuthority()).isEqualTo("role.exact.developer");
+        assertThat(AppRole.DEVELOPER.exactAuthority()).isNotEqualTo(AppRole.DEVELOPER.authority());
     }
 
     @Test

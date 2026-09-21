@@ -6,8 +6,6 @@ import com.coc.docs.account.dto.AccountSummary;
 import com.coc.docs.account.AppRole;
 import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.auth.SessionRepository;
-import com.coc.docs.capability.Capability;
-import com.coc.docs.capability.CapabilityService;
 import jakarta.validation.Valid;
 import java.net.URI;
 import java.time.Instant;
@@ -41,13 +39,10 @@ public class AdminAccountController {
 
     private final AccountService accounts;
     private final SessionRepository sessions;
-    private final CapabilityService capabilities;
 
-    public AdminAccountController(
-            AccountService accounts, SessionRepository sessions, CapabilityService capabilities) {
+    public AdminAccountController(AccountService accounts, SessionRepository sessions) {
         this.accounts = accounts;
         this.sessions = sessions;
-        this.capabilities = capabilities;
     }
 
     /**
@@ -109,24 +104,40 @@ public class AdminAccountController {
             @RequestBody ApiDtos.UpdateAccountRequest request,
             @AuthenticationPrincipal CurrentUser actor) {
 
-        if (request.role() == null && request.active() == null && request.displayName() == null) {
-            throw ApiException.badRequest("supply a role, an active flag, a display name, or any combination");
+        if (request.role() == null
+                && request.roles() == null
+                && request.active() == null
+                && request.displayName() == null) {
+            throw ApiException.badRequest("supply a role, roles, an active flag, a display name, or any combination");
         }
 
         // Parsed before anything is written, so an unknown role name is a 400
-        // rather than a partially applied request.
-        AppRole role = request.role() == null
-                ? null
-                : AppRole.parse(request.role())
+        // rather than a partially applied request. `roles` (the full set) wins
+        // over the single-role `role` when both are somehow present.
+        java.util.Set<AppRole> roles = null;
+        if (request.roles() != null) {
+            if (request.roles().isEmpty()) {
+                throw ApiException.badRequest(
+                        "roles must not be empty; deactivate the account instead of removing them all");
+            }
+            roles = new java.util.LinkedHashSet<>();
+            for (String r : request.roles()) {
+                roles.add(AppRole.parse(r)
                         .orElseThrow(() -> ApiException.badRequest(
-                                "unknown role \"" + request.role() + "\"; expected guest, user, "
-                                        + "admin or super_admin"));
+                                "unknown role \"" + r + "\"; expected guest, user, admin or super_admin")));
+            }
+        } else if (request.role() != null) {
+            roles = java.util.EnumSet.of(AppRole.parse(request.role())
+                    .orElseThrow(() -> ApiException.badRequest(
+                            "unknown role \"" + request.role() + "\"; expected guest, user, "
+                                    + "admin or super_admin")));
+        }
 
         // One service call, one transaction. Applying the two fields with two
         // calls let a request that changed both commit the first and fail the
         // second, which reported an error while a role change had already landed.
         return ApiDtos.AccountResponse.of(
-                accounts.update(accountId, role, request.active(), request.displayName(), actor));
+                accounts.update(accountId, roles, request.active(), request.displayName(), actor));
     }
 
         // -----------------------------------------------------------------------
@@ -195,37 +206,4 @@ public class AdminAccountController {
         return ResponseEntity.noContent().build();
     }
 
-    // -----------------------------------------------------------------------
-    // Capabilities (ADR-037) — a second, rank-independent grant, layered on
-    // top of the role above rather than replacing it. Nested here rather than
-    // a new controller: a capability grant is a sub-resource of the account
-    // it is granted to, and this inherits the surrounding super_admin floor
-    // for free, the same floor FR-AUTH-008 gives every other grant of
-    // authority in this controller.
-    // -----------------------------------------------------------------------
-
-    @GetMapping("/{accountId}/capabilities")
-    ApiDtos.CapabilitiesResponse listCapabilities(@PathVariable UUID accountId) {
-        return ApiDtos.CapabilitiesResponse.of(accountId, capabilities.currentFor(accountId));
-    }
-
-    @PostMapping("/{accountId}/capabilities/{key}")
-    ApiDtos.CapabilitiesResponse grantCapability(
-            @PathVariable UUID accountId,
-            @PathVariable String key,
-            @AuthenticationPrincipal CurrentUser actor) {
-        Capability capability = Capability.parse(key)
-                .orElseThrow(() -> ApiException.badRequest("unknown capability: " + key));
-        return ApiDtos.CapabilitiesResponse.of(accountId, capabilities.grant(accountId, capability, actor));
-    }
-
-    @DeleteMapping("/{accountId}/capabilities/{key}")
-    ApiDtos.CapabilitiesResponse revokeCapability(
-            @PathVariable UUID accountId,
-            @PathVariable String key,
-            @AuthenticationPrincipal CurrentUser actor) {
-        Capability capability = Capability.parse(key)
-                .orElseThrow(() -> ApiException.badRequest("unknown capability: " + key));
-        return ApiDtos.CapabilitiesResponse.of(accountId, capabilities.revoke(accountId, capability, actor));
-    }
 }

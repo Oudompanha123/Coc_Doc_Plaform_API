@@ -97,18 +97,22 @@ public class AccountService {
      * <p>Order matters: the role change goes first, so demoting the only super
      * admin is refused by the same guard whichever field triggers it.
      *
+     * <p>{@code newRoles} replaces the account's whole role set — a set of one
+     * is the ordinary "change to this role" case, and a larger set is how an
+     * account ends up holding more than one (ADR-016).
+     *
      * <p>// req: FR-AUTH-003, FR-AUTH-004, FR-AUTH-005, UC-004
      */
     @Transactional
     public Account update(
-            UUID accountId, AppRole newRole, Boolean active, String displayName, CurrentUser actor) {
+            UUID accountId, Set<AppRole> newRoles, Boolean active, String displayName, CurrentUser actor) {
 
         Account result = accounts
                 .findById(accountId)
                 .orElseThrow(() -> ApiException.notFound("account " + accountId));
 
-        if (newRole != null) {
-            result = changeRole(accountId, newRole, actor);
+        if (newRoles != null) {
+            result = setRoles(accountId, newRoles, actor);
         }
         if (active != null) {
             result = setActive(accountId, active, actor);

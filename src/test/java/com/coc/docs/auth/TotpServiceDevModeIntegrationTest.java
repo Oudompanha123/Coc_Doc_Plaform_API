@@ -49,7 +49,7 @@ class TotpServiceDevModeIntegrationTest extends PostgresTestBase {
         Account account = accounts.insert(
                 email, "Test User", AppRole.USER, null, AccountStatus.ACTIVE,
                 passwordEncoder.encode("Password123!"), false);
-        return new CurrentUser(account, TestPermissions.of(AppRole.USER), java.util.Set.of(), new byte[] {1, 2, 3});
+        return new CurrentUser(account, TestPermissions.of(AppRole.USER), new byte[] {1, 2, 3});
     }
 
     @Test

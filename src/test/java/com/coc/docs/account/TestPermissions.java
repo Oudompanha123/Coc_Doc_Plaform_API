@@ -24,6 +24,12 @@ public final class TestPermissions {
             EnumSet.noneOf(Permission.class),
             AppRole.USER,
             EnumSet.of(Permission.CONTENT_READ),
+            AppRole.DEVELOPER,
+            EnumSet.of(Permission.CONTENT_READ),
+            AppRole.REVIEWER,
+            EnumSet.of(Permission.CONTENT_READ),
+            AppRole.LEAD,
+            EnumSet.of(Permission.CONTENT_READ),
             AppRole.ADMIN,
             EnumSet.of(
                     Permission.CONTENT_READ,

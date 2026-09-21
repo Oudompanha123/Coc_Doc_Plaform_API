@@ -66,10 +66,6 @@ class AdminAccountControllerTest {
     @MockitoBean PageService pageService;
     @MockitoBean BlockBodyValidator validator;
 
-    // AdminAccountController needs it for the new capability grant/revoke
-    // endpoints (ADR-037). Untouched by the tests below.
-    @MockitoBean com.coc.docs.capability.CapabilityService capabilityService;
-
     @org.springframework.boot.test.context.TestConfiguration
     static class Beans {
 
@@ -229,7 +225,7 @@ class AdminAccountControllerTest {
         @Test
         @DisplayName("assigns a new role and returns the updated account")
         void assignsRole() throws Exception {
-            when(accountService.update(eq(ACCOUNT_ID), eq(AppRole.ADMIN), isNull(), isNull(), any()))
+            when(accountService.update(eq(ACCOUNT_ID), eq(EnumSet.of(AppRole.ADMIN)), isNull(), isNull(), any()))
                     .thenReturn(account("person@example.com", AppRole.ADMIN));
 
             mvc.perform(patch("/api/v1/admin/accounts/" + ACCOUNT_ID)
@@ -240,6 +236,37 @@ class AdminAccountControllerTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.id").value(ACCOUNT_ID.toString()))
                     .andExpect(jsonPath("$.role").value("admin"));
+        }
+
+        @Test
+        @DisplayName("assigns a whole set of roles via `roles`, not just the single `role` field")
+        void assignsMultipleRoles() throws Exception {
+            when(accountService.update(
+                            eq(ACCOUNT_ID),
+                            eq(new java.util.LinkedHashSet<>(List.of(AppRole.USER, AppRole.ADMIN))),
+                            isNull(),
+                            isNull(),
+                            any()))
+                    .thenReturn(account("person@example.com", AppRole.ADMIN));
+
+            mvc.perform(patch("/api/v1/admin/accounts/" + ACCOUNT_ID)
+                            .with(superAdmin())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"roles":["user","admin"]}"""))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.role").value("admin"));
+        }
+
+        @Test
+        @DisplayName("answers 400 when roles is an empty list")
+        void rejectsEmptyRolesList() throws Exception {
+            mvc.perform(patch("/api/v1/admin/accounts/" + ACCOUNT_ID)
+                            .with(superAdmin())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"roles":[]}"""))
+                    .andExpect(status().isBadRequest());
         }
 
         @Test

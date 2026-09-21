@@ -21,8 +21,8 @@ import org.springframework.transaction.annotation.Transactional;
  * (four gated sections) → implement → audit workflow (ADR-037).
  *
  * <p><b>Authorisation is enforced exactly once, in {@code SecurityConfig}</b>
- * — this class never re-checks {@code actor.isAtLeast(...)} or {@code
- * actor.hasCapability(...)} itself, the same trust {@code AccountService} and
+ * — this class never re-checks {@code actor.isAtLeast(...)} or which roles
+ * {@code actor} holds itself, the same trust {@code AccountService} and
  * {@code ClaudeUsageService} place in the filter chain (ADR-011). The one
  * thing that genuinely cannot live in {@code SecurityConfig} is {@link
  * #startImplementation}'s "all four sections confirmed and a destination is
@@ -354,16 +354,16 @@ public class AxRenewalService {
 
     /**
      * Confirms one plan section. Reachable only by a Super Admin or an
-     * account holding the {@code developer} capability — enforced in {@code
-     * SecurityConfig}, not here; this method only records <em>which</em> of
-     * the two applied, for the trail.
+     * account holding the {@code developer} role (ADR-039) — enforced in
+     * {@code SecurityConfig}, not here; this method only records
+     * <em>which</em> of the two applied, for the trail.
      */
     @Transactional
     public AxRenewalConfirmation confirmSection(UUID projectId, AxRenewalSection section, CurrentUser actor) {
         requireProject(projectId);
         String via = actor.role() == AppRole.SUPER_ADMIN
                 ? AxRenewalConfirmation.VIA_SUPER_ADMIN
-                : AxRenewalConfirmation.VIA_DEVELOPER_CAPABILITY;
+                : AxRenewalConfirmation.VIA_DEVELOPER_ROLE;
 
         confirmations.upsert(projectId, section, actor.id(), via);
 
