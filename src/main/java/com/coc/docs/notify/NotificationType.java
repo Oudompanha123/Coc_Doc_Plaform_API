@@ -69,6 +69,18 @@ public enum NotificationType {
         return key;
     }
 
+    /**
+     * The member whose {@link #key()} matches, for a client addressing a type
+     * by its wire identifier (e.g. a preference toggle) rather than by enum
+     * name. Empty for an unknown key — a type this build has retired or one
+     * the client made up — which the caller turns into a 404 rather than a
+     * 500, the same way {@link #key()}'s own doc explains an unrecognised row
+     * is a thing to skip, not a thing to crash on.
+     */
+    public static java.util.Optional<NotificationType> fromKey(String key) {
+        return java.util.Arrays.stream(values()).filter(t -> t.key.equals(key)).findFirst();
+    }
+
     public String title() {
         return title;
     }

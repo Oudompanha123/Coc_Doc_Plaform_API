@@ -47,6 +47,14 @@ public class NotificationService {
      */
     private final NotificationRepository notifications;
 
+    /**
+     * The caller's own opt-outs (ADR-041). Checked before {@link
+     * NotificationRepository#insertFor}, not just before delivery — the
+     * {@code notification} table is the bell (ADR-034), so an opted-out
+     * recipient must not see the row either, not merely not be pushed to.
+     */
+    private final NotificationPreferenceRepository preferences;
+
     private final ObjectMapper json;
 
     public NotificationService(
@@ -55,12 +63,14 @@ public class NotificationService {
             PushSender push,
             NotificationStream stream,
             NotificationRepository notifications,
+            NotificationPreferenceRepository preferences,
             ObjectMapper json) {
         this.accounts = accounts;
         this.devices = devices;
         this.push = push;
         this.stream = stream;
         this.notifications = notifications;
+        this.preferences = preferences;
         this.json = json;
     }
 
@@ -86,6 +96,15 @@ public class NotificationService {
             // at least one active super_admin, and the bootstrap makes the first
             // account one. Worth a line rather than a silent return.
             log.warn("no active super_admin to notify about {}", type.key());
+            return;
+        }
+
+        // ADR-041: an approver who opted out of this type sees nothing and is
+        // sent nothing — filtered before the row is written, not after, since
+        // the notification table is the bell they'd otherwise see it in.
+        recipients = preferences.filterEnabled(recipients, type);
+        if (recipients.isEmpty()) {
+            log.debug("every super_admin opted out of {}", type.key());
             return;
         }
 
@@ -141,6 +160,15 @@ public class NotificationService {
     @Transactional
     public void notifyAccount(
             UUID accountId, NotificationType type, NotificationTarget target, String body) {
+        // ADR-041: checked before anything is written or sent. Includes
+        // NEW_DEVICE_SIGN_IN — a PM decision recorded in ADR-041, since that
+        // alert is otherwise the one thing a compromised account could not
+        // silence for itself.
+        if (!preferences.isEnabled(accountId, type)) {
+            log.debug("account {} opted out of {}", accountId, type.key());
+            return;
+        }
+
         // Persisted first, in the transaction that carries the event —
         // everything below is best-effort delivery and can no longer lose it.
         int stored = notifications.insertFor(List.of(accountId), type, target.id(), payloadOf(target, body));

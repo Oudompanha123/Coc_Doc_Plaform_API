@@ -681,6 +681,25 @@ public final class ApiDtos {
      */
     public record NotificationInboxResponse(List<NotificationResponse> items, int unreadCount) {}
 
+    /**
+     * One of the caller's own notification preferences (ADR-041).
+     *
+     * <p>{@code enabled} always reflects the opt-out-by-absence default — the
+     * client never has to know whether a stored row exists, only whether this
+     * type is currently on.
+     */
+    public record NotificationPreferenceResponse(String type, String label, String description, boolean enabled) {
+
+        public static NotificationPreferenceResponse of(com.coc.docs.notify.NotificationPreferenceService.Preference p) {
+            return new NotificationPreferenceResponse(
+                    p.type().key(), p.type().title(), p.type().body(), p.enabled());
+        }
+    }
+
+    public record NotificationPreferenceListResponse(List<NotificationPreferenceResponse> items) {}
+
+    public record UpdateNotificationPreferenceRequest(boolean enabled) {}
+
     // -----------------------------------------------------------------------
     // Claude Usage (ADR-035)
     // -----------------------------------------------------------------------

@@ -132,6 +132,12 @@ class SecurityRulesTest {
     // what they return. NotificationPersistenceTest owns the rows.
     @MockitoBean com.coc.docs.notify.NotificationInboxService notificationInboxService;
 
+    // NotificationPreferenceController is in this slice too (ADR-041). This
+    // class asserts which routes the filter chain admits, not what a
+    // preference does — NotificationPreferenceRepositoryIntegrationTest and
+    // NotificationServiceTest own that.
+    @MockitoBean com.coc.docs.notify.NotificationPreferenceService notificationPreferenceService;
+
     // AdminClaudeUsageController and ClaudeUsageIngestController are in this
     // slice (ADR-035), so their dependency has to be too, same reasoning as
     // the rest of this class: this test is about which routes the filter
@@ -869,6 +875,45 @@ class SecurityRulesTest {
         @Test
         void marking_all_read_needs_a_session_and_nothing_more() throws Exception {
             mvc.perform(post("/api/v1/notifications/inbox/read-all").with(as(AppRole.USER)))
+                    .andExpect(status().isNoContent());
+        }
+    }
+
+    @Nested
+    @DisplayName("notification preferences (ADR-041)")
+    class NotificationPreferences {
+
+        @ParameterizedTest
+        @ValueSource(strings = {"USER", "ADMIN", "SUPER_ADMIN"})
+        void is_reachable_by_every_signed_in_role(String role) throws Exception {
+            // Every role can receive some notification type, so every role
+            // needs to be able to see and change its own preferences — same
+            // floor as the inbox above, for the same reason.
+            mvc.perform(get("/api/v1/notifications/preferences").with(as(AppRole.valueOf(role))))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void is_refused_without_a_session() throws Exception {
+            // The account is the resolved caller's, so an anonymous form of
+            // this request could not mean anything.
+            mvc.perform(get("/api/v1/notifications/preferences")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void updating_a_preference_is_refused_without_a_session() throws Exception {
+            mvc.perform(put("/api/v1/notifications/preferences/registration.pending")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"enabled\":false}"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void updating_a_preference_needs_a_session_and_nothing_more() throws Exception {
+            mvc.perform(put("/api/v1/notifications/preferences/registration.pending")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"enabled\":false}"))
                     .andExpect(status().isNoContent());
         }
     }
