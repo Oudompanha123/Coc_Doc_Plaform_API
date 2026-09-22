@@ -146,25 +146,5 @@ public final class AuditAction {
 
     public static final String TARGET_CLAUDE_USAGE_MEMBER = "claude_usage_member";
 
-    /** A super_admin connected a new outgoing webhook integration (ADR-037). */
-    public static final String INTEGRATION_CONNECT = "integration.connect";
-
-    /** Renamed or re-subscribed an existing integration — never its target URL or secret, which have no update action of their own today. */
-    public static final String INTEGRATION_UPDATE = "integration.update";
-
-    public static final String INTEGRATION_ROTATE_SECRET = "integration.rotate_secret";
-
-    /**
-     * The integration's signing secret was nulled and it stopped receiving
-     * deliveries. Never raised for a delete -- there is no delete; see
-     * {@code Integration}'s Javadoc.
-     */
-    public static final String INTEGRATION_DISCONNECT = "integration.disconnect";
-
-    /** A disconnected integration's row was re-activated with a freshly issued signing secret — never a new row. */
-    public static final String INTEGRATION_RECONNECT = "integration.reconnect";
-
-    public static final String TARGET_INTEGRATION = "integration";
-
     public static final String TARGET_AX_RENEWAL_PROJECT = "ax_renewal_project";
 }
