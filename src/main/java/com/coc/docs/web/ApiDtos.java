@@ -719,11 +719,16 @@ public final class ApiDtos {
      *  anything to that panel, and dropping them means one less field to
      *  remember not to widen later. */
     public record ActivityEntryResponse(
-            String actorEmail, String action, String targetType, JsonNode detail, Instant occurredAt) {
+            String actorEmail, String actorAvatarUrl, String action, String targetType, JsonNode detail, Instant occurredAt) {
 
         public static ActivityEntryResponse of(com.coc.docs.audit.AuditEntry entry) {
             return new ActivityEntryResponse(
-                    entry.actorEmail(), entry.action(), entry.targetType(), entry.detail(), entry.occurredAt());
+                    entry.actorEmail(),
+                    entry.actorAvatarUrl(),
+                    entry.action(),
+                    entry.targetType(),
+                    entry.detail(),
+                    entry.occurredAt());
         }
     }
 
@@ -952,81 +957,6 @@ public final class ApiDtos {
             Map<String, ClaudeUsageModelTokensRequest> byModel) {}
 
     public record ClaudeUsageIngestResponse(String action) {}
-
-    // -----------------------------------------------------------------------
-    // Integrations (ADR-037)
-    // -----------------------------------------------------------------------
-
-    /**
-     * One connected integration, without its secret — no field here can ever
-     * carry it, by construction, the same "absent from the DTO, not merely
-     * unpopulated" shape every other secret in this codebase already uses.
-     */
-    public record IntegrationResponse(
-            UUID id,
-            String provider,
-            String name,
-            String targetUrl,
-            List<String> events,
-            String status,
-            Instant lastTestedAt,
-            String lastTestStatus,
-            Instant createdAt) {
-
-        public static IntegrationResponse of(com.coc.docs.integration.Integration integration) {
-            return new IntegrationResponse(
-                    integration.id(),
-                    integration.provider(),
-                    integration.name(),
-                    integration.targetUrl(),
-                    integration.events(),
-                    integration.status(),
-                    integration.lastTestedAt(),
-                    integration.lastTestStatus(),
-                    integration.createdAt());
-        }
-    }
-
-    /**
-     * The signing secret, shown exactly once — the response shape only
-     * {@code connect} and {@code rotate-secret} return; every other
-     * integration response uses {@link IntegrationResponse}, which has no
-     * field for it at all.
-     */
-    public record IntegrationSecretResponse(IntegrationResponse integration, String signingSecret) {
-
-        public static IntegrationSecretResponse of(com.coc.docs.integration.Integration integration, String plaintextSecret) {
-            return new IntegrationSecretResponse(IntegrationResponse.of(integration), plaintextSecret);
-        }
-    }
-
-    public record ConnectIntegrationRequest(
-            @NotBlank String provider, @NotBlank String name, @NotBlank String targetUrl, @NotNull List<String> events) {}
-
-    public record UpdateIntegrationRequest(@NotBlank String name, @NotNull List<String> events) {}
-
-    /** One delivery attempt — a real event or the synthetic {@code integration.test}. */
-    public record IntegrationDeliveryResponse(
-            long id, String eventType, Integer httpStatus, boolean success, String error, Integer latencyMs, Instant attemptedAt) {
-
-        public static IntegrationDeliveryResponse of(com.coc.docs.integration.IntegrationDelivery delivery) {
-            return new IntegrationDeliveryResponse(
-                    delivery.id(),
-                    delivery.eventType(),
-                    delivery.httpStatus(),
-                    delivery.success(),
-                    delivery.error(),
-                    delivery.latencyMs(),
-                    delivery.attemptedAt());
-        }
-    }
-
-    public record TestIntegrationResponse(IntegrationDeliveryResponse result) {
-
-        public static TestIntegrationResponse of(com.coc.docs.integration.IntegrationDelivery delivery) {
-            return new TestIntegrationResponse(IntegrationDeliveryResponse.of(delivery));
-        }
-    }
 
     // -----------------------------------------------------------------------
     // Docs content meta (product docs pages' "About this document" panel)
