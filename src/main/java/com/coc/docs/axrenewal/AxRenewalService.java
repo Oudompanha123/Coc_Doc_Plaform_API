@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
@@ -44,6 +45,8 @@ public class AxRenewalService {
     private final AxRenewalCommentRepository comments;
     private final AuditRepository audit;
     private final ObjectMapper json;
+    private final LocalClaudeAnalyzer localClaude;
+    private final AxRenewalProperties properties;
 
     public AxRenewalService(
             AxRenewalProjectRepository projects,
@@ -55,7 +58,9 @@ public class AxRenewalService {
             AxRenewalImplementationRepository implementations,
             AxRenewalCommentRepository comments,
             AuditRepository audit,
-            ObjectMapper json) {
+            ObjectMapper json,
+            LocalClaudeAnalyzer localClaude,
+            AxRenewalProperties properties) {
         this.projects = projects;
         this.analyses = analyses;
         this.plan = plan;
@@ -66,6 +71,8 @@ public class AxRenewalService {
         this.comments = comments;
         this.audit = audit;
         this.json = json;
+        this.localClaude = localClaude;
+        this.properties = properties;
     }
 
     // -----------------------------------------------------------------------
@@ -187,6 +194,15 @@ public class AxRenewalService {
     @Transactional
     public AxRenewalAnalysis runAnalysis(UUID projectId, CurrentUser actor) {
         AxRenewalProject project = requireProject(projectId);
+
+        // A local Claude Code installation, where one is configured and working.
+        // Absent on every deployment and on any machine that has not opted in,
+        // which is why the keyword branch below stays -- it is the answer for
+        // everybody else, not dead code (ADR-043).
+        Optional<LocalClaudeAnalyzer.Result> local = localClaude.analyse(project);
+        if (local.isPresent()) {
+            return persistLocalAnalysis(projectId, project, local.get(), actor);
+        }
         String manifest = (project.manifestFilename() == null ? "" : project.manifestFilename().toLowerCase())
                 + " " + (project.manifestContent() == null ? "" : project.manifestContent().toLowerCase());
 
@@ -222,6 +238,62 @@ public class AxRenewalService {
 
         return analyses.find(projectId).orElseThrow();
     }
+
+    /**
+     * Stores what a local Claude Code run produced.
+     *
+     * <p>The audit entry records { modelConnected} true and, separately,
+     * whether the model actually read the source or only the stored manifest
+     * -- two different claims, and conflating them would let a manifest-only
+     * run read later as a full review of the code (ADR-043).
+     */
+    private AxRenewalAnalysis persistLocalAnalysis(
+            UUID projectId, AxRenewalProject project, LocalClaudeAnalyzer.Result result, CurrentUser actor) {
+        analyses.upsert(
+                projectId,
+                result.stackDetected(),
+                result.findings(),
+                result.pagesDetected(),
+                true,
+                actor.id());
+        if (AxRenewalProject.STATUS_DRAFT.equals(project.status())) {
+            projects.updateStatus(projectId, AxRenewalProject.STATUS_ANALYZED);
+        }
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_ANALYSIS_RUN,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode()
+                        .put("modelConnected", true)
+                        .put("engine", "local-claude-code")
+                        .put("readSource", result.readSource()));
+
+        return analyses.find(projectId).orElseThrow();
+    }
+
+    /**
+     * What the workspace should say about the analysis engine.
+     *
+     * <p>Read by the assistant panel so its banner states the truth rather
+     * than a hardcoded "no model connected" -- which was right for every
+     * deployment and wrong on a machine that has one (ADR-043).
+     */
+    public AxRenewalEngineStatus engineStatus() {
+        if (!properties.localClaudeConfigured()) {
+            return new AxRenewalEngineStatus(false, false);
+        }
+        return new AxRenewalEngineStatus(true, properties.sourcePathConfigured());
+    }
+
+    /**
+     *  connected whether a model answers Run analysis at all
+     *  readsSource whether it can see the source, or only the stored
+     *     manifest -- a real difference the UI must not blur
+     */
+    public record AxRenewalEngineStatus(boolean connected, boolean readsSource) {}
 
     // -----------------------------------------------------------------------
     // Plan — stack move

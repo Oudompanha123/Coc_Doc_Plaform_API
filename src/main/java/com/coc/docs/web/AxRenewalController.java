@@ -41,6 +41,13 @@ public class AxRenewalController {
         this.projects = projects;
     }
 
+    /** Whether Run analysis reaches a real model on this deployment (ADR-043). */
+    @GetMapping("/engine")
+    ApiDtos.AxRenewalEngineResponse engine() {
+        var status = projects.engineStatus();
+        return new ApiDtos.AxRenewalEngineResponse(status.connected(), status.readsSource());
+    }
+
     @GetMapping("/projects")
     List<ApiDtos.AxRenewalProjectResponse> list() {
         return projects.list().stream().map(ApiDtos.AxRenewalProjectResponse::of).toList();

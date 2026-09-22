@@ -1050,6 +1050,19 @@ public final class ApiDtos {
     // AX Renewal (ADR-037)
     // -----------------------------------------------------------------------
 
+    /**
+     * What the workspace says about its analysis engine (ADR-043).
+     *
+     * <p>No path, no key, no model name -- only the two facts the UI needs.
+     * A configured CLI path is a filesystem detail of somebody's machine and
+     * has no business in an API response.
+     *
+     * @param connected whether Run analysis reaches a real model
+     * @param readsSource whether that model can see the source, or only the
+     *     stored dependency manifest
+     */
+    public record AxRenewalEngineResponse(boolean connected, boolean readsSource) {}
+
     public record CreateAxRenewalProjectRequest(@NotBlank String name, String description) {}
 
     // filename is nullable, not @NotBlank: a folder with no recognized
