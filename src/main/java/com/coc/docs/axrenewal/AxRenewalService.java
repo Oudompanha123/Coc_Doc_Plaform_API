@@ -192,14 +192,16 @@ public class AxRenewalService {
      * connected, the same honest fallback the prototype this replaces used.
      */
     @Transactional
-    public AxRenewalAnalysis runAnalysis(UUID projectId, CurrentUser actor) {
+    public AxRenewalAnalysis runAnalysis(UUID projectId, boolean useModel, CurrentUser actor) {
         AxRenewalProject project = requireProject(projectId);
 
-        // A local Claude Code installation, where one is configured and working.
-        // Absent on every deployment and on any machine that has not opted in,
-        // which is why the keyword branch below stays -- it is the answer for
-        // everybody else, not dead code (ADR-043).
-        Optional<LocalClaudeAnalyzer.Result> local = localClaude.analyse(project);
+        // A local Claude Code installation, where one is configured and
+        // working, and where the caller has not asked for the keyword
+        // analysis instead. Absent on every deployment and on any machine
+        // that has not opted in, which is why the keyword branch below stays
+        // -- it is the answer for everybody else, not dead code (ADR-043).
+        Optional<LocalClaudeAnalyzer.Result> local =
+                useModel ? localClaude.analyse(project) : Optional.empty();
         if (local.isPresent()) {
             return persistLocalAnalysis(projectId, project, local.get(), actor);
         }

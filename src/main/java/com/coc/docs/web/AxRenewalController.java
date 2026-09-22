@@ -13,6 +13,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -76,10 +77,19 @@ public class AxRenewalController {
                 projects.attachManifest(projectId, request.filename(), request.content(), request.stats(), actor));
     }
 
+    /**
+     * @param useModel false to run the keyword analysis even where a local
+     *     model is configured — the "Disconnect" the workspace offers. A
+     *     per-request choice rather than a stored setting, because the
+     *     configuration it overrides is one developer's own machine
+     *     (ADR-043) and a persisted flag would outlive the reason for it.
+     */
     @PostMapping("/projects/{projectId}/analysis/run")
     ApiDtos.AxRenewalAnalysisResponse runAnalysis(
-            @PathVariable UUID projectId, @AuthenticationPrincipal CurrentUser actor) {
-        return ApiDtos.AxRenewalAnalysisResponse.of(projects.runAnalysis(projectId, actor));
+            @PathVariable UUID projectId,
+            @RequestParam(name = "useModel", defaultValue = "true") boolean useModel,
+            @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalAnalysisResponse.of(projects.runAnalysis(projectId, useModel, actor));
     }
 
     @PutMapping("/projects/{projectId}/plan/stack-move")
