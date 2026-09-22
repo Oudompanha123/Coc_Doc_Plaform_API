@@ -2,6 +2,8 @@ package com.coc.docs.axrenewal;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -84,8 +86,44 @@ public class LocalClaudeAnalyzer {
         this.json = json;
     }
 
-    /** What one run produced, or {@link Optional#empty()} if it could not run. */
-    public record Result(JsonNode stackDetected, JsonNode findings, JsonNode pagesDetected, boolean readSource) {}
+    /**
+     * What one run produced, or {@link Optional#empty()} if it could not run.
+     *
+     * @param indexed lines/routes/templates/dependencies/testCoveragePercent —
+     *     each null unless the model could point to real evidence for it. Never
+     *     a guess: {@link #prompt} tells it explicitly to leave a field null
+     *     rather than estimate.
+     * @param runningOnToday what the project visibly runs on today (not a
+     *     migration target — that stays the Plan section's own, separately
+     *     authored data), each entry an honest observation with an optional
+     *     caution note (age, lack of maintenance, and so on).
+     * @param fileLayout the directories the model actually saw under {@code
+     *     source-path}, empty unless {@code readSource} — the browser's own
+     *     attach-time scan ({@code AxRenewalProject.attachStats}) covers this
+     *     too and is preferred when both exist (it is a full scan, not
+     *     whatever subset the model chose to look at), but a project attached
+     *     before that scan existed had no such data at all, and re-attaching
+     *     is not always convenient just to see this panel — this is the same
+     *     folder, read a second way, by whichever of the two is available.
+     * @param moduleCoupling which modules import which, empty unless {@code
+     *     readSource} — tracing an import graph needs the actual source, not
+     *     just the manifest. Backs the Architecture panel's "Module coupling"
+     *     diagram; its "System context" diagram is built from data this
+     *     class already reports elsewhere ({@code stackDetected}, {@code
+     *     fileLayout}, {@code pagesDetected}). "Request lifecycle" (needs a
+     *     real timed run) and "Deployment" (needs a person describing how
+     *     they actually ship) are not things reading source can ever answer,
+     *     so nothing here attempts either.
+     */
+    public record Result(
+            JsonNode stackDetected,
+            JsonNode findings,
+            JsonNode pagesDetected,
+            JsonNode indexed,
+            JsonNode runningOnToday,
+            JsonNode fileLayout,
+            JsonNode moduleCoupling,
+            boolean readSource) {}
 
     /**
      * Asks the local model to analyse this project.
@@ -184,11 +222,65 @@ public class LocalClaudeAnalyzer {
                     parsed.path("stackDetected"),
                     parsed.path("findings"),
                     parsed.path("pagesDetected"),
+                    parsed.path("indexed"),
+                    parsed.path("runningOnToday"),
+                    normalizeFileLayout(parsed.path("fileLayout")),
+                    normalizeModuleCoupling(parsed.path("moduleCoupling")),
                     readSource));
         } catch (IOException e) {
             log.warn("local Claude analysis returned output that is not the JSON it was asked for: {}", e.getMessage());
             return Optional.empty();
         }
+    }
+
+    /**
+     * Defends the module-coupling graph the same way {@link
+     * #normalizeFileLayout} defends the directory listing — a well-shaped,
+     * empty result is the honest "nothing traced" answer, not a missing key
+     * every consumer has to separately guard against.
+     */
+    private ObjectNode normalizeModuleCoupling(JsonNode raw) {
+        ObjectNode result = json.createObjectNode();
+        JsonNode modules = raw.path("modules");
+        JsonNode edges = raw.path("edges");
+        JsonNode hubs = raw.path("hubs");
+        JsonNode cycles = raw.path("cycles");
+        result.set("modules", modules.isArray() ? modules : json.createArrayNode());
+        result.set("edges", edges.isArray() ? edges : json.createArrayNode());
+        result.set("hubs", hubs.isArray() ? hubs : json.createArrayNode());
+        result.set("cycles", cycles.isArray() ? cycles : json.createArrayNode());
+        return result;
+    }
+
+    /**
+     * Fills in the two fields the model was never asked for because it
+     * cannot meaningfully know them — {@code fileCount} (it only ever
+     * reports a curated subset, not a total it counted) and {@code
+     * truncated} (a fixed {@code false}: "truncated" describes a scan that
+     * chose to stop early, not a model that was never doing a full listing
+     * in the first place). Done here, once, so every consumer of a
+     * persisted {@code file_layout} — this frontend included — can rely on
+     * the same shape regardless of which of the two sources produced it,
+     * rather than each having to guess at what a model-authored entry
+     * omitted.
+     */
+    private ArrayNode normalizeFileLayout(JsonNode rawEntries) {
+        ArrayNode normalized = json.createArrayNode();
+        if (!rawEntries.isArray()) {
+            return normalized;
+        }
+        for (JsonNode entry : rawEntries) {
+            JsonNode files = entry.path("files");
+            ObjectNode filled = json.createObjectNode();
+            filled.put("dir", entry.path("dir").asText(""));
+            filled.put("fileCount", files.isArray() ? files.size() : 0);
+            filled.set("files", files.isArray() ? files : json.createArrayNode());
+            filled.put("truncated", false);
+            JsonNode riskFiles = entry.path("riskFiles");
+            filled.set("riskFiles", riskFiles.isArray() ? riskFiles : json.createArrayNode());
+            normalized.add(filled);
+        }
+        return normalized;
     }
 
     /**
@@ -228,7 +320,22 @@ public class LocalClaudeAnalyzer {
                 {
                   "stackDetected": { "runtime": "...", "framework": "...", "notes": "..." },
                   "findings": [ { "severity": "info|warn|risk", "what": "...", "where": "..." } ],
-                  "pagesDetected": [ { "path": "...", "purpose": "..." } ]
+                  "pagesDetected": [ { "path": "...", "purpose": "..." } ],
+                  "moduleCoupling": {
+                    "modules": ["..."],
+                    "edges": [[0, 1]],
+                    "hubs": [0],
+                    "cycles": [[2, 3]]
+                  },
+                  "indexed": {
+                    "lines": number or null,
+                    "routes": number or null,
+                    "templates": number or null,
+                    "dependencies": number or null,
+                    "testCoveragePercent": number or null
+                  },
+                  "runningOnToday": [ { "label": "...", "note": "... or null" } ],
+                  "fileLayout": [ { "dir": "...", "files": ["..."], "riskFiles": ["..."] } ]
                 }
 
                 Rules:
@@ -236,6 +343,39 @@ public class LocalClaudeAnalyzer {
                   brief. Say "none found" as a single info finding rather than inventing risks.
                 - pagesDetected: routes or screens you can actually see. Empty array if you
                   cannot see any. Never guess at a page you have not found evidence for.
+                - moduleCoupling: do this before the other sections below, while you still have
+                  budget left for it — on a real project this is the single most useful thing
+                  you can report, and it is the one most likely to get shortchanged if you leave
+                  it for last. Empty "modules"/"edges" only when the source is not available to
+                  you at all; otherwise open a representative sample of files — entry points,
+                  anything large, anything many others import — and trace their actual
+                  import/require statements. A partial graph over 15-25 files you did open beats
+                  an empty one because the project has hundreds; never infer an import you have
+                  not seen, but do not skip this because tracing every file is impractical — it
+                  never was the ask. "modules" is that sample's paths, a couple dozen at most.
+                  "edges" is pairs of indices into "modules" meaning the first imports the
+                  second. "hubs" lists indices of modules that at least three other reported
+                  modules import directly — leave it empty rather than guess if nothing in your
+                  sample clears that bar. "cycles" lists index pairs [a, b] where you saw a
+                  import b and b import a directly.
+                - indexed: every field null unless you can support it with something you
+                  actually counted or read. "lines"/"routes"/"templates" need the source
+                  available to you — leave them null on a manifest-only run. "dependencies"
+                  can come from the manifest alone. "testCoveragePercent" must come from an
+                  actual coverage report or badge you found in the project; never estimate it
+                  by guessing, and leave it null if you found no such evidence.
+                - runningOnToday: what the project visibly runs on today — runtime, framework,
+                  language, data access, UI, styling, build and test tooling you can actually
+                  see, each with a "note" only when there is something concretely worth
+                  flagging about it right now (age, lack of maintenance, a known end-of-life
+                  date). null the note otherwise. This describes the present, not a
+                  recommendation — do not suggest a target stack; that is decided elsewhere.
+                - fileLayout: empty array unless the source is available to you. Otherwise,
+                  the real top-level directories you actually looked at (a handful is enough —
+                  do not enumerate every file in a large project), each with the filenames you
+                  saw in it. "riskFiles" lists only filenames from that same "files" list that
+                  you actually found something concerning in (a hardcoded credential, for
+                  example) — empty array, not null, when nothing stood out.
                 - Do not recommend a target stack; that is a decision a person makes later.
 
                 %s

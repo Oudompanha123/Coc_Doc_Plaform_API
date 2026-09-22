@@ -225,7 +225,17 @@ public class AxRenewalService {
 
         ArrayNode pagesDetected = json.createArrayNode();
 
-        analyses.upsert(projectId, stackDetected, findings, pagesDetected, false, actor.id());
+        analyses.upsert(
+                projectId,
+                stackDetected,
+                findings,
+                pagesDetected,
+                json.createObjectNode(),
+                json.createArrayNode(),
+                json.createArrayNode(),
+                json.createObjectNode(),
+                false,
+                actor.id());
         if (AxRenewalProject.STATUS_DRAFT.equals(project.status())) {
             projects.updateStatus(projectId, AxRenewalProject.STATUS_ANALYZED);
         }
@@ -256,6 +266,10 @@ public class AxRenewalService {
                 result.stackDetected(),
                 result.findings(),
                 result.pagesDetected(),
+                result.indexed(),
+                result.runningOnToday(),
+                result.fileLayout(),
+                result.moduleCoupling(),
                 true,
                 actor.id());
         if (AxRenewalProject.STATUS_DRAFT.equals(project.status())) {

@@ -1056,6 +1056,10 @@ public final class ApiDtos {
             JsonNode stackDetected,
             JsonNode findings,
             JsonNode pagesDetected,
+            JsonNode indexed,
+            JsonNode runningOnToday,
+            JsonNode fileLayout,
+            JsonNode moduleCoupling,
             boolean modelConnected,
             Instant analyzedAt) {
 
@@ -1064,6 +1068,10 @@ public final class ApiDtos {
                     analysis.stackDetected(),
                     analysis.findings(),
                     analysis.pagesDetected(),
+                    analysis.indexed(),
+                    analysis.runningOnToday(),
+                    analysis.fileLayout(),
+                    analysis.moduleCoupling(),
                     analysis.modelConnected(),
                     analysis.analyzedAt());
         }
