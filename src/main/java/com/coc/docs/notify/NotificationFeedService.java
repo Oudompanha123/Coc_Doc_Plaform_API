@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Stream;
 import org.springframework.stereotype.Service;
 
@@ -82,8 +83,37 @@ public class NotificationFeedService {
         this.hrms = hrms;
     }
 
-    /** One line in the feed. {@code actorEmail} is null when the actor was the system. */
-    public record FeedItem(String id, String actorEmail, String summary, Instant occurredAt) {}
+    /**
+     * One line in the feed. {@code actorEmail} is null when the actor was the
+     * system.
+     *
+     * <p>{@code actionType}/{@code targetType}/{@code targetId} are the same
+     * {@code audit_log} columns {@code summary} was already built from —
+     * carried through rather than duplicated, per {@code audit_log}'s existing
+     * {@code target_type}/{@code target_id} columns (no new storage). {@code
+     * href} is the one field this class computes rather than copies: where in
+     * this app that target actually opens, decided here so the client never
+     * has to guess a route from an id, and gated by role so it is never
+     * offered to a caller who could not reach it anyway (NFR-SEC-PII). Null on
+     * every field a caller cannot act on — including every {@code page}
+     * target today, because no page editor exists in this frontend yet (see
+     * {@link #hrefFor}).
+     *
+     * <p>{@code actorAvatarUrl} is likewise carried straight through from
+     * {@code AuditEntry} (itself a live join, not a stored column — see that
+     * record's javadoc); null whenever the actor has no picture, has been
+     * deleted, or the row has no actor at all (an HRMS arrival).
+     */
+    public record FeedItem(
+            String id,
+            String actorEmail,
+            String actorAvatarUrl,
+            String summary,
+            Instant occurredAt,
+            String actionType,
+            String targetType,
+            UUID targetId,
+            String href) {}
 
     /**
      * The feed for {@code caller}, newest first.
@@ -107,7 +137,7 @@ public class NotificationFeedService {
 
         Stream<FeedItem> activity = rows.stream()
                 .filter(entry -> !HIDDEN_ACTIONS.contains(entry.action()))
-                .map(NotificationFeedService::toItem);
+                .map(entry -> toItem(entry, caller));
 
         // Merged and re-sorted rather than appended: the two sources are each
         // newest-first on their own, and concatenating them would put a
@@ -152,13 +182,63 @@ public class NotificationFeedService {
         return new FeedItem(
                 HRMS_ID_PREFIX + notification.id(),
                 null,
+                null,
                 notification.summary(),
-                notification.receivedAt());
+                notification.receivedAt(),
+                null,
+                null,
+                null,
+                null);
     }
 
-    private static FeedItem toItem(AuditEntry entry) {
+    private static FeedItem toItem(AuditEntry entry, CurrentUser caller) {
         return new FeedItem(
-                Long.toString(entry.id()), entry.actorEmail(), summaryFor(entry), entry.occurredAt());
+                Long.toString(entry.id()),
+                entry.actorEmail(),
+                entry.actorAvatarUrl(),
+                summaryFor(entry),
+                entry.occurredAt(),
+                entry.action(),
+                entry.targetType(),
+                entry.targetId(),
+                hrefFor(entry, caller));
+    }
+
+    /**
+     * Where {@code entry}'s target actually opens in this app, or null when
+     * there is nowhere to send the reader — either because this deployment
+     * has no destination for that target type yet, or because {@code caller}
+     * could not open it even if there were one.
+     *
+     * <p><b>Only {@code account} resolves today.</b> {@code page} carries a
+     * real {@code target_id} (the {@code page}/{@code page_version} tables and
+     * {@code AdminContentController} both exist), but no frontend route opens
+     * one — there is no page editor and no reader page keyed by page id
+     * anywhere in this codebase yet, confirmed by grep. Returning a link to a
+     * page that does not exist would be worse than returning none, so a
+     * {@code page} target is deliberately left with no {@code href} until an
+     * editor exists to send someone to.
+     *
+     * <p>Gated on role here, not left to the destination to refuse, for the
+     * same reason {@code SecurityConfig} puts {@code /users-roles} and
+     * {@code /api/v1/admin/accounts/**} at {@code super_admin}: an account
+     * target is exactly the class of thing NFR-SEC-PII exists to keep off a
+     * lower-privileged screen, and a caller who could never reach
+     * {@code /users-roles} should not be handed a link to it, even a dead one.
+     *
+     * <p>Does not check that the target still exists — an account or page can
+     * be deleted after the audit row was written and before anyone reads this
+     * feed, and a query per feed row to guard against that race would not
+     * even close it. The destination itself is what has to answer "not found"
+     * gracefully; see {@code UsersRolesPage}'s {@code highlight} handling.
+     */
+    private static String hrefFor(AuditEntry entry, CurrentUser caller) {
+        if (AuditAction.TARGET_ACCOUNT.equals(entry.targetType())
+                && entry.targetId() != null
+                && caller.isAtLeast(AppRole.SUPER_ADMIN)) {
+            return "/users-roles?highlight=" + entry.targetId();
+        }
+        return null;
     }
 
     /**

@@ -604,12 +604,42 @@ public final class ApiDtos {
      * {@code NotificationFeedService}'s note on why unread state would need a
      * table of its own.
      *
+     * <p>{@code actionType}/{@code targetType}/{@code targetId} are the same
+     * {@code audit_log} row {@code summary} already reads, exposed rather than
+     * duplicated so a client can tell what kind of thing happened without
+     * parsing the English sentence. {@code href}, unlike the other three, is
+     * frequently null: see {@code NotificationFeedService.hrefFor} for when it
+     * is populated and why it deliberately is not for every target type yet.
+     *
+     * <p>{@code actorAvatarUrl} is the actor's <em>current</em> picture, read
+     * live rather than stored — null for no picture, a deleted account, or no
+     * actor at all (an HRMS report arrival). No more sensitive than
+     * {@code actorEmail}, which this response already carries.
+     *
      * <p>// req: FR-OPS-001, NFR-SEC-PII
      */
-    public record NotificationItem(String id, String actorEmail, String summary, Instant occurredAt) {
+    public record NotificationItem(
+            String id,
+            String actorEmail,
+            String actorAvatarUrl,
+            String summary,
+            Instant occurredAt,
+            String actionType,
+            String targetType,
+            UUID targetId,
+            String href) {
 
         public static NotificationItem of(NotificationFeedService.FeedItem item) {
-            return new NotificationItem(item.id(), item.actorEmail(), item.summary(), item.occurredAt());
+            return new NotificationItem(
+                    item.id(),
+                    item.actorEmail(),
+                    item.actorAvatarUrl(),
+                    item.summary(),
+                    item.occurredAt(),
+                    item.actionType(),
+                    item.targetType(),
+                    item.targetId(),
+                    item.href());
         }
     }
 
