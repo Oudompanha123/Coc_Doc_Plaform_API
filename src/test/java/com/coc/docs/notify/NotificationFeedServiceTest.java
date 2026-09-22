@@ -195,14 +195,24 @@ class NotificationFeedServiceTest {
          * Not a confidentiality rule — the subject names nobody. An editor has
          * no use for an operational notice about a mailbox, and the feed is
          * more useful for not carrying it.
+         *
+         * <p><b>That floor is gone (ADR-042).</b> This test asserted the
+         * opposite until the attendance popup was added: a report row can now
+         * be opened to show the table, and the PM decided every role should
+         * see it. The test is rewritten rather than deleted so the change is
+         * legible here — a vanished test looks like an oversight, an inverted
+         * one looks like a decision.
          */
         @Test
-        @DisplayName("do not appear below the admin floor")
-        void editorDoesNotSeeThem() {
+        @DisplayName("appear for every signed-in role, including a plain user")
+        void everyRoleSeesThem() {
             CurrentUser caller = TestCallers.user(AppRole.USER);
+            when(hrms.recent(anyInt()))
+                    .thenReturn(List.of(report(7, "Attendance on 08-Sep-2026", Instant.now())));
 
-            assertThat(service.feedFor(caller, 20)).isEmpty();
-            verify(hrms, never()).recent(anyInt());
+            assertThat(service.feedFor(caller, 20))
+                    .extracting(NotificationFeedService.FeedItem::summary)
+                    .containsExactly("Attendance on 08-Sep-2026");
         }
 
         /**

@@ -4,12 +4,15 @@ import jakarta.mail.FetchProfile;
 import jakarta.mail.Folder;
 import jakarta.mail.Message;
 import jakarta.mail.MessagingException;
+import jakarta.mail.Multipart;
+import jakarta.mail.Part;
 import jakarta.mail.Session;
 import jakarta.mail.Store;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.search.AndTerm;
 import jakarta.mail.search.ComparisonTerm;
 import jakarta.mail.search.FromTerm;
+import jakarta.mail.search.HeaderTerm;
 import jakarta.mail.search.SearchTerm;
 import jakarta.mail.search.SentDateTerm;
 import java.time.Instant;
@@ -123,6 +126,84 @@ public class HrmsImapMailbox implements HrmsMailbox {
             closeQuietly(folder);
             closeQuietly(store);
         }
+    }
+
+    /**
+     * One message's HTML body, found by {@code Message-ID}.
+     *
+     * <p>Searched by header rather than kept as a folder index: an IMAP
+     * sequence number is only valid for the session that saw it, and the
+     * notification row it comes from may be weeks old.
+     *
+     * <p>The sender term is ANDed in even though the id is unique. The id
+     * arrives from a URL, and a caller who guessed one belonging to another
+     * mail in the same box must not be handed it — the sender filter is what
+     * makes this method able to return only HRMS reports, whatever it is
+     * asked for.
+     *
+     * <p>{@link Folder#READ_ONLY} here too, so opening a report in this
+     * platform does not mark it read in somebody's Gmail.
+     */
+    @Override
+    public Optional<String> htmlBodyOf(String messageId) {
+        if (!properties.usable() || messageId == null || messageId.isBlank()) {
+            return Optional.empty();
+        }
+
+        Store store = null;
+        Folder folder = null;
+        try {
+            store = Session.getInstance(sessionProperties()).getStore("imaps");
+            store.connect(properties.host(), properties.port(), properties.username(), properties.password());
+
+            folder = store.getFolder(properties.folder());
+            if (!folder.exists()) {
+                return Optional.empty();
+            }
+            folder.open(Folder.READ_ONLY);
+
+            Message[] found = folder.search(new AndTerm(
+                    new FromTerm(new InternetAddress(properties.sender())),
+                    new HeaderTerm("Message-ID", messageId.trim())));
+
+            if (found.length == 0) {
+                // Deleted from the mailbox since it was recorded. The
+                // notification row outlives the mail, so this is ordinary.
+                log.debug("HRMS: no message with the requested id is still in {}", properties.folder());
+                return Optional.empty();
+            }
+            return Optional.ofNullable(htmlPartOf(found[0]));
+
+        } catch (MessagingException | java.io.IOException e) {
+            log.warn("HRMS: could not read a report body ({})", e.getMessage());
+            return Optional.empty();
+        } finally {
+            closeQuietly(folder);
+            closeQuietly(store);
+        }
+    }
+
+    /**
+     * The {@code text/html} part, depth-first.
+     *
+     * <p>These reports arrive {@code multipart/MIXED} wrapping a
+     * {@code multipart/ALTERNATIVE}, so the HTML is two levels down and a flat
+     * look at the top-level parts finds only the plain-text alternative.
+     */
+    private static String htmlPartOf(Part part) throws MessagingException, java.io.IOException {
+        if (part.isMimeType("text/html")) {
+            Object content = part.getContent();
+            return content instanceof String html ? html : null;
+        }
+        if (part.isMimeType("multipart/*") && part.getContent() instanceof Multipart parts) {
+            for (int i = 0; i < parts.getCount(); i++) {
+                String html = htmlPartOf(parts.getBodyPart(i));
+                if (html != null) {
+                    return html;
+                }
+            }
+        }
+        return null;
     }
 
     /**

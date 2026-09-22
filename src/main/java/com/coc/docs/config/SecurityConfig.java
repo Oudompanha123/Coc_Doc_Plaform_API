@@ -208,7 +208,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/notifications/inbox/**")
                         .hasRole(AppRole.USER.name())
 
-                        // The caller's own notification preferences (ADR-041).
+                        // The caller's own notification preferences (ADR-042).
                         // Same reasoning as the inbox rule above: every role
                         // can receive some notification type, and the account
                         // is the resolved caller's, never one from the URL, so
@@ -235,6 +235,28 @@ public class SecurityConfig {
                         // super_admin rule further down. Nothing here touches it.
                         // // req: FR-OPS-001, FR-AUTH-008, NFR-SEC-PII
                         .requestMatchers(HttpMethod.GET, "/api/v1/notifications")
+                        .hasRole(AppRole.USER.name())
+
+                        // One HRMS attendance report, fetched from the mailbox on
+                        // the request and never stored (ADR-042).
+                        //
+                        // Needs a line of its own because the matcher above is
+                        // exact-path: without this, the route would fall through to
+                        // anyRequest() rather than inherit the neighbour it looks
+                        // like it belongs to.
+                        //
+                        // THE FLOOR IS DELIBERATE AND IT IS LOW. This response
+                        // carries ~60 colleagues' check-in and check-out times --
+                        // the only route in this chain that returns personal data
+                        // about people who are not users of this system. Every
+                        // other PII-bearing route here is super_admin, and
+                        // NotificationFeedService used to say that if this content
+                        // ever named people the floor must move UP. The PM decided
+                        // the other way; ADR-042 records that, with what it weighed.
+                        // Anyone narrowing this later needs to read that ADR first,
+                        // not just this comment.
+                        // // req: FR-OPS-001, NFR-SEC-PII
+                        .requestMatchers(HttpMethod.GET, "/api/v1/notifications/hrms/*")
                         .hasRole(AppRole.USER.name())
 
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()

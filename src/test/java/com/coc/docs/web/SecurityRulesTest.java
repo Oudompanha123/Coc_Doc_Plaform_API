@@ -91,6 +91,9 @@ class SecurityRulesTest {
     // what the digest does — that is ActivityDigestServiceTest's job.
     @MockitoBean com.coc.docs.notify.ActivityDigestService activityDigestService;
 
+    /** NotificationFeedController's second collaborator, behind GET /notifications/hrms/{id} (ADR-042). */
+    @MockitoBean com.coc.docs.notify.HrmsNotificationService hrmsNotificationService;
+
     // AdminAuditController is in this slice too, same reasoning.
     @MockitoBean com.coc.docs.audit.AuditRepository auditRepository;
 
@@ -132,7 +135,7 @@ class SecurityRulesTest {
     // what they return. NotificationPersistenceTest owns the rows.
     @MockitoBean com.coc.docs.notify.NotificationInboxService notificationInboxService;
 
-    // NotificationPreferenceController is in this slice too (ADR-041). This
+    // NotificationPreferenceController is in this slice too (ADR-042). This
     // class asserts which routes the filter chain admits, not what a
     // preference does — NotificationPreferenceRepositoryIntegrationTest and
     // NotificationServiceTest own that.
@@ -880,7 +883,7 @@ class SecurityRulesTest {
     }
 
     @Nested
-    @DisplayName("notification preferences (ADR-041)")
+    @DisplayName("notification preferences (ADR-042)")
     class NotificationPreferences {
 
         @ParameterizedTest

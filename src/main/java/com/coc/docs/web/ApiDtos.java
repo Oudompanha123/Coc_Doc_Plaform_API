@@ -22,6 +22,7 @@ import com.coc.docs.page.PageRepository;
 import com.coc.docs.page.PageService;
 import com.coc.docs.page.PageVersion;
 import com.coc.docs.notify.ActivityDigestService;
+import com.coc.docs.notify.HrmsMailContent;
 import com.coc.docs.notify.NotificationFeedService;
 import com.coc.docs.page.PageVersionRepository;
 import com.coc.docs.section.Section;
@@ -643,6 +644,72 @@ public final class ApiDtos {
         }
     }
 
+    /**
+     * One HRMS attendance report, as the popup that opens over the feed row
+     * renders it.
+     *
+     * <p>Built from a mail fetched on the click and never stored — see
+     * {@code HrmsNotificationService.report} and ADR-042. This is the only DTO
+     * in this file carrying other people's personal data, and it is the only
+     * one that must never end up in a cache header, a log line or a second
+     * table.
+     */
+    public record HrmsMailContentResponse(
+            String subject,
+            LocalDate reportDate,
+            String department,
+            List<HrmsAttendanceRow> rows,
+            List<HrmsMailDetail> details,
+            String note) {
+
+        public static HrmsMailContentResponse of(HrmsMailContent report) {
+            return new HrmsMailContentResponse(
+                    report.subject(),
+                    report.reportDate(),
+                    report.department(),
+                    report.rows().stream().map(HrmsAttendanceRow::of).toList(),
+                    report.details().stream().map(HrmsMailDetail::of).toList(),
+                    report.note());
+        }
+    }
+
+    /**
+     * One labelled field from an HRMS mail that is not an attendance report —
+     * a leave or overtime request, an account created, a password reset. Those
+     * are most of what the sender sends, and the popup rendered every one of
+     * them as "could not be read" until this existed.
+     */
+    public record HrmsMailDetail(String label, String value) {
+
+        static HrmsMailDetail of(HrmsMailContent.Detail detail) {
+            return new HrmsMailDetail(detail.label(), detail.value());
+        }
+    }
+
+    /** One person's line in the report above. */
+    public record HrmsAttendanceRow(
+            String name, HrmsAttendanceCheck yesterdayCheckOut, HrmsAttendanceCheck todayCheckIn) {
+
+        static HrmsAttendanceRow of(HrmsMailContent.Row row) {
+            return new HrmsAttendanceRow(
+                    row.name(),
+                    HrmsAttendanceCheck.of(row.yesterdayCheckOut()),
+                    HrmsAttendanceCheck.of(row.todayCheckIn()));
+        }
+    }
+
+    /**
+     * One check: the scheduled time, what actually happened, and HRMS's word
+     * for the difference. Strings throughout — see {@code
+     * HrmsMailContent.Entry} for why these are never parsed to times.
+     */
+    public record HrmsAttendanceCheck(String scheduled, String actual, String status) {
+
+        static HrmsAttendanceCheck of(HrmsMailContent.Entry entry) {
+            return new HrmsAttendanceCheck(entry.scheduled(), entry.actual(), entry.status());
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Audit / activity
     // -----------------------------------------------------------------------
@@ -712,7 +779,7 @@ public final class ApiDtos {
     public record NotificationInboxResponse(List<NotificationResponse> items, int unreadCount) {}
 
     /**
-     * One of the caller's own notification preferences (ADR-041).
+     * One of the caller's own notification preferences (ADR-042).
      *
      * <p>{@code enabled} always reflects the opt-out-by-absence default — the
      * client never has to know whether a stored row exists, only whether this

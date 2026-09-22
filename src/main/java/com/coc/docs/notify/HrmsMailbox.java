@@ -2,6 +2,7 @@ package com.coc.docs.notify;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * The one thing this feature needs from a mailbox: what has arrived from one
@@ -57,4 +58,26 @@ public interface HrmsMailbox {
      * covers both "no new mail" and "could not look".
      */
     List<Arrival> arrivalsSince(Instant since);
+
+    /**
+     * The HTML body of one message, fetched on demand.
+     *
+     * <p><b>This is the exception to "envelopes, not mail" above, and it is a
+     * narrow one.</b> Polling still never reads a body: this is called only
+     * when a person opens one report, for that one message, and what comes
+     * back is parsed, sent to them, and dropped. Nothing writes it down —
+     * {@code V21__hrms_notification.sql} keeps the body out of the database and
+     * that has not changed. {@code ADR-042} records the decision.
+     *
+     * <p>Empty when the message cannot be found or read: it may have been
+     * deleted from the mailbox since it was recorded, which is ordinary rather
+     * than exceptional — the notification row outlives the mail. Callers show
+     * "could not read it" and leave the row alone.
+     *
+     * <p>Never throws, for the same reason {@link #arrivalsSince} does not.
+     *
+     * @param messageId the RFC 5322 {@code Message-ID} recorded when the
+     *     arrival was first seen
+     */
+    Optional<String> htmlBodyOf(String messageId);
 }

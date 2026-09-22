@@ -135,6 +135,40 @@ public class HrmsNotificationService {
     }
 
     /**
+     * One report's contents, fetched from the mailbox on demand.
+     *
+     * <p><b>Read, shown, dropped.</b> Nothing here writes the body anywhere:
+     * not to {@code hrms_notification}, which {@code V21} keeps deliberately
+     * narrow, not to {@code audit_log}, and not to a log line. The row in the
+     * database still holds only a subject, a date and an arrival time; this
+     * method is the one path by which the rest of the report is ever visible,
+     * and it exists for exactly as long as the response does. {@code ADR-042}
+     * has the decision and what it weighed.
+     *
+     * <p>Costs one IMAP connection per call, which is why nothing calls it on
+     * a schedule and the poll still reads envelopes only. A person opening a
+     * report is a deliberate act and can wait for a round trip; a background
+     * job doing it sixty times a day would be the mailbox being mined.
+     *
+     * @return empty when the notification is unknown, when the mail is no
+     *     longer in the mailbox, or when the mailbox cannot be reached. The
+     *     caller cannot tell these apart and should not: all three mean "not
+     *     available now", and distinguishing them would tell an unauthorised
+     *     caller which ids exist.
+     */
+    public Optional<HrmsMailContent> report(long id) {
+        if (!properties.usable()) {
+            return Optional.empty();
+        }
+        return repository
+                .findById(id)
+                .flatMap(notification -> mailbox
+                        .htmlBodyOf(notification.messageId())
+                        .map(html -> HrmsReportParser.parse(
+                                notification.subject(), notification.reportDate(), html)));
+    }
+
+    /**
      * Deletes arrivals past the retention window.
      *
      * @return how many rows went

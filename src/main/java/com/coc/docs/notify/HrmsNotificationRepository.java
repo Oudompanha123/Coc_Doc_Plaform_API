@@ -54,6 +54,13 @@ public class HrmsNotificationRepository {
             limit ?
             """;
 
+    private static final String BY_ID_SQL =
+            """
+            select id, message_id, subject, report_date, received_at
+            from hrms_notification
+            where id = ?
+            """;
+
     /**
      * The newest arrival's send time — where the next poll starts from.
      *
@@ -91,6 +98,18 @@ public class HrmsNotificationRepository {
     /** The most recent arrivals, newest first. */
     public List<HrmsNotification> recent(int limit) {
         return jdbc.sql(RECENT_SQL).param(limit).query(HrmsNotificationRepository::map).list();
+    }
+
+    /**
+     * One arrival by its surrogate key.
+     *
+     * <p>What the report view starts from: the row holds the {@code
+     * message_id}, which is the only thing that can find the mail again.
+     * Empty when the row has been pruned past the retention window, which the
+     * caller reports as "no longer available" rather than as an error.
+     */
+    public Optional<HrmsNotification> findById(long id) {
+        return jdbc.sql(BY_ID_SQL).param(id).query(HrmsNotificationRepository::map).optional();
     }
 
     /** When the newest recorded arrival was sent, if there is one. */
