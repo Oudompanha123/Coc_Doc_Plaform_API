@@ -161,6 +161,9 @@ public final class AuditAction {
      */
     public static final String INTEGRATION_DISCONNECT = "integration.disconnect";
 
+    /** A disconnected integration's row was re-activated with a freshly issued signing secret — never a new row. */
+    public static final String INTEGRATION_RECONNECT = "integration.reconnect";
+
     public static final String TARGET_INTEGRATION = "integration";
 
     public static final String TARGET_AX_RENEWAL_PROJECT = "ax_renewal_project";

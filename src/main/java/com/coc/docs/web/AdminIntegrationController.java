@@ -86,6 +86,13 @@ public class AdminIntegrationController {
         return ApiDtos.IntegrationSecretResponse.of(rotated.integration(), rotated.plaintextSecret());
     }
 
+    /** Re-activates a disconnected row in place, with a freshly issued secret — never a new row. */
+    @PostMapping("/{id}/reconnect")
+    ApiDtos.IntegrationSecretResponse reconnect(@PathVariable UUID id, @AuthenticationPrincipal CurrentUser actor) {
+        IntegrationService.Reconnected reconnected = integrations.reconnect(id, actor);
+        return ApiDtos.IntegrationSecretResponse.of(reconnected.integration(), reconnected.plaintextSecret());
+    }
+
     /** Disconnects — never deletes the row. See {@code Integration}'s Javadoc. */
     @DeleteMapping("/{id}")
     ApiDtos.IntegrationResponse disconnect(@PathVariable UUID id, @AuthenticationPrincipal CurrentUser actor) {

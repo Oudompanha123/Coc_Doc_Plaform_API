@@ -194,6 +194,41 @@ public class IntegrationService {
         return require(id);
     }
 
+    public record Reconnected(Integration integration, String plaintextSecret) {}
+
+    /**
+     * Re-activates a disconnected integration's own row (same provider,
+     * target URL, name and events) with a freshly issued secret — the old
+     * one was nulled at disconnect time and cannot be recovered, so there is
+     * no "restore" here, only a new secret on the same identity and delivery
+     * history.
+     *
+     * @throws ApiException 409 when the integration is already connected;
+     *     503 when encryption is unconfigured
+     */
+    @Transactional
+    public Reconnected reconnect(UUID id, CurrentUser actor) {
+        requireEncryptionConfigured();
+        Integration existing = require(id);
+        if (existing.isConnected()) {
+            throw ApiException.conflict("this integration is already connected");
+        }
+
+        String plaintextSecret = generateSecret();
+        SecretBox.Encrypted encrypted = secretBox.encrypt(plaintextSecret);
+        integrations.reconnect(id, encrypted.iv(), encrypted.ciphertext(), CURRENT_KEY_VERSION);
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.INTEGRATION_RECONNECT,
+                AuditAction.TARGET_INTEGRATION,
+                id,
+                jsonb.mapper().createObjectNode().put("subject", existing.name()));
+
+        return new Reconnected(require(id), plaintextSecret);
+    }
+
     // -----------------------------------------------------------------------
     // Real-event fan-out — called from IntegrationRegisteredListener
     // -----------------------------------------------------------------------

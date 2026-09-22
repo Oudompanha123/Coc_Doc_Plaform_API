@@ -143,6 +143,18 @@ public class IntegrationRepository {
                 .update();
     }
 
+    /** Reconnect: status back to {@code connected} + a freshly issued secret, in one statement — the mirror of {@link #disconnect}. */
+    public void reconnect(UUID id, byte[] signingSecretIv, byte[] signingSecretCiphertext, short encryptionKeyVersion) {
+        jdbc.sql("""
+                        update integration
+                        set status = ?, signing_secret_iv = ?, signing_secret_ciphertext = ?,
+                            encryption_key_version = ?, updated_at = now()
+                        where id = ?
+                        """)
+                .params(Integration.STATUS_CONNECTED, signingSecretIv, signingSecretCiphertext, encryptionKeyVersion, id)
+                .update();
+    }
+
     public void recordTestResult(UUID id, String testStatus) {
         jdbc.sql("update integration set last_tested_at = now(), last_test_status = ? where id = ?")
                 .params(testStatus, id)

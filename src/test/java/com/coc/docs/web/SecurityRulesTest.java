@@ -19,6 +19,7 @@ import com.coc.docs.config.SecurityConfig;
 import com.coc.docs.content.BlockBodyValidator;
 import com.coc.docs.docscontent.DocsContentService;
 import com.coc.docs.integration.Integration;
+import com.coc.docs.integration.IntegrationService;
 import com.coc.docs.nav.NavProduct;
 import com.coc.docs.nav.NavService;
 import com.coc.docs.page.PageService;
@@ -735,6 +736,28 @@ class SecurityRulesTest {
                     .thenReturn(disabled);
 
             mvc.perform(delete("/api/v1/admin/integrations/" + id).with(as(AppRole.SUPER_ADMIN)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void reconnecting_refuses_an_admin() throws Exception {
+            // Same "touches credentials" floor as connect/rotate/disconnect —
+            // reconnecting issues a fresh signing secret.
+            mvc.perform(post("/api/v1/admin/integrations/" + UUID.randomUUID() + "/reconnect").with(as(AppRole.ADMIN)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void reconnecting_admits_a_super_admin() throws Exception {
+            UUID id = UUID.randomUUID();
+            Instant now = Instant.now();
+            Integration reconnected = new Integration(
+                    id, "webhook", "x", "https://example.com", new byte[12], new byte[16], (short) 1,
+                    List.of("account.registered"), "connected", null, null, null, now, now);
+            Mockito.when(integrationService.reconnect(ArgumentMatchers.eq(id), ArgumentMatchers.any()))
+                    .thenReturn(new IntegrationService.Reconnected(reconnected, "whsec_test"));
+
+            mvc.perform(post("/api/v1/admin/integrations/" + id + "/reconnect").with(as(AppRole.SUPER_ADMIN)))
                     .andExpect(status().isOk());
         }
     }
