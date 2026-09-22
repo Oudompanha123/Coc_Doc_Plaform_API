@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -148,8 +149,18 @@ public class SessionService {
      */
     public sealed interface PasswordSignInResult permits IssuedSession, MfaRequired {}
 
-    /** An issued session: the plaintext token, which exists only here and in the response. */
-    public record IssuedSession(String token, Account account, Instant expiresAt) implements PasswordSignInResult {}
+    /**
+     * An issued session: the plaintext token, which exists only here and in
+     * the response.
+     *
+     * <p>{@code deactivationCancelled} (revision of ADR-042): true when this
+     * sign-in itself just cancelled a pending self-service deactivation —
+     * {@code AuthController} surfaces it on {@code MeResponse} so the
+     * frontend can tell the caller their account is no longer scheduled to
+     * deactivate, rather than that being silently true.
+     */
+    public record IssuedSession(String token, Account account, Instant expiresAt, boolean deactivationCancelled)
+            implements PasswordSignInResult {}
 
     /**
      * The password was correct, but this account has confirmed TOTP
@@ -299,6 +310,7 @@ public class SessionService {
                 existing.avatarUploadedAt(),
                 existing.status(),
                 existing.deactivatedAt(),
+                existing.deactivationScheduledFor(),
                 existing.createdAt(),
                 existing.updatedAt(),
                 existing.mustChangePassword(),
@@ -677,7 +689,14 @@ public class SessionService {
                     issuedAt));
         }
 
-        return new IssuedSession(token, account, expiresAt);
+        // Every sign-in path funnels through here (see the class javadoc
+        // above), which is exactly why this is the one place a pending
+        // self-service deactivation gets cancelled rather than duplicating
+        // the check into signIn/signInWithPassword/issueForAccount
+        // separately (revision of ADR-042).
+        boolean deactivationCancelled = cancelScheduledDeactivationOnSignIn(account);
+
+        return new IssuedSession(token, account, expiresAt, deactivationCancelled);
     }
 
     // -----------------------------------------------------------------------
@@ -842,6 +861,150 @@ public class SessionService {
         }
         accounts.clearUploadedAvatar(existing.id());
         return accounts.findById(existing.id()).orElseThrow();
+    }
+
+    // -----------------------------------------------------------------------
+    // Self-service deactivation, with a grace period (revision of ADR-042)
+    // -----------------------------------------------------------------------
+
+    /**
+     * The only grace periods the confirm panel offers, in days. A fixed set
+     * rather than free-form input: the Danger zone panel is presets, not a
+     * number field, and this is what the request handler validates a caller's
+     * choice against.
+     */
+    public static final Set<Integer> DEACTIVATION_GRACE_PERIOD_DAYS_OPTIONS = Set.of(3, 7, 14, 30);
+
+    /**
+     * Schedules the caller's own account to deactivate after {@code
+     * graceDays} — Settings &rarr; Danger zone.
+     *
+     * <p>Deliberately its own method rather than a relaxed {@code
+     * AccountService.setActive}: that one is a {@code super_admin} acting on
+     * someone else's account and keeps refusing a self-target unconditionally
+     * (ADR-042). This one exists to be exactly the case that refuses —
+     * genuine, confirmed self-service, not a misclick, so the guard it needs
+     * is different: not "never", but "never if it would lock everyone out."
+     *
+     * <p>Does not set {@code deactivated_at} itself. It stamps {@code
+     * deactivation_scheduled_for} instead, so the account stays {@link
+     * Account#isActive()} until either {@link
+     * com.coc.docs.account.AccountRepository#finalizeScheduledDeactivation}
+     * sweeps it once the time is reached ({@code ScheduledDeactivationSweeper})
+     * or {@link #issue} cancels it first because its owner signed back in.
+     *
+     * <p>Every session for the account is revoked right away regardless, not
+     * only the one making this call — matching {@code
+     * AccountService.setActive}'s existing behaviour and the "signed out
+     * everywhere now" the frontend's confirmation panel states before this is
+     * ever called. Signing back in during the grace period is exactly what
+     * cancels the schedule, so it has to actually require signing back in
+     * (Google or password, whichever this account uses) rather than resuming
+     * whatever session was live a moment ago.
+     *
+     * <p>// req: FR-AUTH-003, FR-AUTH-007, ADR-042
+     */
+    @Transactional
+    public Instant deactivateSelf(CurrentUser caller, int graceDays) {
+        if (!DEACTIVATION_GRACE_PERIOD_DAYS_OPTIONS.contains(graceDays)) {
+            throw ApiException.badRequest("choose one of: " + DEACTIVATION_GRACE_PERIOD_DAYS_OPTIONS);
+        }
+        Account account = caller.account();
+        if (account.role() == AppRole.SUPER_ADMIN && accounts.isLastActiveSuperAdmin(account.id())) {
+            throw ApiException.conflict(
+                    "you're the only active super admin; promote someone else before deactivating your account");
+        }
+
+        Instant scheduledFor = clock.instant().plus(Duration.ofDays(graceDays));
+        accounts.scheduleDeactivation(account.id(), scheduledFor);
+        int revoked = revokeAllFor(account.id());
+
+        audit.append(
+                account.id(),
+                account.email(),
+                AuditAction.ACCOUNT_DEACTIVATE_SCHEDULE,
+                AuditAction.TARGET_ACCOUNT,
+                account.id(),
+                json.createObjectNode()
+                        .put("subject", account.email())
+                        .put("graceDays", graceDays)
+                        .put("scheduledFor", scheduledFor.toString())
+                        .put("sessionsRevoked", revoked)
+                        .put("selfService", true));
+
+        return scheduledFor;
+    }
+
+    /**
+     * Cancels a pending self-service deactivation because its owner signed
+     * back in before it took effect (revision of ADR-042) — called from
+     * {@link #issue}, the one place every sign-in path converges, so Google,
+     * password and password+TOTP sign-ins all cancel it the same way.
+     *
+     * <p>No-ops (and audits nothing) when nothing was pending, which is the
+     * overwhelmingly common case — {@code
+     * AccountRepository.cancelScheduledDeactivation}'s row count is the only
+     * way to tell the two apart without an extra read.
+     */
+    private boolean cancelScheduledDeactivationOnSignIn(Account account) {
+        if (account.deactivationScheduledFor() == null) {
+            return false;
+        }
+        boolean cancelled = accounts.cancelScheduledDeactivation(account.id()) > 0;
+        if (cancelled) {
+            audit.append(
+                    account.id(),
+                    account.email(),
+                    AuditAction.ACCOUNT_DEACTIVATE_CANCEL,
+                    AuditAction.TARGET_ACCOUNT,
+                    account.id(),
+                    json.createObjectNode().put("subject", account.email()).put("selfService", true));
+        }
+        return cancelled;
+    }
+
+    /**
+     * Finalizes every self-service deactivation whose grace period has
+     * passed without a cancelling sign-in — {@code
+     * ScheduledDeactivationSweeper}'s worklist (revision of ADR-042).
+     *
+     * <p>Revokes sessions again before finalizing, even though scheduling
+     * already revoked every session that existed at that moment: nothing
+     * should have created a new one since (a sign-in would have cancelled
+     * the schedule instead, via {@link #issue}), but this is the last gate
+     * before the account is truly deactivated, and it costs nothing to make
+     * sure rather than assume.
+     *
+     * <p>One account failing must not stop the rest from finalizing — each
+     * is its own transaction, not one covering the whole sweep, and a
+     * failure is logged by the caller ({@code ScheduledDeactivationSweeper})
+     * rather than thrown here.
+     */
+    public int finalizeDueScheduledDeactivations() {
+        int finalized = 0;
+        for (Account account : accounts.findDueForScheduledDeactivation(clock.instant())) {
+            finalizeOneScheduledDeactivation(account);
+            finalized++;
+        }
+        return finalized;
+    }
+
+    @Transactional
+    void finalizeOneScheduledDeactivation(Account account) {
+        accounts.finalizeScheduledDeactivation(account.id());
+        int revoked = revokeAllFor(account.id());
+
+        audit.append(
+                account.id(),
+                account.email(),
+                AuditAction.ACCOUNT_DEACTIVATE,
+                AuditAction.TARGET_ACCOUNT,
+                account.id(),
+                json.createObjectNode()
+                        .put("subject", account.email())
+                        .put("sessionsRevoked", revoked)
+                        .put("selfService", true)
+                        .put("afterGracePeriod", true));
     }
 
     // -----------------------------------------------------------------------

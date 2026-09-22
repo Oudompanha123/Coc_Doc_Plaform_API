@@ -42,6 +42,7 @@ public class AccountRepository {
      */
     private static final String ACCOUNT_COLUMNS =
             "a.id, a.email, a.display_name, a.avatar_url, a.avatar_uploaded_at, a.status, a.deactivated_at, "
+                    + "a.deactivation_scheduled_for, "
                     + "a.created_at, a.updated_at, a.must_change_password, (a.password_hash is not null) as has_password";
 
     /**
@@ -79,6 +80,7 @@ public class AccountRepository {
 
     private static Account map(ResultSet rs, int rowNum) throws SQLException {
         OffsetDateTime deactivated = rs.getObject("deactivated_at", OffsetDateTime.class);
+        OffsetDateTime scheduledFor = rs.getObject("deactivation_scheduled_for", OffsetDateTime.class);
         OffsetDateTime avatarUploadedAt = rs.getObject("avatar_uploaded_at", OffsetDateTime.class);
         return new Account(
                 rs.getObject("id", UUID.class),
@@ -89,6 +91,7 @@ public class AccountRepository {
                 avatarUploadedAt == null ? null : avatarUploadedAt.toInstant(),
                 AccountStatus.fromDb(rs.getString("status")),
                 deactivated == null ? null : deactivated.toInstant(),
+                scheduledFor == null ? null : scheduledFor.toInstant(),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
                 rs.getObject("updated_at", OffsetDateTime.class).toInstant(),
                 rs.getBoolean("must_change_password"),
@@ -454,7 +457,7 @@ public class AccountRepository {
                         update account set avatar_url = ?, avatar_uploaded_at = ?, updated_at = now()
                         where id = ?
                         """)
-                .params(avatarUrl, uploadedAt, id)
+                .params(avatarUrl, OffsetDateTime.ofInstant(uploadedAt, java.time.ZoneOffset.UTC), id)
                 .update();
     }
 
@@ -514,15 +517,94 @@ public class AccountRepository {
      * Deactivates without removing: authored content keeps its attribution and
      * the person can be let back in. The reversible half of the pair — see
      * {@link #delete} for the other.
+     *
+     * <p>Also clears {@link #scheduleDeactivation} state: a row this flips to
+     * deactivated has nothing left pending, and a row it reactivates
+     * (super_admin path) must not still carry a stale self-service schedule
+     * from before it was turned off.
      */
     public int setDeactivated(UUID id, boolean deactivated) {
         return jdbc.sql("""
                         update account
                         set deactivated_at = case when ? then now() else null end,
+                            deactivation_scheduled_for = null,
                             updated_at = now()
                         where id = ?
                         """)
                 .params(deactivated, id)
+                .update();
+    }
+
+    /**
+     * Marks a pending self-service deactivation (revision of ADR-042) — does
+     * not touch {@code deactivated_at} itself. The account stays
+     * {@link Account#isActive()} (and can still hold roles, appear in admin
+     * listings, etc.) until {@code at} is reached and {@link
+     * #finalizeScheduledDeactivations} sweeps it, or until a sign-in cancels
+     * it first ({@link #cancelScheduledDeactivation}).
+     */
+    public int scheduleDeactivation(UUID id, Instant at) {
+        return jdbc.sql("""
+                        update account
+                        set deactivation_scheduled_for = ?, updated_at = now()
+                        where id = ?
+                        """)
+                .params(OffsetDateTime.ofInstant(at, java.time.ZoneOffset.UTC), id)
+                .update();
+    }
+
+    /**
+     * Cancels a pending self-service deactivation without otherwise touching
+     * the row — a sign-in that arrives before {@code deactivation_scheduled_for}
+     * (revision of ADR-042).
+     *
+     * <p>Returns rows changed, so the caller ({@code SessionService.issue})
+     * can tell "there was nothing pending" from "a pending deactivation was
+     * just cancelled" and only audit/notify on the latter.
+     */
+    public int cancelScheduledDeactivation(UUID id) {
+        return jdbc.sql("""
+                        update account
+                        set deactivation_scheduled_for = null, updated_at = now()
+                        where id = ? and deactivation_scheduled_for is not null
+                        """)
+                .param(id)
+                .update();
+    }
+
+    /**
+     * Every account whose scheduled self-service deactivation is due —
+     * {@code ScheduledDeactivationSweeper}'s worklist.
+     *
+     * <p>{@code deactivated_at is null} excludes a row the sweep already
+     * finalized (or that an admin deactivated in the meantime) so a slow
+     * poll cycle cannot revisit one twice.
+     */
+    public List<Account> findDueForScheduledDeactivation(Instant now) {
+        return jdbc.sql(SELECT
+                        + " where a.deactivation_scheduled_for is not null"
+                        + "   and a.deactivation_scheduled_for <= ?"
+                        + "   and a.deactivated_at is null"
+                        + GROUP_BY)
+                .param(OffsetDateTime.ofInstant(now, java.time.ZoneOffset.UTC))
+                .query(MAPPER)
+                .list();
+    }
+
+    /**
+     * Finalizes a due self-service deactivation: turns {@code
+     * deactivation_scheduled_for} into a real {@code deactivated_at}, in one
+     * statement so no other writer can observe the row with neither set (a
+     * row {@link #findDueForScheduledDeactivation} would try to sweep again)
+     * or both set.
+     */
+    public int finalizeScheduledDeactivation(UUID id) {
+        return jdbc.sql("""
+                        update account
+                        set deactivated_at = now(), deactivation_scheduled_for = null, updated_at = now()
+                        where id = ?
+                        """)
+                .param(id)
                 .update();
     }
 

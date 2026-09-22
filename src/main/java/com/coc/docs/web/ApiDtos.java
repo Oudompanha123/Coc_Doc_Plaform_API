@@ -172,7 +172,18 @@ public final class ApiDtos {
              * role (ADR-039) the way AX Renewal's confirm action does
              * server-side.
              */
-            List<String> roles) {
+            List<String> roles,
+            /**
+             * True only on the response to a sign-in call that itself just
+             * cancelled a pending self-service deactivation (revision of
+             * ADR-042) — always false from {@link #of}; set afterwards via
+             * {@link #withDeactivationCancelled} by the three controller
+             * methods that complete a sign-in ({@code /google},
+             * {@code /login-password}, {@code /mfa/verify}). The frontend
+             * uses it to tell the caller their scheduled deactivation was
+             * just called off, rather than that being silently true.
+             */
+            boolean deactivationCancelled) {
 
         public static MeResponse of(CurrentUser user, Instant lastSignInAt) {
             return of(user.account(), lastSignInAt);
@@ -190,7 +201,15 @@ public final class ApiDtos {
                     lastSignInAt,
                     account.mustChangePassword(),
                     account.hasPassword(),
-                    account.roles().stream().map(AppRole::wire).sorted().toList());
+                    account.roles().stream().map(AppRole::wire).sorted().toList(),
+                    false);
+        }
+
+        /** A copy flagging that this same sign-in cancelled a pending self-service deactivation. */
+        public MeResponse withDeactivationCancelled(boolean cancelled) {
+            return new MeResponse(
+                    id, email, displayName, role, avatarUrl, authenticated, createdAt, lastSignInAt,
+                    mustChangePassword, hasPassword, roles, cancelled);
         }
 
         /**
@@ -202,9 +221,15 @@ public final class ApiDtos {
          * satisfied here or not at all. // req: NFR-SEC-PII
          */
         public static MeResponse anonymous() {
-            return new MeResponse(null, null, null, null, null, false, null, null, false, false, List.of());
+            return new MeResponse(null, null, null, null, null, false, null, null, false, false, List.of(), false);
         }
     }
+
+    /** The Danger zone's chosen grace period (revision of ADR-042) — validated against {@code SessionService.DEACTIVATION_GRACE_PERIOD_DAYS_OPTIONS}. */
+    public record DeactivateSelfRequest(@jakarta.validation.constraints.NotNull Integer graceDays) {}
+
+    /** When a just-scheduled self-service deactivation will actually take effect, absent a sign-in before then. */
+    public record DeactivateSelfResponse(Instant scheduledFor) {}
 
     // -----------------------------------------------------------------------
     // Reader path

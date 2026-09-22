@@ -149,8 +149,9 @@ public class AuthController {
                 // most of what the nonce exists to prevent.
                 .header(HttpHeaders.SET_COOKIE, expiredNonceCookie().toString())
                 .body(ApiDtos.MeResponse.of(
-                        issued.account(),
-                        sessions.lastSignInForAccount(issued.account().id()).orElse(null)));
+                                issued.account(),
+                                sessions.lastSignInForAccount(issued.account().id()).orElse(null))
+                        .withDeactivationCancelled(issued.deactivationCancelled()));
     }
 
     /**
@@ -233,6 +234,38 @@ public class AuthController {
         Account updated = sessions.removeOwnAvatar(caller);
         return ApiDtos.MeResponse.of(
                 updated, sessions.lastSignInForAccount(updated.id()).orElse(null));
+    }
+
+    /**
+     * Schedules the caller's own account to deactivate after a chosen grace
+     * period (revision of ADR-042) — Settings &rarr; Danger zone's confirmed
+     * "Deactivate my account" action, not the admin-management {@code PATCH
+     * /api/v1/admin/accounts/{id}}, which stays {@code super_admin}-only and
+     * still refuses a self-target unconditionally. See {@code
+     * SessionService.deactivateSelf} for the one guard this path keeps (the
+     * last active super admin cannot self-deactivate), the allowed grace
+     * periods, and why this no longer deactivates immediately.
+     *
+     * <p>The session cookie is cleared here too, not left to the frontend's
+     * own sign-out cleanup to notice: every session for the account is
+     * revoked the moment this is scheduled, including this request's own, so
+     * there is nothing left to authenticate a later request against — this
+     * response body is the last one the caller gets before having to sign
+     * back in, which is also what cancels the schedule.
+     *
+     * <p>// req: FR-AUTH-003, FR-AUTH-007, ADR-042
+     */
+    @PostMapping("/me/deactivate")
+    ResponseEntity<ApiDtos.DeactivateSelfResponse> deactivateSelf(
+            @Valid @RequestBody ApiDtos.DeactivateSelfRequest request,
+            @AuthenticationPrincipal CurrentUser caller) {
+        if (caller == null) {
+            throw ApiException.forbidden("sign in first");
+        }
+        Instant scheduledFor = sessions.deactivateSelf(caller, request.graceDays());
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, expiredCookie().toString())
+                .body(new ApiDtos.DeactivateSelfResponse(scheduledFor));
     }
 
     /**
@@ -543,8 +576,9 @@ public class AuthController {
             case SessionService.IssuedSession issued -> ResponseEntity.ok()
                     .header(HttpHeaders.SET_COOKIE, sessionCookie(issued).toString())
                     .body(ApiDtos.MeResponse.of(
-                            issued.account(),
-                            sessions.lastSignInForAccount(issued.account().id()).orElse(null)));
+                                    issued.account(),
+                                    sessions.lastSignInForAccount(issued.account().id()).orElse(null))
+                            .withDeactivationCancelled(issued.deactivationCancelled()));
             case SessionService.MfaRequired mfaRequired -> ResponseEntity.ok()
                     .header(HttpHeaders.SET_COOKIE, mfaPendingCookie(mfaRequired).toString())
                     .body(new MfaRequiredResponse(true, mfaChallengeTtlSeconds(mfaRequired)));
@@ -586,8 +620,9 @@ public class AuthController {
                 // around" reasoning /google already applies to the nonce.
                 .header(HttpHeaders.SET_COOKIE, expiredMfaPendingCookie().toString())
                 .body(ApiDtos.MeResponse.of(
-                        issued.account(),
-                        sessions.lastSignInForAccount(issued.account().id()).orElse(null)));
+                                issued.account(),
+                                sessions.lastSignInForAccount(issued.account().id()).orElse(null))
+                        .withDeactivationCancelled(issued.deactivationCancelled()));
     }
 
     /**

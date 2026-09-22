@@ -270,9 +270,20 @@ public class AccountService {
 
         if (!active) {
             if (account.id().equals(actor.id())) {
-                // Not a security boundary — a super admin could deactivate a
-                // colleague and then themselves. It is refused because it is
-                // almost always a misclick, and the recovery is another person.
+                // Refused here unconditionally because this method is the
+                // super_admin-acting-on-someone-else path (PATCH
+                // /api/v1/admin/accounts/{id}) — a self-target reaching this
+                // far is always an admin who opened their own row by mistake,
+                // not a deliberate self-service request. Deliberate
+                // self-service deactivation is a separate, genuinely
+                // supported path: SessionService.deactivateSelf, reachable by
+                // any signed-in account at POST /api/v1/auth/me/deactivate
+                // (ADR-042), with its own confirmation UX and its own
+                // last-active-super-admin guard. This guard and that one are
+                // not the same check reused twice — they answer different
+                // questions ("is this actually you, acting on yourself" is
+                // meaningless here, since this method only ever runs for a
+                // super_admin managing the accounts screen).
                 throw ApiException.badRequest("you cannot deactivate your own account");
             }
             if (account.role() == AppRole.SUPER_ADMIN
