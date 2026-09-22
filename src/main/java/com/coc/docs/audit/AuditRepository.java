@@ -48,6 +48,7 @@ public class AuditRepository {
                 rs.getLong("id"),
                 rs.getObject("actor_id", UUID.class),
                 rs.getString("actor_email"),
+                rs.getString("actor_avatar_url"),
                 rs.getString("action"),
                 rs.getString("target_type"),
                 rs.getObject("target_id", UUID.class),
@@ -74,10 +75,12 @@ public class AuditRepository {
 
     public List<AuditEntry> recent(int limit) {
         return jdbc.sql("""
-                        select id, actor_id, actor_email, action, target_type, target_id,
-                               detail::text as detail, occurred_at
-                        from audit_log
-                        order by occurred_at desc, id desc
+                        select l.id, l.actor_id, l.actor_email, a.avatar_url as actor_avatar_url,
+                               l.action, l.target_type, l.target_id,
+                               l.detail::text as detail, l.occurred_at
+                        from audit_log l
+                        left join account a on a.id = l.actor_id
+                        order by l.occurred_at desc, l.id desc
                         limit ?
                         """)
                 .param(limit)
@@ -101,11 +104,13 @@ public class AuditRepository {
      */
     public List<AuditEntry> recentForActor(UUID actorId, int limit) {
         return jdbc.sql("""
-                        select id, actor_id, actor_email, action, target_type, target_id,
-                               detail::text as detail, occurred_at
-                        from audit_log
-                        where actor_id = ?
-                        order by occurred_at desc, id desc
+                        select l.id, l.actor_id, l.actor_email, a.avatar_url as actor_avatar_url,
+                               l.action, l.target_type, l.target_id,
+                               l.detail::text as detail, l.occurred_at
+                        from audit_log l
+                        left join account a on a.id = l.actor_id
+                        where l.actor_id = ?
+                        order by l.occurred_at desc, l.id desc
                         limit ?
                         """)
                 .params(actorId, limit)
@@ -115,11 +120,13 @@ public class AuditRepository {
 
     public List<AuditEntry> forTarget(String targetType, UUID targetId, int limit) {
         return jdbc.sql("""
-                        select id, actor_id, actor_email, action, target_type, target_id,
-                               detail::text as detail, occurred_at
-                        from audit_log
-                        where target_type = ? and target_id = ?
-                        order by occurred_at desc, id desc
+                        select l.id, l.actor_id, l.actor_email, a.avatar_url as actor_avatar_url,
+                               l.action, l.target_type, l.target_id,
+                               l.detail::text as detail, l.occurred_at
+                        from audit_log l
+                        left join account a on a.id = l.actor_id
+                        where l.target_type = ? and l.target_id = ?
+                        order by l.occurred_at desc, l.id desc
                         limit ?
                         """)
                 .params(targetType, targetId, limit)

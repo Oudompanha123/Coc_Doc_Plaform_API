@@ -41,7 +41,7 @@ class NotificationFeedServiceTest {
 
     private static AuditEntry entry(long id, String action, String actorEmail) {
         return new AuditEntry(
-                id, UUID.randomUUID(), actorEmail, action, "account", UUID.randomUUID(), null, Instant.now());
+                id, UUID.randomUUID(), actorEmail, null, action, "account", UUID.randomUUID(), null, Instant.now());
     }
 
     @Nested
@@ -221,6 +221,7 @@ class NotificationFeedServiceTest {
                             1,
                             UUID.randomUUID(),
                             "a@example.com",
+                            null,
                             AuditAction.PAGE_PUBLISH,
                             "page",
                             UUID.randomUUID(),
@@ -260,6 +261,145 @@ class NotificationFeedServiceTest {
             assertThat(service.feedFor(caller, 20))
                     .extracting(NotificationFeedService.FeedItem::actorEmail)
                     .containsOnlyNulls();
+        }
+    }
+
+    @Nested
+    @DisplayName("target navigation")
+    class TargetNavigation {
+
+        @Test
+        @DisplayName("an account target resolves to Users & Roles for a super_admin")
+        void accountTargetResolvesForSuperAdmin() {
+            CurrentUser caller = TestCallers.user(AppRole.SUPER_ADMIN);
+            UUID accountId = UUID.randomUUID();
+            when(audit.recent(anyInt())).thenReturn(List.of(new AuditEntry(
+                    1, UUID.randomUUID(), "a@example.com", null, AuditAction.ACCOUNT_ROLE_CHANGE,
+                    AuditAction.TARGET_ACCOUNT, accountId, null, Instant.now())));
+
+            List<NotificationFeedService.FeedItem> feed = service.feedFor(caller, 20);
+
+            assertThat(feed).singleElement().satisfies(item -> {
+                assertThat(item.actionType()).isEqualTo(AuditAction.ACCOUNT_ROLE_CHANGE);
+                assertThat(item.targetType()).isEqualTo(AuditAction.TARGET_ACCOUNT);
+                assertThat(item.targetId()).isEqualTo(accountId);
+                assertThat(item.href()).isEqualTo("/users-roles?highlight=" + accountId);
+            });
+        }
+
+        /**
+         * Defence in depth: a non-super_admin cannot in practice be the actor
+         * of an account-management action (the route is super_admin-only), but
+         * this asserts the client is never handed a link to a screen it could
+         * not open even if a row like this ever reached its own feed.
+         */
+        @Test
+        @DisplayName("an account target never resolves to a link for anyone below super_admin")
+        void accountTargetDoesNotResolveBelowSuperAdmin() {
+            CurrentUser caller = TestCallers.user(AppRole.ADMIN);
+            UUID accountId = UUID.randomUUID();
+            when(audit.recentForActor(eq(caller.id()), anyInt())).thenReturn(List.of(new AuditEntry(
+                    1, caller.id(), caller.email(), null, AuditAction.ACCOUNT_REGISTER,
+                    AuditAction.TARGET_ACCOUNT, accountId, null, Instant.now())));
+
+            assertThat(service.feedFor(caller, 20))
+                    .singleElement()
+                    .extracting(NotificationFeedService.FeedItem::href)
+                    .isNull();
+        }
+
+        /**
+         * A page target carries a real {@code target_id} (the schema and the
+         * admin API both exist), but no frontend route opens one yet — see
+         * {@code NotificationFeedService.hrefFor}. This documents that current
+         * limitation so the day a page editor ships, this test is what has to
+         * change, rather than the gap going unnoticed.
+         */
+        @Test
+        @DisplayName("a page target carries its id but no link, since no page editor exists yet")
+        void pageTargetHasNoLinkYet() {
+            CurrentUser caller = TestCallers.user(AppRole.SUPER_ADMIN);
+            UUID pageId = UUID.randomUUID();
+            when(audit.recent(anyInt())).thenReturn(List.of(new AuditEntry(
+                    1, UUID.randomUUID(), "a@example.com", null, AuditAction.PAGE_PUBLISH,
+                    AuditAction.TARGET_PAGE, pageId, null, Instant.now())));
+
+            List<NotificationFeedService.FeedItem> feed = service.feedFor(caller, 20);
+
+            assertThat(feed).singleElement().satisfies(item -> {
+                assertThat(item.targetType()).isEqualTo(AuditAction.TARGET_PAGE);
+                assertThat(item.targetId()).isEqualTo(pageId);
+                assertThat(item.href()).isNull();
+            });
+        }
+
+        @Test
+        @DisplayName("an HRMS report arrival carries no target at all")
+        void hrmsItemHasNoTarget() {
+            CurrentUser caller = TestCallers.user(AppRole.ADMIN);
+            when(hrms.recent(anyInt()))
+                    .thenReturn(List.of(new HrmsNotification(
+                            7, "<7@hrms>", "Attendance on 08-Sep-2026", null, Instant.now())));
+
+            assertThat(service.feedFor(caller, 20)).singleElement().satisfies(item -> {
+                assertThat(item.actionType()).isNull();
+                assertThat(item.targetType()).isNull();
+                assertThat(item.targetId()).isNull();
+                assertThat(item.href()).isNull();
+            });
+        }
+    }
+
+    @Nested
+    @DisplayName("actor picture")
+    class ActorPicture {
+
+        @Test
+        @DisplayName("carries the actor's current avatar, read live by AuditRepository's join")
+        void carriesActorAvatar() {
+            CurrentUser caller = TestCallers.user(AppRole.SUPER_ADMIN);
+            when(audit.recent(anyInt())).thenReturn(List.of(new AuditEntry(
+                    1, UUID.randomUUID(), "a@example.com", "https://cdn.example.com/a.png",
+                    AuditAction.ACCOUNT_APPROVE, AuditAction.TARGET_ACCOUNT, UUID.randomUUID(), null, Instant.now())));
+
+            assertThat(service.feedFor(caller, 20))
+                    .singleElement()
+                    .extracting(NotificationFeedService.FeedItem::actorAvatarUrl)
+                    .isEqualTo("https://cdn.example.com/a.png");
+        }
+
+        /**
+         * The actor has no picture, or the account behind {@code actor_id} has
+         * since been deleted — {@code AuditRepository}'s join is a left join
+         * for exactly this, and this asserts the null it produces survives
+         * through rather than being defaulted to something that reads as a
+         * real (missing) picture.
+         */
+        @Test
+        @DisplayName("is null when the actor has no picture")
+        void nullWhenNoAvatar() {
+            CurrentUser caller = TestCallers.user(AppRole.SUPER_ADMIN);
+            when(audit.recent(anyInt()))
+                    .thenReturn(List.of(entry(1, AuditAction.ACCOUNT_APPROVE, "a@example.com")));
+
+            assertThat(service.feedFor(caller, 20))
+                    .singleElement()
+                    .extracting(NotificationFeedService.FeedItem::actorAvatarUrl)
+                    .isNull();
+        }
+
+        @Test
+        @DisplayName("is null for an HRMS report arrival, which has no actor to have one")
+        void nullForHrms() {
+            CurrentUser caller = TestCallers.user(AppRole.ADMIN);
+            when(hrms.recent(anyInt()))
+                    .thenReturn(List.of(new HrmsNotification(
+                            7, "<7@hrms>", "Attendance on 08-Sep-2026", null, Instant.now())));
+
+            assertThat(service.feedFor(caller, 20))
+                    .singleElement()
+                    .extracting(NotificationFeedService.FeedItem::actorAvatarUrl)
+                    .isNull();
         }
     }
 
