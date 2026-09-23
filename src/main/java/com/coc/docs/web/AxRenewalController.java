@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -197,6 +198,23 @@ public class AxRenewalController {
             @AuthenticationPrincipal CurrentUser actor) {
         var created = projects.addComment(projectId, request.body(), actor);
         return ResponseEntity.status(201).body(ApiDtos.AxRenewalCommentResponse.of(created));
+    }
+
+    /**
+     * Hides one comment (ADR-045). 204, because there is nothing left to
+     * return and the thread is re-read anyway.
+     *
+     * <p>Whether the caller is allowed depends on whose comment it is, which
+     * is row data — so unlike every other route here, the check lives in the
+     * service. {@code SecurityConfig} still holds the floor.
+     */
+    @DeleteMapping("/projects/{projectId}/comments/{commentId}")
+    ResponseEntity<Void> deleteComment(
+            @PathVariable UUID projectId,
+            @PathVariable UUID commentId,
+            @AuthenticationPrincipal CurrentUser actor) {
+        projects.deleteComment(projectId, commentId, actor);
+        return ResponseEntity.noContent().build();
     }
 
     /**

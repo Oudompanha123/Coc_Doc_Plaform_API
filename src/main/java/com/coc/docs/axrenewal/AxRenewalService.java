@@ -616,4 +616,51 @@ public class AxRenewalService {
 
         return created;
     }
+
+    /**
+     * Hides one comment from the thread (ADR-045).
+     *
+     * <p><b>Who may:</b> its author, or a {@code super_admin}. That is the
+     * one authorisation decision in this class that {@code SecurityConfig}
+     * genuinely cannot make, for the same reason {@link #startImplementation}
+     * makes its own — "is this your comment" depends on row data, not on who
+     * is calling. The filter chain still does the part it can, holding the
+     * route at the {@code user} floor; this adds only the ownership test, and
+     * reports a refusal as 403.
+     *
+     * <p><b>Soft.</b> The row stays and no edit exists anywhere, so a
+     * discussion cannot be quietly rewritten after the fact — the comment
+     * stops being shown, which is the reversible half of the request.
+     * Deleting an already-deleted comment is a 404: it is not in the thread,
+     * which is all a caller can observe.
+     */
+    @Transactional
+    public void deleteComment(UUID projectId, UUID commentId, CurrentUser actor) {
+        requireProject(projectId);
+        AxRenewalComment comment = comments
+                .findLive(projectId, commentId)
+                .orElseThrow(() -> ApiException.notFound("comment"));
+
+        boolean own = comment.authorId().equals(actor.id());
+        if (!own && !actor.isAtLeast(AppRole.SUPER_ADMIN)) {
+            throw ApiException.forbidden("only its author or a super admin can remove a comment");
+        }
+
+        // False means somebody else won the race in the moment between the
+        // read above and this update. Their entry is already in the log;
+        // adding a second one for the same removal would misreport it as two.
+        if (!comments.softDelete(commentId, actor.id())) {
+            throw ApiException.notFound("comment");
+        }
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_COMMENT_DELETE,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode()
+                        .put("commentId", commentId.toString())
+                        .put("ownComment", own));
+    }
 }

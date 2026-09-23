@@ -902,6 +902,31 @@ class SecurityRulesTest {
         }
 
         @Test
+        void removing_a_comment_admits_a_plain_user_and_leaves_ownership_to_the_service() throws Exception {
+            // The floor is all a matcher can decide here: whether this caller
+            // may remove *this* comment depends on who wrote it, which is row
+            // data. AxRenewalCommentDeleteTest covers that half (ADR-045).
+            org.mockito.Mockito.doThrow(ApiException.notFound("comment"))
+                    .when(axRenewalService)
+                    .deleteComment(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any());
+
+            mvc.perform(delete("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/comments/"
+                                    + UUID.randomUUID())
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void removing_a_comment_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(delete("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/comments/"
+                            + UUID.randomUUID()))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
         void assistant_chat_refuses_a_plain_user() throws Exception {
             // Chat can point a local model at the source folder, the same as
             // Run analysis — so it sits at the analysis floor, not at the

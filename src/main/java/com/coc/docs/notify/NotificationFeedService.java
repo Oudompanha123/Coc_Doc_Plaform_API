@@ -310,6 +310,7 @@ public class NotificationFeedService {
             case AuditAction.AX_RENEWAL_SECTION_CONFIRM -> "Confirmed a renewal plan section";
             case AuditAction.AX_RENEWAL_IMPLEMENTATION_START -> "Started a renewal implementation";
             case AuditAction.AX_RENEWAL_COMMENT_ADD -> "Commented on a renewal project";
+            case AuditAction.AX_RENEWAL_COMMENT_DELETE -> "Removed a comment from a renewal project";
             case AuditAction.ACCOUNT_CAPABILITY_GRANT -> "Granted a capability";
             case AuditAction.ACCOUNT_CAPABILITY_REVOKE -> "Revoked a capability";
             default -> entry.action();

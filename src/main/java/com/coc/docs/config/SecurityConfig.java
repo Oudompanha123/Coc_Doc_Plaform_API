@@ -352,6 +352,13 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/ax-renewal/**").hasRole(AppRole.USER.name())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/comments")
                         .hasRole(AppRole.USER.name())
+                        // Removing one stays at the same floor as writing one:
+                        // whether this particular caller may remove this
+                        // particular comment depends on who wrote it, which is
+                        // row data no matcher can see. AxRenewalService makes
+                        // that call — author, or super_admin (ADR-045).
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/ax-renewal/projects/*/comments/*")
+                        .hasRole(AppRole.USER.name())
 
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects").hasRole(AppRole.ADMIN.name())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/manifest")
