@@ -119,6 +119,8 @@ public final class AuditAction {
     public static final String AX_RENEWAL_DESTINATION_SET = "ax_renewal.destination_set";
     public static final String AX_RENEWAL_SECTION_CONFIRM = "ax_renewal.section_confirm";
     public static final String AX_RENEWAL_IMPLEMENTATION_START = "ax_renewal.implementation_start";
+    public static final String AX_RENEWAL_IMPLEMENTATION_APPROVE = "ax_renewal.implementation_approve";
+    public static final String AX_RENEWAL_IMPLEMENTATION_REJECT = "ax_renewal.implementation_reject";
     public static final String AX_RENEWAL_COMMENT_ADD = "ax_renewal.comment_add";
 
     /** Target types, for the {@code target_type} column. */

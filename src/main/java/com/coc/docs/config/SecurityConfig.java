@@ -371,6 +371,15 @@ public class SecurityConfig {
                         .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/start")
                         .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        // Approve/reject a Generate run's proposed changes (ADR-044) —
+                        // Approve is the one action in this whole feature that writes
+                        // outside this application's own database, so it gets exactly
+                        // the same floor as starting implementation in the first place,
+                        // not a lower one.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/approve")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/reject")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
 
                         // --- editorial writes and admin reads ----------------
                         .requestMatchers("/api/v1/admin/**").hasRole(AppRole.ADMIN.name())
