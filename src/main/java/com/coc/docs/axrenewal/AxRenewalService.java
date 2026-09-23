@@ -46,6 +46,7 @@ public class AxRenewalService {
     private final AuditRepository audit;
     private final ObjectMapper json;
     private final LocalClaudeAnalyzer localClaude;
+    private final LocalClaudeChat localChat;
     private final AxRenewalProperties properties;
 
     public AxRenewalService(
@@ -60,6 +61,7 @@ public class AxRenewalService {
             AuditRepository audit,
             ObjectMapper json,
             LocalClaudeAnalyzer localClaude,
+            LocalClaudeChat localChat,
             AxRenewalProperties properties) {
         this.projects = projects;
         this.analyses = analyses;
@@ -72,6 +74,7 @@ public class AxRenewalService {
         this.audit = audit;
         this.json = json;
         this.localClaude = localClaude;
+        this.localChat = localChat;
         this.properties = properties;
     }
 
@@ -310,6 +313,27 @@ public class AxRenewalService {
      *     manifest -- a real difference the UI must not blur
      */
     public record AxRenewalEngineStatus(boolean connected, boolean readsSource) {}
+
+    /**
+     * One turn of free-text conversation with the local model, about one
+     * project.
+     *
+     * <p><b>Writes nothing.</b> No row, no comment, no audit entry — unlike
+     * every other method on this class, which is also why it is not {@code
+     * @Transactional} and takes no {@code actor}: there is nothing to
+     * attribute, because there is nothing kept. The browser holds the
+     * conversation and replays it in {@code history} (ADR-044).
+     *
+     * <p>The project still has to exist. Asking about one nobody attached is
+     * a 404, exactly as reading it would be.
+     */
+    public LocalClaudeChat.Reply chat(UUID projectId, List<LocalClaudeChat.Turn> history, String message) {
+        AxRenewalProject project = requireProject(projectId);
+        if (message == null || message.isBlank()) {
+            throw ApiException.badRequest("say something to the assistant");
+        }
+        return localChat.reply(project, history, message.trim());
+    }
 
     // -----------------------------------------------------------------------
     // Plan — stack move

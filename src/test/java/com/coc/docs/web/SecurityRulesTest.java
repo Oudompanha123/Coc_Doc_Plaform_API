@@ -902,6 +902,52 @@ class SecurityRulesTest {
         }
 
         @Test
+        void assistant_chat_refuses_a_plain_user() throws Exception {
+            // Chat can point a local model at the source folder, the same as
+            // Run analysis — so it sits at the analysis floor, not at the
+            // comment floor it superficially resembles (ADR-044).
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/assistant/chat")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"message\":\"what runs this?\"}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void assistant_chat_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/assistant/chat")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"message\":\"what runs this?\"}"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void assistant_chat_admits_an_admin() throws Exception {
+            org.mockito.Mockito.doThrow(ApiException.notFound("project"))
+                    .when(axRenewalService)
+                    .chat(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any());
+
+            // 404 from the stub, not 403 — the route was reached.
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/assistant/chat")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"message\":\"what runs this?\"}"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void assistant_chat_rejects_an_empty_message_before_it_reaches_a_model() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/assistant/chat")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"message\":\"   \"}"))
+                    .andExpect(status().is4xxClientError());
+        }
+
+        @Test
         void confirming_a_section_refuses_a_plain_admin_who_does_not_also_hold_developer() throws Exception {
             // The deliberate divergence from "admin-or-above" (ADR-037,
             // roles revised by ADR-039): an Admin may draft a plan but not

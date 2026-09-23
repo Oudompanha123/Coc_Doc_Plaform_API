@@ -31,9 +31,11 @@ import com.coc.docs.claudeusage.ClaudeUsageDashboard;
 import com.coc.docs.claudeusage.ClaudeUsageMemberUsage;
 import com.coc.docs.claudeusage.ClaudeUsageTotals;
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -1017,6 +1019,33 @@ public final class ApiDtos {
      *     stored dependency manifest
      */
     public record AxRenewalEngineResponse(boolean connected, boolean readsSource) {}
+
+    /**
+     * One turn typed into the AX Assistant's chat, plus the conversation the
+     * browser is replaying with it (ADR-044).
+     *
+     * <p>{@code history} comes from the page because the server keeps none:
+     * nothing about this conversation is stored, so there is nowhere else it
+     * could come from. It is therefore caller-supplied and bounded here —
+     * {@code 40} entries at 4,000 characters is well past any real
+     * conversation and well short of a prompt somebody could use to make the
+     * backend spawn work indefinitely. {@code LocalClaudeChat} trims further
+     * to the last 20 turns.
+     */
+    public record AxRenewalChatRequest(
+            @NotBlank @Size(max = 4_000) String message,
+            @Size(max = 40) List<@Valid AxRenewalChatTurn> history) {}
+
+    /** @param role {@code "you"} or {@code "assistant"}; anything else reads as the person. */
+    public record AxRenewalChatTurn(@NotBlank @Size(max = 16) String role, @NotBlank @Size(max = 4_000) String text) {}
+
+    /**
+     * @param reply the model's own prose, unparsed
+     * @param readSource whether it could see the source or only what this
+     *     application stores — the panel says which, rather than letting
+     *     somebody assume the code was read
+     */
+    public record AxRenewalChatResponse(String reply, boolean readSource) {}
 
     public record CreateAxRenewalProjectRequest(@NotBlank String name, String description) {}
 

@@ -3,6 +3,7 @@ package com.coc.docs.web;
 import com.coc.docs.axrenewal.AxRenewalPlanRepository;
 import com.coc.docs.axrenewal.AxRenewalSection;
 import com.coc.docs.axrenewal.AxRenewalService;
+import com.coc.docs.axrenewal.LocalClaudeChat;
 import com.coc.docs.auth.CurrentUser;
 import jakarta.validation.Valid;
 import java.net.URI;
@@ -196,6 +197,30 @@ public class AxRenewalController {
             @AuthenticationPrincipal CurrentUser actor) {
         var created = projects.addComment(projectId, request.body(), actor);
         return ResponseEntity.status(201).body(ApiDtos.AxRenewalCommentResponse.of(created));
+    }
+
+    /**
+     * One chat turn with the local model (ADR-044).
+     *
+     * <p>Deliberately not a {@code /comments} sibling: a comment is recorded
+     * and attributed, this is not recorded at all. Nothing is written by this
+     * call, which is why it takes no {@code actor} — who is allowed to reach
+     * it is {@code SecurityConfig}'s decision, as everywhere else here, but
+     * there is no row to stamp with their name afterwards.
+     *
+     * <p>Answers 409 rather than 500 when the machine has no Claude Code
+     * configured: "this deployment cannot do that" is a state, not a fault.
+     */
+    @PostMapping("/projects/{projectId}/assistant/chat")
+    ApiDtos.AxRenewalChatResponse chat(
+            @PathVariable UUID projectId, @Valid @RequestBody ApiDtos.AxRenewalChatRequest request) {
+        List<LocalClaudeChat.Turn> history = request.history() == null
+                ? List.of()
+                : request.history().stream()
+                        .map(turn -> new LocalClaudeChat.Turn(turn.role(), turn.text()))
+                        .toList();
+        LocalClaudeChat.Reply reply = projects.chat(projectId, history, request.message());
+        return new ApiDtos.AxRenewalChatResponse(reply.text(), reply.readSource());
     }
 
     private static AxRenewalSection parseSection(String value) {
