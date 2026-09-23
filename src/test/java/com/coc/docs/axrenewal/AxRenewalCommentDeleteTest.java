@@ -77,7 +77,9 @@ class AxRenewalCommentDeleteTest {
                 new ObjectMapper(),
                 mock(LocalClaudeAnalyzer.class),
                 mock(LocalClaudeChat.class),
-                new AxRenewalProperties(null, null, null));
+                new AxRenewalProperties(null, null, null),
+                mock(AxRenewalCodeGenerator.class),
+                mock(AxRenewalImplementationRunner.class));
     }
 
     private void commentExistsBy(UUID authorId) {

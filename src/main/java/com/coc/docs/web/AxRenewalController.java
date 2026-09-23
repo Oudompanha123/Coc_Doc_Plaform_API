@@ -191,6 +191,27 @@ public class AxRenewalController {
         return ApiDtos.AxRenewalImplementationRunResponse.of(projects.startImplementation(projectId, actor));
     }
 
+    /** The files a Generate run actually found different, once it reaches {@code awaiting_review} (ADR-044). */
+    @GetMapping("/projects/{projectId}/implementation/{runId}/changes")
+    List<ApiDtos.AxRenewalGeneratedChangeResponse> generatedChanges(
+            @PathVariable UUID projectId, @PathVariable UUID runId) {
+        return projects.findGeneratedChanges(projectId, runId).stream()
+                .map(ApiDtos.AxRenewalGeneratedChangeResponse::of)
+                .toList();
+    }
+
+    @PostMapping("/projects/{projectId}/implementation/{runId}/approve")
+    ApiDtos.AxRenewalImplementationRunResponse approveImplementation(
+            @PathVariable UUID projectId, @PathVariable UUID runId, @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalImplementationRunResponse.of(projects.approveImplementation(projectId, runId, actor));
+    }
+
+    @PostMapping("/projects/{projectId}/implementation/{runId}/reject")
+    ApiDtos.AxRenewalImplementationRunResponse rejectImplementation(
+            @PathVariable UUID projectId, @PathVariable UUID runId, @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalImplementationRunResponse.of(projects.rejectImplementation(projectId, runId, actor));
+    }
+
     @PostMapping("/projects/{projectId}/comments")
     ResponseEntity<ApiDtos.AxRenewalCommentResponse> addComment(
             @PathVariable UUID projectId,

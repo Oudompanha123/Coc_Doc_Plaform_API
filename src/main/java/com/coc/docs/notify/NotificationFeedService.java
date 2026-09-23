@@ -309,6 +309,12 @@ public class NotificationFeedService {
             case AuditAction.AX_RENEWAL_DESTINATION_SET -> "Set where renewed code is written";
             case AuditAction.AX_RENEWAL_SECTION_CONFIRM -> "Confirmed a renewal plan section";
             case AuditAction.AX_RENEWAL_IMPLEMENTATION_START -> "Started a renewal implementation";
+            // Added here at merge time: feature/ax-renewal-generate-and-apply
+            // introduced these two actions without a sentence each, which the
+            // "every visible action has one" guard catches — an action with no
+            // wording reads as its own raw constant in the activity feed.
+            case AuditAction.AX_RENEWAL_IMPLEMENTATION_APPROVE -> "Approved generated code changes";
+            case AuditAction.AX_RENEWAL_IMPLEMENTATION_REJECT -> "Rejected generated code changes";
             case AuditAction.AX_RENEWAL_COMMENT_ADD -> "Commented on a renewal project";
             case AuditAction.AX_RENEWAL_COMMENT_DELETE -> "Removed a comment from a renewal project";
             case AuditAction.ACCOUNT_CAPABILITY_GRANT -> "Granted a capability";

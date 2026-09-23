@@ -12,6 +12,7 @@ import com.coc.docs.axrenewal.AxRenewalConfirmation;
 import com.coc.docs.axrenewal.AxRenewalDbChange;
 import com.coc.docs.axrenewal.AxRenewalDbConnection;
 import com.coc.docs.axrenewal.AxRenewalDestination;
+import com.coc.docs.axrenewal.AxRenewalGeneratedChange;
 import com.coc.docs.axrenewal.AxRenewalImplementationRun;
 import com.coc.docs.axrenewal.AxRenewalPageMapping;
 import com.coc.docs.axrenewal.AxRenewalProject;
@@ -1204,11 +1205,28 @@ public final class ApiDtos {
             JsonNode beforeReport,
             JsonNode afterReport,
             Instant startedAt,
-            Instant completedAt) {
+            Instant completedAt,
+            String failureReason) {
 
         public static AxRenewalImplementationRunResponse of(AxRenewalImplementationRun run) {
             return new AxRenewalImplementationRunResponse(
-                    run.id(), run.status(), run.beforeReport(), run.afterReport(), run.startedAt(), run.completedAt());
+                    run.id(),
+                    run.status(),
+                    run.beforeReport(),
+                    run.afterReport(),
+                    run.startedAt(),
+                    run.completedAt(),
+                    run.failureReason());
+        }
+    }
+
+    /** One file a Generate run actually found different — real before/after content, never a computed patch format (ADR-044). */
+    public record AxRenewalGeneratedChangeResponse(
+            String path, String changeKind, String beforeContent, String afterContent) {
+
+        public static AxRenewalGeneratedChangeResponse of(AxRenewalGeneratedChange change) {
+            return new AxRenewalGeneratedChangeResponse(
+                    change.path(), change.changeKind(), change.beforeContent(), change.afterContent());
         }
     }
 
