@@ -165,6 +165,14 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/change-password")
                         .hasRole(AppRole.USER.name())
 
+                        // Self-service deactivation (ADR-042): any signed-in account may
+                        // deactivate itself, unlike /api/v1/admin/accounts/** below, which
+                        // stays a fixed super_admin floor for acting on someone else's
+                        // account. This route only ever acts on the caller's own row,
+                        // resolved from the session — same reasoning as PATCH /auth/me.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/me/deactivate")
+                        .hasRole(AppRole.USER.name())
+
                         // Self-service TOTP enrollment (ADR-031): same floor and reasoning
                         // as change-password above -- acts on the caller's own account,
                         // resolved from the session, and cannot name another.

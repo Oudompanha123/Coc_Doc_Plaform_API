@@ -29,6 +29,22 @@ public final class AuditAction {
     public static final String ACCOUNT_REACTIVATE = "account.reactivate";
 
     /**
+     * A self-service deactivation was scheduled but has not taken effect yet
+     * (revision of ADR-042) — {@code detail} carries {@code days} and {@code
+     * scheduledFor}. Distinct from {@link #ACCOUNT_DEACTIVATE}, which is only
+     * written once {@code deactivated_at} is actually set, whether that is
+     * immediately (admin path) or once the grace period elapses (self-service
+     * sweep).
+     */
+    public static final String ACCOUNT_DEACTIVATE_SCHEDULE = "account.deactivate_schedule";
+
+    /**
+     * A pending self-service deactivation was cancelled by its owner signing
+     * back in before it took effect (revision of ADR-042).
+     */
+    public static final String ACCOUNT_DEACTIVATE_CANCEL = "account.deactivate_cancel";
+
+    /**
      * The account row is gone (ADR-023). The only account action whose target
      * cannot be looked up afterwards, so the entry carries the subject email
      * and roles in {@code detail} — the trail has to answer "who was removed"

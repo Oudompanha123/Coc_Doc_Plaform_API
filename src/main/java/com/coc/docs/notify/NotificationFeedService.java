@@ -274,6 +274,8 @@ public class NotificationFeedService {
             case AuditAction.ACCOUNT_CREATE -> "Created an account";
             case AuditAction.ACCOUNT_ROLE_CHANGE -> "Changed an account's role";
             case AuditAction.ACCOUNT_DEACTIVATE -> "Deactivated an account";
+            case AuditAction.ACCOUNT_DEACTIVATE_SCHEDULE -> "Scheduled an account to deactivate";
+            case AuditAction.ACCOUNT_DEACTIVATE_CANCEL -> "Cancelled a scheduled deactivation";
             case AuditAction.ACCOUNT_REACTIVATE -> "Reactivated an account";
             case AuditAction.ACCOUNT_DELETE -> "Deleted an account";
             case AuditAction.ACCOUNT_REGISTER -> "Registered an account";

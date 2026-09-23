@@ -68,6 +68,16 @@ public record Account(
         Instant avatarUploadedAt,
         AccountStatus status,
         Instant deactivatedAt,
+        /**
+         * Non-null while a self-service deactivation is pending but has not
+         * taken effect yet (revision of ADR-042) — the account stays
+         * {@link #isActive()} until this time passes. Set by {@code
+         * SessionService.deactivateSelf}, cleared by a sign-in that arrives
+         * before it ({@code SessionService.issue}) or by {@code
+         * ScheduledDeactivationSweeper} once it is reached, whichever
+         * happens first.
+         */
+        Instant deactivationScheduledFor,
         Instant createdAt,
         Instant updatedAt,
         /**
@@ -132,21 +142,21 @@ public record Account(
     /** A copy with a different status, for a {@code super_admin}'s approve or reject. */
     public Account withStatus(AccountStatus newStatus) {
         return new Account(
-                id, email, displayName, roles, avatarUrl, avatarUploadedAt, newStatus, deactivatedAt, createdAt,
-                updatedAt, mustChangePassword, hasPassword);
+                id, email, displayName, roles, avatarUrl, avatarUploadedAt, newStatus, deactivatedAt,
+                deactivationScheduledFor, createdAt, updatedAt, mustChangePassword, hasPassword);
     }
 
     /** A copy holding a different set of roles. */
     public Account withRoles(Set<AppRole> newRoles) {
         return new Account(
-                id, email, displayName, newRoles, avatarUrl, avatarUploadedAt, status, deactivatedAt, createdAt,
-                updatedAt, mustChangePassword, hasPassword);
+                id, email, displayName, newRoles, avatarUrl, avatarUploadedAt, status, deactivatedAt,
+                deactivationScheduledFor, createdAt, updatedAt, mustChangePassword, hasPassword);
     }
 
     /** A copy with a self-uploaded photo (ADR-026) — {@code avatarUploadedAt} marks it as owner-controlled. */
     public Account withUploadedAvatar(String newAvatarUrl, Instant uploadedAt) {
         return new Account(
-                id, email, displayName, roles, newAvatarUrl, uploadedAt, status, deactivatedAt, createdAt,
-                updatedAt, mustChangePassword, hasPassword);
+                id, email, displayName, roles, newAvatarUrl, uploadedAt, status, deactivatedAt,
+                deactivationScheduledFor, createdAt, updatedAt, mustChangePassword, hasPassword);
     }
 }

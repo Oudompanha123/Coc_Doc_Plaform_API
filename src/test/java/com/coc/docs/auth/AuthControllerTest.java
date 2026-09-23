@@ -2,6 +2,7 @@ package com.coc.docs.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
@@ -163,7 +164,8 @@ class AuthControllerTest {
                     .thenReturn(new SessionService.IssuedSession(
                             "opaque-session-token",
                             caller.account(),
-                            Instant.parse("2026-09-10T09:00:00Z")));
+                            Instant.parse("2026-09-10T09:00:00Z"),
+                            false));
 
             mvc.perform(post("/api/v1/auth/google")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -185,7 +187,7 @@ class AuthControllerTest {
             var caller = TestCallers.user(AppRole.USER);
             when(sessions.signIn(any(), any(), any(), any()))
                     .thenReturn(new SessionService.IssuedSession(
-                            "opaque-session-token", caller.account(), Instant.now()));
+                            "opaque-session-token", caller.account(), Instant.now(), false));
 
             MvcResult result = mvc.perform(post("/api/v1/auth/google")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -441,6 +443,7 @@ class AuthControllerTest {
                     null,
                     AccountStatus.PENDING,
                     null,
+                    null,
                     Instant.now(),
                     Instant.now(),
                     false,
@@ -545,7 +548,7 @@ class AuthControllerTest {
             var caller = TestCallers.user(AppRole.USER);
             when(sessions.signIn(any(), any(), any(), any()))
                     .thenReturn(new SessionService.IssuedSession(
-                            "opaque-session-token", caller.account(), Instant.now()));
+                            "opaque-session-token", caller.account(), Instant.now(), false));
 
             mvc.perform(post("/api/v1/auth/google")
                             .cookie(new jakarta.servlet.http.Cookie(
@@ -564,7 +567,7 @@ class AuthControllerTest {
             var caller = TestCallers.user(AppRole.USER);
             when(sessions.signIn(any(), any(), any(), any()))
                     .thenReturn(new SessionService.IssuedSession(
-                            "opaque-session-token", caller.account(), Instant.now()));
+                            "opaque-session-token", caller.account(), Instant.now(), false));
 
             mvc.perform(post("/api/v1/auth/google")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -583,7 +586,7 @@ class AuthControllerTest {
             var caller = TestCallers.user(AppRole.USER);
             when(sessions.signIn(any(), any(), any(), any()))
                     .thenReturn(new SessionService.IssuedSession(
-                            "opaque-session-token", caller.account(), Instant.now()));
+                            "opaque-session-token", caller.account(), Instant.now(), false));
 
             MvcResult result = mvc.perform(post("/api/v1/auth/google")
                             .cookie(new jakarta.servlet.http.Cookie(
@@ -974,6 +977,97 @@ class AuthControllerTest {
     }
 
     /**
+     * ADR-042 (revised: a grace period, not an immediate flip): self-service
+     * deactivation, distinct from the {@code super_admin}-only
+     * admin-management endpoint — any signed-in role can reach this one, and
+     * it only ever acts on the caller resolved from the session.
+     */
+    @Nested
+    @DisplayName("POST /api/v1/auth/me/deactivate")
+    class DeactivateSelf {
+
+        private static String body(int graceDays) {
+            return "{\"graceDays\":" + graceDays + "}";
+        }
+
+        @Test
+        @DisplayName("schedules deactivation, returns when, and clears the session cookie, same as logout")
+        void schedulesAndClearsCookie() throws Exception {
+            Instant scheduledFor = Instant.parse("2026-09-29T09:00:00Z");
+            when(sessions.deactivateSelf(any(), eq(7))).thenReturn(scheduledFor);
+
+            MvcResult result = mvc.perform(post("/api/v1/auth/me/deactivate")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(7)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.scheduledFor").value("2026-09-29T09:00:00Z"))
+                    .andReturn();
+
+            verify(sessions).deactivateSelf(any(), eq(7));
+            assertThat(result.getResponse().getHeader(HttpHeaders.SET_COOKIE))
+                    .contains(SessionService.COOKIE_NAME + "=")
+                    .contains("Max-Age=0");
+        }
+
+        @Test
+        @DisplayName("reachable by an ordinary user, not only super_admin — unlike the admin-management endpoint")
+        void reachableByOrdinaryUser() throws Exception {
+            when(sessions.deactivateSelf(any(), eq(7))).thenReturn(Instant.now());
+
+            mvc.perform(post("/api/v1/auth/me/deactivate")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(7)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("surfaces the last-active-super-admin refusal plainly")
+        void surfacesLastActiveSuperAdminRefusal() throws Exception {
+            doThrow(ApiException.conflict(
+                            "you're the only active super admin; promote someone else before "
+                                    + "deactivating your account"))
+                    .when(sessions)
+                    .deactivateSelf(any(), anyInt());
+
+            mvc.perform(post("/api/v1/auth/me/deactivate")
+                            .with(as(AppRole.SUPER_ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(7)))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.detail").value(
+                            "you're the only active super admin; promote someone else before "
+                                    + "deactivating your account"));
+        }
+
+        @Test
+        @DisplayName("surfaces an out-of-range grace period, from the service's own validation")
+        void surfacesInvalidGracePeriod() throws Exception {
+            doThrow(ApiException.badRequest("choose one of: [3, 7, 14, 30]"))
+                    .when(sessions)
+                    .deactivateSelf(any(), eq(5));
+
+            mvc.perform(post("/api/v1/auth/me/deactivate")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(5)))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("refuses an anonymous caller")
+        void refusesAnonymous() throws Exception {
+            mvc.perform(post("/api/v1/auth/me/deactivate")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(7)))
+                    .andExpect(status().isUnauthorized());
+
+            verify(sessions, never()).deactivateSelf(any(), anyInt());
+        }
+    }
+
+    /**
      * {@code MustChangePasswordInterceptor}, exercised through this
      * controller's own routes rather than a synthetic one, since it is what
      * an invited account actually hits on its first request after logging in
@@ -1048,7 +1142,7 @@ class AuthControllerTest {
             var caller = TestCallers.user(AppRole.USER);
             when(sessions.signInWithPassword(any(), any(), any(), any()))
                     .thenReturn(new SessionService.IssuedSession(
-                            "opaque-session-token", caller.account(), Instant.now()));
+                            "opaque-session-token", caller.account(), Instant.now(), false));
 
             mvc.perform(post("/api/v1/auth/login-password")
                             .contentType(MediaType.APPLICATION_JSON)
@@ -1100,7 +1194,7 @@ class AuthControllerTest {
             when(totp.verifyLoginChallenge(eq("pending-token"), eq("123456"))).thenReturn(caller.account());
             when(sessions.issueForAccount(eq(caller.account()), any(), any()))
                     .thenReturn(new SessionService.IssuedSession(
-                            "opaque-session-token", caller.account(), Instant.now()));
+                            "opaque-session-token", caller.account(), Instant.now(), false));
 
             MvcResult result = mvc.perform(post("/api/v1/auth/mfa/verify")
                             .cookie(new jakarta.servlet.http.Cookie(
