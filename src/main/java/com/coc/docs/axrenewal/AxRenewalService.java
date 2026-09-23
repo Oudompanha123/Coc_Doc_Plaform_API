@@ -322,7 +322,7 @@ public class AxRenewalService {
      * every other method on this class, which is also why it is not {@code
      * @Transactional} and takes no {@code actor}: there is nothing to
      * attribute, because there is nothing kept. The browser holds the
-     * conversation and replays it in {@code history} (ADR-044).
+     * conversation and replays it in {@code history} (ADR-046).
      *
      * <p>The project still has to exist. Asking about one nobody attached is
      * a 404, exactly as reading it would be.

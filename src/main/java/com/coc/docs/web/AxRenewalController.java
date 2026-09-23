@@ -218,7 +218,7 @@ public class AxRenewalController {
     }
 
     /**
-     * One chat turn with the local model (ADR-044).
+     * One chat turn with the local model (ADR-046).
      *
      * <p>Deliberately not a {@code /comments} sibling: a comment is recorded
      * and attributed, this is not recorded at all. Nothing is written by this

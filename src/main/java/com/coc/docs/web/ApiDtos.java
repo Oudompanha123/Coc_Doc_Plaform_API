@@ -1022,7 +1022,7 @@ public final class ApiDtos {
 
     /**
      * One turn typed into the AX Assistant's chat, plus the conversation the
-     * browser is replaying with it (ADR-044).
+     * browser is replaying with it (ADR-046).
      *
      * <p>{@code history} comes from the page because the server keeps none:
      * nothing about this conversation is stored, so there is nowhere else it

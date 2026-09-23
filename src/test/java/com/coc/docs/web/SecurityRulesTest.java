@@ -930,7 +930,7 @@ class SecurityRulesTest {
         void assistant_chat_refuses_a_plain_user() throws Exception {
             // Chat can point a local model at the source folder, the same as
             // Run analysis — so it sits at the analysis floor, not at the
-            // comment floor it superficially resembles (ADR-044).
+            // comment floor it superficially resembles (ADR-046).
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/assistant/chat")
                             .with(as(AppRole.USER))
                             .contentType(MediaType.APPLICATION_JSON)

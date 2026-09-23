@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
  * an argument array, prompt over stdin) and that the text handed to the
  * model is bounded and ordered.
  *
- * <p>// req: ADR-044
+ * <p>// req: ADR-046
  */
 class LocalClaudeChatTest {
 

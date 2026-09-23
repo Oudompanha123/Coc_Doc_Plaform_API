@@ -42,7 +42,7 @@ import org.springframework.stereotype.Component;
  *   <li>With no audit entry, there is no record of who asked what. That is
  *       acceptable only while this stays read-only. If chat ever gains the
  *       ability to change a project, it must go back through the audited
- *       command path in {@code AxRenewalService} instead (ADR-044).
+ *       command path in {@code AxRenewalService} instead (ADR-046).
  * </ul>
  *
  * <h2>Local-only, for the same reason analysis is</h2>
@@ -71,7 +71,7 @@ import org.springframework.stereotype.Component;
  *       feature.
  * </ul>
  *
- * <p>// req: ADR-043, ADR-044
+ * <p>// req: ADR-043, ADR-046
  */
 @Component
 public class LocalClaudeChat {

@@ -369,7 +369,7 @@ public class SecurityConfig {
                         // comment floor it superficially resembles: both this
                         // and Run analysis can point a local model at the
                         // source folder, and reading the source is the thing
-                        // being gated. Writing a comment cannot (ADR-044).
+                        // being gated. Writing a comment cannot (ADR-046).
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/assistant/chat")
                         .hasRole(AppRole.ADMIN.name())
                         .requestMatchers(HttpMethod.PUT, "/api/v1/ax-renewal/projects/*/plan/**")
