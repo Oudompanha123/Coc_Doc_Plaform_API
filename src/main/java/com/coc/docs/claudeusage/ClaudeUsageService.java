@@ -44,8 +44,16 @@ public class ClaudeUsageService {
      */
     public static final long DEFAULT_SOFT_BUDGET_TOKENS = 1_200_000L;
 
-    /** Percentage of the effective budget at or above which a member counts toward "Near Limit". */
-    private static final int NEAR_LIMIT_PCT = 80;
+    /**
+     * Soft-budget status thresholds, matching the reference tool's own
+     * amber/red split rather than a single cutoff (ADR-035). "Near Limit" on
+     * the dashboard counts amber and red together, i.e. at or above {@link
+     * #AMBER_AT_PCT}.
+     */
+    private static final int AMBER_AT_PCT = 70;
+
+    /** At or above this, a member is in the reference tool's "hand off" zone. */
+    private static final int RED_AT_PCT = 90;
 
     /** The storage column's scale — cost is summed across every model in a day at higher precision, then rounded once to this. */
     private static final int COST_SCALE = 4;
@@ -349,12 +357,16 @@ public class ClaudeUsageService {
 
         ClaudeUsageTotals totals = totalsOf(memberUsages);
 
-        int activeUsers = (int) roster.stream()
-                .filter(member -> ClaudeUsageMember.STATUS_ACTIVE.equals(member.status()))
+        // Reported any tokens in this exact period (ADR-035, reference tool
+        // parity) — deliberately period-scoped, not roster status: switching
+        // Day/Week/Month must change this number, the same way it changes
+        // every other figure on the dashboard.
+        int activeUsers = (int) memberUsages.stream()
+                .filter(usage -> usage.totalTokens() > 0)
                 .count();
         int nearLimit = (int) memberUsages.stream()
                 .filter(usage -> !ClaudeUsageMember.STATUS_REMOVED.equals(usage.member().status()))
-                .filter(usage -> usage.budgetPct() >= NEAR_LIMIT_PCT)
+                .filter(usage -> !ClaudeUsageMemberUsage.STATUS_GREEN.equals(usage.budgetStatus()))
                 .count();
 
         Instant lastUpdated =
@@ -396,7 +408,19 @@ public class ClaudeUsageService {
         int pct = effectiveBudget > 0 ? (int) Math.round(total * 100.0 / effectiveBudget) : 0;
 
         return new ClaudeUsageMemberUsage(
-                member, input, output, cacheRead, cacheCreation, cost, List.copyOf(models), lastActive, effectiveBudget, pct);
+                member, input, output, cacheRead, cacheCreation, cost, List.copyOf(models), lastActive, effectiveBudget, pct,
+                budgetStatusFor(pct));
+    }
+
+    /** Green below {@link #AMBER_AT_PCT}, amber below {@link #RED_AT_PCT}, red at or above it. */
+    private static String budgetStatusFor(int pct) {
+        if (pct >= RED_AT_PCT) {
+            return ClaudeUsageMemberUsage.STATUS_RED;
+        }
+        if (pct >= AMBER_AT_PCT) {
+            return ClaudeUsageMemberUsage.STATUS_AMBER;
+        }
+        return ClaudeUsageMemberUsage.STATUS_GREEN;
     }
 
     private static List<ClaudeUsageDailyPoint> rollupDaily(LocalDate from, LocalDate to, List<ClaudeUsageDaily> rows) {

@@ -1,5 +1,7 @@
 package com.coc.docs.web;
 
+import com.coc.docs.account.Account;
+import com.coc.docs.claudeusage.ClaudeUsageIngestTokenService;
 import com.coc.docs.claudeusage.ClaudeUsageModelTokens;
 import com.coc.docs.claudeusage.ClaudeUsageProperties;
 import com.coc.docs.claudeusage.ClaudeUsageService;
@@ -8,7 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import org.springframework.http.HttpStatus;
+import java.util.Optional;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -23,16 +25,24 @@ import org.springframework.web.bind.annotation.RestController;
  * model (TM-028) already wrote this route's name against before this
  * controller existed.
  *
- * <p><b>Authenticated by a single shared bearer secret, not a session.</b> This
- * is the one deliberate exception to this backend's whole authorization model
+ * <p><b>Authenticated by a bearer credential, not a session.</b> This is the
+ * one deliberate exception to this backend's whole authorization model
  * (ADR-011: every other route is enforced from a session the caller cannot
  * forge). {@code SecurityConfig} {@code permitAll()}s this path for exactly
  * that reason — the check below, not the filter chain, is what protects it —
  * and per {@code NFR-SEC-CHANNEL}'s own wording this is explicitly not a
- * template for an editorial write path. See ADR-035 decision 2 for why a
- * single shared secret, not a per-member token.
+ * template for an editorial write path.
  *
- * <p>// req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-035, ADR-036
+ * <p><b>Two credential shapes are accepted (ADR-044, revising ADR-035 §2):</b>
+ * {@code ClaudeUsageProperties}' single shared secret — unscoped, may report
+ * as any email, kept only for deployments already configured with it — and a
+ * per-account token minted from {@code POST /api/v1/me/usage-tokens}, which
+ * {@link ClaudeUsageIngestTokenService#resolve} restricts to its own
+ * account's email. {@code INGEST_URL} is required either way; {@code
+ * INGEST_SECRET} is not — see {@code push-usage.mjs}'s own {@code
+ * canReport} gate, unaffected by which credential shape fills it.
+ *
+ * <p>// req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-035, ADR-036, ADR-044
  */
 @RestController
 public class ClaudeUsageIngestController {
@@ -41,10 +51,13 @@ public class ClaudeUsageIngestController {
 
     private final ClaudeUsageService usage;
     private final ClaudeUsageProperties properties;
+    private final ClaudeUsageIngestTokenService tokens;
 
-    public ClaudeUsageIngestController(ClaudeUsageService usage, ClaudeUsageProperties properties) {
+    public ClaudeUsageIngestController(
+            ClaudeUsageService usage, ClaudeUsageProperties properties, ClaudeUsageIngestTokenService tokens) {
         this.usage = usage;
         this.properties = properties;
+        this.tokens = tokens;
     }
 
     @PostMapping("/api/ingest")
@@ -52,7 +65,7 @@ public class ClaudeUsageIngestController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @Valid @RequestBody ApiDtos.ClaudeUsageIngestRequest request) {
 
-        authorize(authorization);
+        authorize(authorization, request.email());
 
         ClaudeUsageService.IngestOutcome outcome = usage.recordUsage(
                 request.email(),
@@ -79,18 +92,30 @@ public class ClaudeUsageIngestController {
         return out;
     }
 
-    private void authorize(String authorization) {
-        if (!properties.ingestConfigured()) {
-            // Not the caller's fault -- nobody has set app.claude-usage.ingest-secret
-            // on this deployment yet. 503, not 401, says so.
-            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "usage ingestion is not configured on this deployment");
-        }
+    /**
+     * Accepts the shared secret (any email, unscoped) or a per-account token
+     * (that account's own email only). Neither being configured/valid is a
+     * {@code 401}, not a {@code 503}: unlike the shared-secret-only design
+     * this revises, an otherwise-unconfigured deployment can still accept
+     * ingestion the moment one admin mints their own token, so there is no
+     * "not configured at all" state worth a distinct status for.
+     */
+    private void authorize(String authorization, String requestEmail) {
         if (authorization == null || !authorization.startsWith(BEARER_PREFIX)) {
             throw ApiException.unauthorized("missing or malformed Authorization header");
         }
         String provided = authorization.substring(BEARER_PREFIX.length());
-        if (!secretMatches(provided, properties.ingestSecret())) {
-            throw ApiException.unauthorized("invalid ingest secret");
+
+        if (properties.ingestConfigured() && secretMatches(provided, properties.ingestSecret())) {
+            return;
+        }
+
+        Optional<Account> owner = tokens.resolve(provided);
+        if (owner.isEmpty()) {
+            throw ApiException.unauthorized("invalid ingest credential");
+        }
+        if (!owner.get().email().equalsIgnoreCase(requestEmail == null ? "" : requestEmail)) {
+            throw ApiException.forbidden("this token may only report usage for its own account");
         }
     }
 

@@ -351,7 +351,7 @@ class ClaudeUsageServiceTest {
         }
 
         @Test
-        @DisplayName("rolls up tokens/cost per member, sorts by total desc, and flags near-limit at 80%")
+        @DisplayName("rolls up tokens/cost per member, sorts by total desc, and flags near-limit at 70% (amber)")
         void rollsUpMembersAndFlagsNearLimit() {
             LocalDate day = LocalDate.of(2026, 9, 17);
             ClaudeUsageMember heavy = member("heavy@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, 700_000L); // scaled to 100k/day
@@ -371,10 +371,59 @@ class ClaudeUsageServiceTest {
             assertThat(dashboard.members().get(0).member().email()).isEqualTo("heavy@cocdocs.example");
             // 700_000 weekly / 7 * 1 day = 100_000 effective budget; 100_000 total => 100%
             assertThat(dashboard.members().get(0).budgetPct()).isEqualTo(100);
+            assertThat(dashboard.members().get(0).budgetStatus()).isEqualTo(ClaudeUsageMemberUsage.STATUS_RED);
             assertThat(dashboard.members().get(0).modelsUsed()).containsExactly("Sonnet 5");
             assertThat(dashboard.nearLimit()).isEqualTo(1);
             assertThat(dashboard.activeUsers()).isEqualTo(2);
             assertThat(dashboard.totals().totalTokens()).isEqualTo(100_150);
+        }
+
+        @Test
+        @DisplayName("budget status is green below 70%, amber 70-89%, red at 90%+")
+        void budgetStatusThreeTier() {
+            LocalDate day = LocalDate.of(2026, 9, 17);
+            // 7_000_000 weekly / 7 = 1_000_000/day effective budget for each.
+            ClaudeUsageMember green = member("green@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, 7_000_000L);
+            ClaudeUsageMember amber = member("amber@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, 7_000_000L);
+            ClaudeUsageMember red = member("red@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, 7_000_000L);
+            when(members.list()).thenReturn(List.of(green, amber, red));
+
+            ClaudeUsageDaily greenRow = new ClaudeUsageDaily(
+                    UUID.randomUUID(), green.id(), day, 600_000, 0, 0, 0, BigDecimal.ZERO, "", Instant.now()); // 60%
+            ClaudeUsageDaily amberRow = new ClaudeUsageDaily(
+                    UUID.randomUUID(), amber.id(), day, 700_000, 0, 0, 0, BigDecimal.ZERO, "", Instant.now()); // 70%
+            ClaudeUsageDaily redRow = new ClaudeUsageDaily(
+                    UUID.randomUUID(), red.id(), day, 900_000, 0, 0, 0, BigDecimal.ZERO, "", Instant.now()); // 90%
+            when(daily.listInRange(day, day)).thenReturn(List.of(greenRow, amberRow, redRow));
+
+            var dashboard = service.dashboard("day", 0, day);
+
+            var byEmail = dashboard.members().stream()
+                    .collect(java.util.stream.Collectors.toMap(u -> u.member().email(), u -> u));
+            assertThat(byEmail.get("green@cocdocs.example").budgetStatus()).isEqualTo(ClaudeUsageMemberUsage.STATUS_GREEN);
+            assertThat(byEmail.get("amber@cocdocs.example").budgetStatus()).isEqualTo(ClaudeUsageMemberUsage.STATUS_AMBER);
+            assertThat(byEmail.get("red@cocdocs.example").budgetStatus()).isEqualTo(ClaudeUsageMemberUsage.STATUS_RED);
+            // Near Limit is amber + red together, i.e. at or above 70%.
+            assertThat(dashboard.nearLimit()).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("Active Users is period-scoped: a tracked member who reported nothing this period does not count")
+        void activeUsersIsPeriodScoped() {
+            LocalDate day = LocalDate.of(2026, 9, 17);
+            ClaudeUsageMember reportedToday = member("here@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            ClaudeUsageMember quietToday = member("quiet@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.list()).thenReturn(List.of(reportedToday, quietToday));
+
+            ClaudeUsageDaily row = new ClaudeUsageDaily(
+                    UUID.randomUUID(), reportedToday.id(), day, 100, 50, 0, 0, BigDecimal.ZERO, "", Instant.now());
+            when(daily.listInRange(day, day)).thenReturn(List.of(row));
+
+            var dashboard = service.dashboard("day", 0, day);
+
+            // Both are STATUS_ACTIVE on the roster, but only one reported tokens today.
+            assertThat(dashboard.members()).hasSize(2);
+            assertThat(dashboard.activeUsers()).isEqualTo(1);
         }
 
         @Test
@@ -391,6 +440,9 @@ class ClaudeUsageServiceTest {
 
             assertThat(dashboard.members().get(0).budgetPct()).isGreaterThan(100);
             assertThat(dashboard.nearLimit()).isZero();
+            // Removed is not excluded from Active Users -- that stat is purely
+            // period usage, matching the reference tool, which has no roster concept.
+            assertThat(dashboard.activeUsers()).isEqualTo(1);
         }
     }
 

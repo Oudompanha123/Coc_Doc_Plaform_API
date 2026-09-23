@@ -147,6 +147,12 @@ class SecurityRulesTest {
     // that is ClaudeUsageServiceTest's job.
     @MockitoBean com.coc.docs.claudeusage.ClaudeUsageService claudeUsageService;
 
+    // ClaudeUsageIngestController and the new ClaudeUsageIngestTokenController
+    // (ADR-044) both need it to construct. What it resolves is
+    // ClaudeUsageIngestTokenServiceTest's job; this class only asserts who may
+    // reach POST /api/ingest and /api/v1/me/usage-tokens/**.
+    @MockitoBean com.coc.docs.claudeusage.ClaudeUsageIngestTokenService claudeUsageIngestTokenService;
+
     @MockitoBean com.coc.docs.axrenewal.AxRenewalService axRenewalService;
 
     @TestConfiguration
@@ -665,17 +671,41 @@ class SecurityRulesTest {
         @Test
         void ingest_is_reachable_without_a_session() throws Exception {
             // permitAll() at the filter-chain level (ClaudeUsageIngestController
-            // is authorized by its own bearer-secret check, never by a
-            // session) — proven here by 503, not 401/403: with no ingest
-            // secret configured in this slice (see Beans.claudeUsageProperties),
-            // the controller itself refuses for that reason, which only
-            // happens if the filter chain let the request through to it.
+            // is authorized by its own bearer-credential check, never by a
+            // session) — proven here by 401 for a missing Authorization header,
+            // which only happens if the filter chain let the request through to
+            // the controller. (ADR-044: a 503 "not configured" no longer exists
+            // — with no shared secret configured in this slice, the controller
+            // falls through to the per-account token check and refuses with the
+            // same 401 an invalid credential of either shape gets.)
             mvc.perform(post("/api/ingest")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(
                                     "{\"email\":\"a@example.com\",\"date\":\"2026-01-01\","
                                             + "\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheCreation\":0}"))
-                    .andExpect(status().isServiceUnavailable());
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void usage_tokens_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(get("/api/v1/me/usage-tokens")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void usage_tokens_refuses_a_plain_user() throws Exception {
+            // Floored at ADMIN (V35, ADR-044) — a plain user may report their
+            // own usage via a token someone else mints for them, but may not
+            // mint one, the same asymmetry FR-AUTH-008 already draws between
+            // "may act" and "may grant/administer" elsewhere in this system.
+            mvc.perform(get("/api/v1/me/usage-tokens").with(as(AppRole.USER))).andExpect(status().isForbidden());
+        }
+
+        @Test
+        void usage_tokens_admits_an_admin() throws Exception {
+            org.mockito.Mockito.when(claudeUsageIngestTokenService.list(org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/me/usage-tokens").with(as(AppRole.ADMIN))).andExpect(status().isOk());
         }
     }
 
