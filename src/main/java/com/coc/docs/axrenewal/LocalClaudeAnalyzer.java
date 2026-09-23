@@ -319,7 +319,7 @@ public class LocalClaudeAnalyzer {
 
                 {
                   "stackDetected": { "runtime": "...", "framework": "...", "notes": "..." },
-                  "findings": [ { "severity": "info|warn|risk", "what": "...", "where": "..." } ],
+                  "findings": [ { "severity": "info|warn|risk", "what": "...", "where": "...", "fixedBy": "stack_move|database|architecture|decision|null" } ],
                   "pagesDetected": [ { "path": "...", "purpose": "..." } ],
                   "moduleCoupling": {
                     "modules": ["..."],
@@ -341,6 +341,14 @@ public class LocalClaudeAnalyzer {
                 Rules:
                 - findings: what a migration would actually have to deal with. Be specific and
                   brief. Say "none found" as a single info finding rather than inventing risks.
+                  "fixedBy" is which part of an already-planned renewal would address this,
+                  purely to help someone reading the list, not a target-stack recommendation:
+                  "stack_move" for something a newer runtime/language/framework/build tool fixes
+                  on its own, "database" for a schema or data-access change, "architecture" for a
+                  structural/code-organization change, "decision" for something that needs a
+                  person to choose (changes a contract, a behavior, or a cost), and null when it
+                  genuinely doesn't fit any of those cleanly — null is the right answer far more
+                  often than not; only tag one when you are confident, never to fill the category out.
                 - pagesDetected: routes or screens you can actually see. Empty array if you
                   cannot see any. Never guess at a page you have not found evidence for.
                 - moduleCoupling: do this before the other sections below, while you still have
