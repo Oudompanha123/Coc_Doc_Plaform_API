@@ -9,6 +9,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -16,6 +20,8 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Business rules for one AX Renewal project: the attach → analyze → plan
@@ -46,7 +52,10 @@ public class AxRenewalService {
     private final AuditRepository audit;
     private final ObjectMapper json;
     private final LocalClaudeAnalyzer localClaude;
+    private final LocalClaudeChat localChat;
     private final AxRenewalProperties properties;
+    private final AxRenewalCodeGenerator generator;
+    private final AxRenewalImplementationRunner runner;
 
     public AxRenewalService(
             AxRenewalProjectRepository projects,
@@ -60,7 +69,10 @@ public class AxRenewalService {
             AuditRepository audit,
             ObjectMapper json,
             LocalClaudeAnalyzer localClaude,
-            AxRenewalProperties properties) {
+            LocalClaudeChat localChat,
+            AxRenewalProperties properties,
+            AxRenewalCodeGenerator generator,
+            AxRenewalImplementationRunner runner) {
         this.projects = projects;
         this.analyses = analyses;
         this.plan = plan;
@@ -72,7 +84,10 @@ public class AxRenewalService {
         this.audit = audit;
         this.json = json;
         this.localClaude = localClaude;
+        this.localChat = localChat;
         this.properties = properties;
+        this.generator = generator;
+        this.runner = runner;
     }
 
     // -----------------------------------------------------------------------
@@ -311,6 +326,27 @@ public class AxRenewalService {
      */
     public record AxRenewalEngineStatus(boolean connected, boolean readsSource) {}
 
+    /**
+     * One turn of free-text conversation with the local model, about one
+     * project.
+     *
+     * <p><b>Writes nothing.</b> No row, no comment, no audit entry — unlike
+     * every other method on this class, which is also why it is not {@code
+     * @Transactional} and takes no {@code actor}: there is nothing to
+     * attribute, because there is nothing kept. The browser holds the
+     * conversation and replays it in {@code history} (ADR-046).
+     *
+     * <p>The project still has to exist. Asking about one nobody attached is
+     * a 404, exactly as reading it would be.
+     */
+    public LocalClaudeChat.Reply chat(UUID projectId, List<LocalClaudeChat.Turn> history, String message) {
+        AxRenewalProject project = requireProject(projectId);
+        if (message == null || message.isBlank()) {
+            throw ApiException.badRequest("say something to the assistant");
+        }
+        return localChat.reply(project, history, message.trim());
+    }
+
     // -----------------------------------------------------------------------
     // Plan — stack move
     // -----------------------------------------------------------------------
@@ -511,14 +547,16 @@ public class AxRenewalService {
      * destination is set — a business rule, reported as a 409, not an
      * authorisation decision (see the class Javadoc).
      *
-     * <p><b>Completes synchronously, honestly.</b> Phase 1 generates no code
-     * at all (ADR-037): there is no background pipeline to be "running", so
-     * pretending one exists by leaving the row in {@code running} would be
-     * misleading rather than merely incomplete. The recorded report restates
-     * what was confirmed and says plainly that implementing it is a manual
-     * or future-automated step — unlike the prototype this replaces, which
-     * fabricated specific before/after metrics for a demo. A real tool must
-     * not invent numbers it did not measure.
+     * <p>Two paths (ADR-044). Without a local model, or with anything other
+     * than a filesystem destination, this is exactly the original Phase-1
+     * placeholder: completes synchronously, records what was confirmed, and
+     * says plainly that no code was generated — unlike the prototype this
+     * replaces, which fabricated specific before/after metrics for a demo. A
+     * real tool must not invent numbers it did not measure. With both, this
+     * instead kicks off a real Generate run in the background and returns
+     * immediately with the run at {@code generating} — see {@link
+     * #approveImplementation} for what happens once it reaches {@code
+     * awaiting_review}.
      */
     @Transactional
     public AxRenewalImplementationRun startImplementation(UUID projectId, CurrentUser actor) {
@@ -538,6 +576,68 @@ public class AxRenewalService {
             throw ApiException.conflict("implementation is already running for this project");
         }
 
+        if (generator.canGenerate() && AxRenewalDestination.KIND_FILESYSTEM_PATH.equals(destination.kind())) {
+            String confirmedPlan = buildConfirmedPlanDescription(projectId);
+            if (confirmedPlan.isBlank()) {
+                // Confirming a section is not the same as having decided
+                // something in it — Stack move can be confirmed with every
+                // layer still pointing nowhere (the seeded suggestion only
+                // ever fills in the *old* side; a real target is always a
+                // person's own decision), same for an empty Architecture
+                // draft, no page mappings, no database changes. Caught here,
+                // before a run or a 20-minute CLI call exists to fail later
+                // with a vaguer version of the same fact.
+                throw ApiException.conflict(
+                        "the confirmed plan doesn't describe any concrete change yet — enter at least one real "
+                                + "Stack move target, an Architecture description, a page mapping, or a database "
+                                + "change before rebuilding");
+            }
+            return beginGeneration(projectId, project, destination, actor, confirmedPlan);
+        }
+        return recordPlaceholderCompletion(projectId, project, destination, actor);
+    }
+
+    private AxRenewalImplementationRun beginGeneration(
+            UUID projectId,
+            AxRenewalProject project,
+            AxRenewalDestination destination,
+            CurrentUser actor,
+            String confirmedPlan) {
+        ObjectNode beforeReport =
+                json.createObjectNode().put("mode", "generate").put("destination", destination.target());
+        AxRenewalImplementationRun run = implementations.insert(
+                projectId, actor.id(), beforeReport, AxRenewalImplementationRun.STATUS_GENERATING);
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_IMPLEMENTATION_START,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode().put("project", project.name()).put("mode", "generate"));
+
+        // Off the request thread from here — AxRenewalImplementationRunner is
+        // a separate bean specifically so @Async actually takes effect (see
+        // its own Javadoc on why a method here calling itself would not). It
+        // must not start until *this* transaction has actually committed the
+        // insert above: this whole method still runs inside startImplementation's
+        // @Transactional, so firing the async call here would race the runner's
+        // first write (markStaging) against a row that, from its own separate
+        // connection, does not exist yet — the write silently affects zero rows
+        // rather than failing, leaving staging_path permanently null even
+        // though the run goes on to reach awaiting_review normally. Deferring
+        // to afterCommit is the only way to guarantee ordering.
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                runner.runGeneration(run.id(), confirmedPlan);
+            }
+        });
+        return run;
+    }
+
+    private AxRenewalImplementationRun recordPlaceholderCompletion(
+            UUID projectId, AxRenewalProject project, AxRenewalDestination destination, CurrentUser actor) {
         List<AxRenewalStackLayer> stackLayers = plan.findStackLayers(projectId);
         List<AxRenewalPageMapping> pageMappings = plan.findPageMappings(projectId);
         List<AxRenewalDbChange> dbChanges = plan.findDbChanges(projectId);
@@ -569,6 +669,181 @@ public class AxRenewalService {
         return implementations.findLatest(projectId).orElseThrow();
     }
 
+    /**
+     * Restates the confirmed Plan as instructions for the local model to
+     * carry out — every line traces to a row someone actually entered and
+     * confirmed; nothing here is invented on top of what was confirmed.
+     */
+    private String buildConfirmedPlanDescription(UUID projectId) {
+        List<AxRenewalStackLayer> stackLayers = plan.findStackLayers(projectId);
+        List<AxRenewalPageMapping> pageMappings = plan.findPageMappings(projectId);
+        List<AxRenewalDbChange> dbChanges = plan.findDbChanges(projectId);
+        AxRenewalArchitecturePlan architecture = plan.findArchitecture(projectId).orElse(null);
+
+        List<String> decidedLayers = stackLayers.stream()
+                .filter(l -> l.newTarget() != null && !l.newTarget().equals(l.oldTarget()))
+                .map(l -> "- " + l.layerKey() + ": " + (l.oldTarget() == null ? "current" : l.oldTarget()) + " -> "
+                        + l.newTarget())
+                .toList();
+
+        // Every section's header is conditional on having something real
+        // under it — unlike the version this replaced, which always wrote
+        // "Stack move:" even with zero decided layers underneath, handing
+        // the model what amounted to an empty plan and getting exactly the
+        // honest "nothing to change" answer that deserved back. See
+        // startImplementation's own check for the same fact, caught earlier.
+        StringBuilder out = new StringBuilder();
+        if (!decidedLayers.isEmpty()) {
+            out.append("Stack move:\n").append(String.join("\n", decidedLayers)).append('\n');
+        }
+        if (architecture != null && architecture.summary() != null && !architecture.summary().isBlank()) {
+            if (out.length() > 0) {
+                out.append('\n');
+            }
+            out.append("Architecture:\n").append(architecture.summary()).append('\n');
+        }
+        if (!pageMappings.isEmpty()) {
+            if (out.length() > 0) {
+                out.append('\n');
+            }
+            out.append("Page mappings:\n");
+            for (AxRenewalPageMapping p : pageMappings) {
+                out.append("- ")
+                        .append(p.oldPath() == null ? "(new)" : p.oldPath())
+                        .append(" -> ")
+                        .append(p.newPath() == null ? "(retired)" : p.newPath());
+                if (p.notes() != null && !p.notes().isBlank()) {
+                    out.append(" — ").append(p.notes());
+                }
+                out.append('\n');
+            }
+        }
+        if (!dbChanges.isEmpty()) {
+            if (out.length() > 0) {
+                out.append('\n');
+            }
+            out.append("Database changes:\n");
+            for (AxRenewalDbChange d : dbChanges) {
+                out.append("- ").append(d.changeType()).append(" on ").append(d.tableName());
+                if (d.rationale() != null && !d.rationale().isBlank()) {
+                    out.append(" — ").append(d.rationale());
+                }
+                out.append('\n');
+            }
+        }
+        return out.toString();
+    }
+
+    /**
+     * Approves a Generate run's proposed changes and copies them into the
+     * real destination — the one place in this whole feature that writes
+     * outside this application's own database, and the only thing Approve
+     * does; Generate itself never touches the destination (ADR-044).
+     */
+    @Transactional
+    public AxRenewalImplementationRun approveImplementation(UUID projectId, UUID runId, CurrentUser actor) {
+        AxRenewalProject project = requireProject(projectId);
+        AxRenewalImplementationRun run = requireOwnRun(projectId, runId);
+        if (!AxRenewalImplementationRun.STATUS_AWAITING_REVIEW.equals(run.status())) {
+            throw ApiException.conflict("this run is not awaiting review");
+        }
+        AxRenewalDestination destination =
+                destinations.find(projectId).orElseThrow(() -> ApiException.conflict("no destination set"));
+        if (!AxRenewalDestination.KIND_FILESYSTEM_PATH.equals(destination.kind())) {
+            throw ApiException.conflict("only a filesystem destination can be applied automatically");
+        }
+        if (run.stagingPath() == null) {
+            throw ApiException.conflict("this run has no staged changes to apply");
+        }
+
+        List<AxRenewalGeneratedChange> changes = implementations.findGeneratedChanges(runId);
+        implementations.updateStatus(runId, AxRenewalImplementationRun.STATUS_APPLYING);
+
+        Path destinationRoot = Path.of(destination.target()).toAbsolutePath().normalize();
+        Path stagingRoot = Path.of(run.stagingPath());
+        try {
+            Files.createDirectories(destinationRoot);
+            for (AxRenewalGeneratedChange c : changes) {
+                // Never trust a generated path to stay inside the destination on its
+                // own, even though it always has so far (ADR-011's own habit of not
+                // trusting a boundary just because nothing has crossed it yet).
+                Path target = destinationRoot.resolve(c.path()).normalize();
+                if (!target.startsWith(destinationRoot)) {
+                    throw new IOException("refusing to write outside the destination for path " + c.path());
+                }
+                if (AxRenewalGeneratedChange.KIND_DELETE.equals(c.changeKind())) {
+                    Files.deleteIfExists(target);
+                } else {
+                    Files.createDirectories(target.getParent());
+                    Files.copy(stagingRoot.resolve(c.path()), target, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+        } catch (IOException e) {
+            implementations.markFailed(runId, "could not apply the approved changes: " + e.getMessage());
+            throw ApiException.conflict("could not apply the approved changes: " + e.getMessage());
+        }
+
+        AxRenewalImplementationRunner.deleteQuietly(stagingRoot);
+        implementations.clearStaging(runId);
+        ObjectNode afterReport =
+                json.createObjectNode().put("filesApplied", changes.size()).put("destination", destination.target());
+        implementations.markCompleted(runId, AxRenewalImplementationRun.STATUS_APPLIED, afterReport);
+        projects.updateStatus(projectId, AxRenewalProject.STATUS_COMPLETED);
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_IMPLEMENTATION_APPROVE,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode().put("project", project.name()).put("filesApplied", changes.size()));
+
+        return implementations.findLatest(projectId).orElseThrow();
+    }
+
+    /** Rejects a Generate run — the staged copy is deleted and the destination is never touched (ADR-044). */
+    @Transactional
+    public AxRenewalImplementationRun rejectImplementation(UUID projectId, UUID runId, CurrentUser actor) {
+        AxRenewalProject project = requireProject(projectId);
+        AxRenewalImplementationRun run = requireOwnRun(projectId, runId);
+        if (!AxRenewalImplementationRun.STATUS_AWAITING_REVIEW.equals(run.status())) {
+            throw ApiException.conflict("this run is not awaiting review");
+        }
+        if (run.stagingPath() != null) {
+            AxRenewalImplementationRunner.deleteQuietly(Path.of(run.stagingPath()));
+            implementations.clearStaging(runId);
+        }
+        implementations.markCompleted(
+                runId,
+                AxRenewalImplementationRun.STATUS_REJECTED,
+                json.createObjectNode().put("note", "Rejected on review — nothing was written to the destination."));
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_IMPLEMENTATION_REJECT,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode().put("project", project.name()));
+
+        return implementations.findLatest(projectId).orElseThrow();
+    }
+
+    /** The files a Generate run actually found different, for the review screen. */
+    public List<AxRenewalGeneratedChange> findGeneratedChanges(UUID projectId, UUID runId) {
+        requireOwnRun(projectId, runId);
+        return implementations.findGeneratedChanges(runId);
+    }
+
+    private AxRenewalImplementationRun requireOwnRun(UUID projectId, UUID runId) {
+        AxRenewalImplementationRun run =
+                implementations.findById(runId).orElseThrow(() -> ApiException.notFound("implementation run"));
+        if (!run.projectId().equals(projectId)) {
+            throw ApiException.notFound("implementation run");
+        }
+        return run;
+    }
+
     // -----------------------------------------------------------------------
     // Comments
     // -----------------------------------------------------------------------
@@ -591,5 +866,52 @@ public class AxRenewalService {
                 json.createObjectNode());
 
         return created;
+    }
+
+    /**
+     * Hides one comment from the thread (ADR-045).
+     *
+     * <p><b>Who may:</b> its author, or a {@code super_admin}. That is the
+     * one authorisation decision in this class that {@code SecurityConfig}
+     * genuinely cannot make, for the same reason {@link #startImplementation}
+     * makes its own — "is this your comment" depends on row data, not on who
+     * is calling. The filter chain still does the part it can, holding the
+     * route at the {@code user} floor; this adds only the ownership test, and
+     * reports a refusal as 403.
+     *
+     * <p><b>Soft.</b> The row stays and no edit exists anywhere, so a
+     * discussion cannot be quietly rewritten after the fact — the comment
+     * stops being shown, which is the reversible half of the request.
+     * Deleting an already-deleted comment is a 404: it is not in the thread,
+     * which is all a caller can observe.
+     */
+    @Transactional
+    public void deleteComment(UUID projectId, UUID commentId, CurrentUser actor) {
+        requireProject(projectId);
+        AxRenewalComment comment = comments
+                .findLive(projectId, commentId)
+                .orElseThrow(() -> ApiException.notFound("comment"));
+
+        boolean own = comment.authorId().equals(actor.id());
+        if (!own && !actor.isAtLeast(AppRole.SUPER_ADMIN)) {
+            throw ApiException.forbidden("only its author or a super admin can remove a comment");
+        }
+
+        // False means somebody else won the race in the moment between the
+        // read above and this update. Their entry is already in the log;
+        // adding a second one for the same removal would misreport it as two.
+        if (!comments.softDelete(commentId, actor.id())) {
+            throw ApiException.notFound("comment");
+        }
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_COMMENT_DELETE,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode()
+                        .put("commentId", commentId.toString())
+                        .put("ownComment", own));
     }
 }

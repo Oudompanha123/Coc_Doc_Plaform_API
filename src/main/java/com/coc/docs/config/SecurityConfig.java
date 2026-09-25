@@ -289,6 +289,17 @@ public class SecurityConfig {
                         // // req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-044
                         .requestMatchers("/api/v1/me/usage-tokens/**").hasRole(AppRole.ADMIN.name())
 
+                        // The personal "My Claude Usage" screen (ADR-047):
+                        // every signed-in account's own read of its own
+                        // usage, unlike AdminClaudeUsageController's
+                        // team-wide roster below, which stays ADMIN+. USER
+                        // floor, not ADMIN -- ClaudeUsageMeController
+                        // resolves the caller's rows from the session email,
+                        // never from a request parameter, so widening this
+                        // floor cannot let one account read another's usage.
+                        // // req: FR-USAGE-005, ADR-047
+                        .requestMatchers(HttpMethod.GET, "/api/v1/claude-usage/me").hasRole(AppRole.USER.name())
+
                         // Liveness only. Carries no version, no configuration and
                         // no dependency status, so it discloses nothing.
                         .requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll()
@@ -361,11 +372,25 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/ax-renewal/**").hasRole(AppRole.USER.name())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/comments")
                         .hasRole(AppRole.USER.name())
+                        // Removing one stays at the same floor as writing one:
+                        // whether this particular caller may remove this
+                        // particular comment depends on who wrote it, which is
+                        // row data no matcher can see. AxRenewalService makes
+                        // that call — author, or super_admin (ADR-045).
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/ax-renewal/projects/*/comments/*")
+                        .hasRole(AppRole.USER.name())
 
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects").hasRole(AppRole.ADMIN.name())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/manifest")
                         .hasRole(AppRole.ADMIN.name())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/analysis/run")
+                        .hasRole(AppRole.ADMIN.name())
+                        // Assistant chat sits at the analysis floor, not the
+                        // comment floor it superficially resembles: both this
+                        // and Run analysis can point a local model at the
+                        // source folder, and reading the source is the thing
+                        // being gated. Writing a comment cannot (ADR-046).
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/assistant/chat")
                         .hasRole(AppRole.ADMIN.name())
                         .requestMatchers(HttpMethod.PUT, "/api/v1/ax-renewal/projects/*/plan/**")
                         .hasRole(AppRole.ADMIN.name())
@@ -387,6 +412,15 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/plan/*/reopen")
                         .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/start")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        // Approve/reject a Generate run's proposed changes (ADR-044) —
+                        // Approve is the one action in this whole feature that writes
+                        // outside this application's own database, so it gets exactly
+                        // the same floor as starting implementation in the first place,
+                        // not a lower one.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/approve")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/reject")
                         .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
 
                         // --- editorial writes and admin reads ----------------

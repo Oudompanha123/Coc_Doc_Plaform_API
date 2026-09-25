@@ -140,7 +140,19 @@ public final class AuditAction {
     public static final String AX_RENEWAL_DESTINATION_SET = "ax_renewal.destination_set";
     public static final String AX_RENEWAL_SECTION_CONFIRM = "ax_renewal.section_confirm";
     public static final String AX_RENEWAL_IMPLEMENTATION_START = "ax_renewal.implementation_start";
+    public static final String AX_RENEWAL_IMPLEMENTATION_APPROVE = "ax_renewal.implementation_approve";
+    public static final String AX_RENEWAL_IMPLEMENTATION_REJECT = "ax_renewal.implementation_reject";
     public static final String AX_RENEWAL_COMMENT_ADD = "ax_renewal.comment_add";
+
+    /**
+     * A comment hidden from a project's thread (ADR-045). Soft: the row
+     * stays, so this entry and the {@code comment_add} before it still refer
+     * to something that exists. {@code detail} carries {@code commentId} and
+     * {@code ownComment} — whether somebody removed their own remark or a
+     * {@code super_admin} removed another person's, which is the part a
+     * reader of this log will actually want to know.
+     */
+    public static final String AX_RENEWAL_COMMENT_DELETE = "ax_renewal.comment_delete";
 
     /** Target types, for the {@code target_type} column. */
     public static final String TARGET_PAGE = "page";

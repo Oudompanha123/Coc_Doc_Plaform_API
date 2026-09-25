@@ -687,6 +687,33 @@ class SecurityRulesTest {
         }
 
         @Test
+        void my_dashboard_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(get("/api/v1/claude-usage/me")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void my_dashboard_admits_a_plain_user() throws Exception {
+            // The whole point of ADR-047: unlike the team-wide roster above
+            // (ADMIN floor), a plain user reads their own usage here.
+            org.mockito.Mockito.when(claudeUsageService.myDashboard(org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageMyDashboard(
+                            "user@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null));
+
+            mvc.perform(get("/api/v1/claude-usage/me").with(as(AppRole.USER)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void my_dashboard_admits_an_admin_too() throws Exception {
+            org.mockito.Mockito.when(claudeUsageService.myDashboard(org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageMyDashboard(
+                            "admin@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null));
+
+            mvc.perform(get("/api/v1/claude-usage/me").with(as(AppRole.ADMIN)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
         void usage_tokens_refuses_a_caller_with_no_session() throws Exception {
             mvc.perform(get("/api/v1/me/usage-tokens")).andExpect(status().isUnauthorized());
         }
@@ -929,6 +956,77 @@ class SecurityRulesTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"name\":\"x\"}"))
                     .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void removing_a_comment_admits_a_plain_user_and_leaves_ownership_to_the_service() throws Exception {
+            // The floor is all a matcher can decide here: whether this caller
+            // may remove *this* comment depends on who wrote it, which is row
+            // data. AxRenewalCommentDeleteTest covers that half (ADR-045).
+            org.mockito.Mockito.doThrow(ApiException.notFound("comment"))
+                    .when(axRenewalService)
+                    .deleteComment(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any());
+
+            mvc.perform(delete("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/comments/"
+                                    + UUID.randomUUID())
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void removing_a_comment_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(delete("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/comments/"
+                            + UUID.randomUUID()))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void assistant_chat_refuses_a_plain_user() throws Exception {
+            // Chat can point a local model at the source folder, the same as
+            // Run analysis — so it sits at the analysis floor, not at the
+            // comment floor it superficially resembles (ADR-046).
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/assistant/chat")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"message\":\"what runs this?\"}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void assistant_chat_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/assistant/chat")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"message\":\"what runs this?\"}"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void assistant_chat_admits_an_admin() throws Exception {
+            org.mockito.Mockito.doThrow(ApiException.notFound("project"))
+                    .when(axRenewalService)
+                    .chat(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any());
+
+            // 404 from the stub, not 403 — the route was reached.
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/assistant/chat")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"message\":\"what runs this?\"}"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void assistant_chat_rejects_an_empty_message_before_it_reaches_a_model() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/assistant/chat")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"message\":\"   \"}"))
+                    .andExpect(status().is4xxClientError());
         }
 
         @Test

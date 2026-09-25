@@ -3,6 +3,7 @@ package com.coc.docs.web;
 import com.coc.docs.axrenewal.AxRenewalPlanRepository;
 import com.coc.docs.axrenewal.AxRenewalSection;
 import com.coc.docs.axrenewal.AxRenewalService;
+import com.coc.docs.axrenewal.LocalClaudeChat;
 import com.coc.docs.auth.CurrentUser;
 import jakarta.validation.Valid;
 import java.net.URI;
@@ -10,6 +11,7 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -189,6 +191,27 @@ public class AxRenewalController {
         return ApiDtos.AxRenewalImplementationRunResponse.of(projects.startImplementation(projectId, actor));
     }
 
+    /** The files a Generate run actually found different, once it reaches {@code awaiting_review} (ADR-044). */
+    @GetMapping("/projects/{projectId}/implementation/{runId}/changes")
+    List<ApiDtos.AxRenewalGeneratedChangeResponse> generatedChanges(
+            @PathVariable UUID projectId, @PathVariable UUID runId) {
+        return projects.findGeneratedChanges(projectId, runId).stream()
+                .map(ApiDtos.AxRenewalGeneratedChangeResponse::of)
+                .toList();
+    }
+
+    @PostMapping("/projects/{projectId}/implementation/{runId}/approve")
+    ApiDtos.AxRenewalImplementationRunResponse approveImplementation(
+            @PathVariable UUID projectId, @PathVariable UUID runId, @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalImplementationRunResponse.of(projects.approveImplementation(projectId, runId, actor));
+    }
+
+    @PostMapping("/projects/{projectId}/implementation/{runId}/reject")
+    ApiDtos.AxRenewalImplementationRunResponse rejectImplementation(
+            @PathVariable UUID projectId, @PathVariable UUID runId, @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalImplementationRunResponse.of(projects.rejectImplementation(projectId, runId, actor));
+    }
+
     @PostMapping("/projects/{projectId}/comments")
     ResponseEntity<ApiDtos.AxRenewalCommentResponse> addComment(
             @PathVariable UUID projectId,
@@ -196,6 +219,47 @@ public class AxRenewalController {
             @AuthenticationPrincipal CurrentUser actor) {
         var created = projects.addComment(projectId, request.body(), actor);
         return ResponseEntity.status(201).body(ApiDtos.AxRenewalCommentResponse.of(created));
+    }
+
+    /**
+     * Hides one comment (ADR-045). 204, because there is nothing left to
+     * return and the thread is re-read anyway.
+     *
+     * <p>Whether the caller is allowed depends on whose comment it is, which
+     * is row data — so unlike every other route here, the check lives in the
+     * service. {@code SecurityConfig} still holds the floor.
+     */
+    @DeleteMapping("/projects/{projectId}/comments/{commentId}")
+    ResponseEntity<Void> deleteComment(
+            @PathVariable UUID projectId,
+            @PathVariable UUID commentId,
+            @AuthenticationPrincipal CurrentUser actor) {
+        projects.deleteComment(projectId, commentId, actor);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * One chat turn with the local model (ADR-046).
+     *
+     * <p>Deliberately not a {@code /comments} sibling: a comment is recorded
+     * and attributed, this is not recorded at all. Nothing is written by this
+     * call, which is why it takes no {@code actor} — who is allowed to reach
+     * it is {@code SecurityConfig}'s decision, as everywhere else here, but
+     * there is no row to stamp with their name afterwards.
+     *
+     * <p>Answers 409 rather than 500 when the machine has no Claude Code
+     * configured: "this deployment cannot do that" is a state, not a fault.
+     */
+    @PostMapping("/projects/{projectId}/assistant/chat")
+    ApiDtos.AxRenewalChatResponse chat(
+            @PathVariable UUID projectId, @Valid @RequestBody ApiDtos.AxRenewalChatRequest request) {
+        List<LocalClaudeChat.Turn> history = request.history() == null
+                ? List.of()
+                : request.history().stream()
+                        .map(turn -> new LocalClaudeChat.Turn(turn.role(), turn.text()))
+                        .toList();
+        LocalClaudeChat.Reply reply = projects.chat(projectId, history, request.message());
+        return new ApiDtos.AxRenewalChatResponse(reply.text(), reply.readSource());
     }
 
     private static AxRenewalSection parseSection(String value) {
