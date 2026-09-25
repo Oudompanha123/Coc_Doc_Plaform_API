@@ -845,6 +845,8 @@ public final class ApiDtos {
             Long budgetOverrideTokens,
             long effectiveBudgetTokens,
             int budgetPct,
+            /** {@code green}/{@code amber}/{@code red} — see {@link ClaudeUsageMemberUsage#budgetStatus()}. */
+            String budgetStatus,
             List<String> modelsUsed,
             Instant lastActiveAt,
             long inputTokens,
@@ -863,6 +865,7 @@ public final class ApiDtos {
                     member.budgetOverrideTokens(),
                     usage.effectiveBudgetTokens(),
                     usage.budgetPct(),
+                    usage.budgetStatus(),
                     usage.modelsUsed(),
                     usage.lastActiveAt(),
                     usage.inputTokens(),
@@ -985,6 +988,30 @@ public final class ApiDtos {
             Map<String, ClaudeUsageModelTokensRequest> byModel) {}
 
     public record ClaudeUsageIngestResponse(String action) {}
+
+    // -----------------------------------------------------------------------
+    // Claude Usage ingest tokens (per-account /api/ingest credential, V35, ADR-047)
+    // -----------------------------------------------------------------------
+
+    public record ClaudeUsageIngestTokenCreateRequest(@NotBlank String label) {}
+
+    /**
+     * The one response that ever carries the raw bearer value — every other
+     * read of this account's tokens ({@link ClaudeUsageIngestTokenResponse})
+     * carries only the label and timestamps, never anything derived from it.
+     */
+    public record ClaudeUsageIngestTokenCreateResponse(UUID id, String label, String token, Instant createdAt) {
+        public static ClaudeUsageIngestTokenCreateResponse of(com.coc.docs.claudeusage.ClaudeUsageIngestTokenService.MintedToken minted) {
+            return new ClaudeUsageIngestTokenCreateResponse(
+                    minted.token().id(), minted.token().label(), minted.rawValue(), minted.token().createdAt());
+        }
+    }
+
+    public record ClaudeUsageIngestTokenResponse(UUID id, String label, Instant createdAt, Instant lastUsedAt) {
+        public static ClaudeUsageIngestTokenResponse of(com.coc.docs.claudeusage.ClaudeUsageIngestToken token) {
+            return new ClaudeUsageIngestTokenResponse(token.id(), token.label(), token.createdAt(), token.lastUsedAt());
+        }
+    }
 
     // -----------------------------------------------------------------------
     // Docs content meta (product docs pages' "About this document" panel)

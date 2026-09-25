@@ -122,6 +122,11 @@ public final class AuditAction {
     public static final String CLAUDE_USAGE_MEMBER_BUDGET_CHANGE = "claude_usage_member.budget_change";
     public static final String CLAUDE_USAGE_MEMBER_REMOVE = "claude_usage_member.remove";
 
+    /** An account minted or revoked its own {@code /api/ingest} bearer token (V35, ADR-047). */
+    public static final String CLAUDE_USAGE_INGEST_TOKEN_CREATE = "claude_usage_ingest_token.create";
+
+    public static final String CLAUDE_USAGE_INGEST_TOKEN_REVOKE = "claude_usage_ingest_token.revoke";
+
     /** AX Renewal actions (ADR-037) — a legacy-migration planning workspace, its plan and its implementation runs. */
     public static final String AX_RENEWAL_PROJECT_CREATE = "ax_renewal.project_create";
 
@@ -173,6 +178,8 @@ public final class AuditAction {
     public static final String TARGET_NAV_ITEM = "nav_item";
 
     public static final String TARGET_CLAUDE_USAGE_MEMBER = "claude_usage_member";
+
+    public static final String TARGET_CLAUDE_USAGE_INGEST_TOKEN = "claude_usage_ingest_token";
 
     public static final String TARGET_AX_RENEWAL_PROJECT = "ax_renewal_project";
 }

@@ -280,6 +280,15 @@ public class SecurityConfig {
                         // // req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-035
                         .requestMatchers(HttpMethod.POST, "/api/ingest").permitAll()
 
+                        // Self-service /api/ingest tokens (ADR-047, revision of ADR-035
+                        // §2): the human minting/listing/revoking their own credential,
+                        // unlike POST /api/ingest above which is the machine presenting
+                        // one. Floored at ADMIN, matching V35's own stated design ("each
+                        // admin / super_admin generates their own token") -- resolved
+                        // from the session as usual, never from the body.
+                        // // req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-047
+                        .requestMatchers("/api/v1/me/usage-tokens/**").hasRole(AppRole.ADMIN.name())
+
                         // Liveness only. Carries no version, no configuration and
                         // no dependency status, so it discloses nothing.
                         .requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll()

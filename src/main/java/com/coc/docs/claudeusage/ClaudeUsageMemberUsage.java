@@ -17,6 +17,11 @@ import java.util.List;
  *     percentage. Computed here rather than left to the frontend because the
  *     scaling depends on the period's length in days, which the frontend
  *     would otherwise have to reconstruct from {@code period}/{@code offset}.
+ * @param budgetStatus {@link #STATUS_GREEN}/{@link #STATUS_AMBER}/{@link
+ *     #STATUS_RED}, from {@code budgetPct} against {@code ClaudeUsageService}'s
+ *     thresholds — the one place that maps a percentage to a status, so the
+ *     "Near Limit" stat, the table's progress bar, and the "hand off" nudge
+ *     can never disagree about which zone a member is in.
  * @param lastActiveAt the latest {@code reported_at} in range, or null if
  *     nothing was reported in this window.
  */
@@ -30,7 +35,15 @@ public record ClaudeUsageMemberUsage(
         List<String> modelsUsed,
         Instant lastActiveAt,
         long effectiveBudgetTokens,
-        int budgetPct) {
+        int budgetPct,
+        String budgetStatus) {
+
+    /** Comfortably under budget. */
+    public static final String STATUS_GREEN = "green";
+    /** At or above the amber threshold — the reference tool's "pay attention" zone. */
+    public static final String STATUS_AMBER = "amber";
+    /** At or above the red threshold — the reference tool's "hand off" zone. */
+    public static final String STATUS_RED = "red";
 
     public long totalTokens() {
         return inputTokens + outputTokens;
