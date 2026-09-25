@@ -16,7 +16,10 @@ import java.util.UUID;
  * {@link #STATUS_AWAITING_REVIEW} → ({@link #STATUS_APPLYING} →
  * {@link #STATUS_APPLIED}) or {@link #STATUS_REJECTED}, or
  * {@link #STATUS_FAILED} at any point along the way — never silently
- * treated as success (ADR-044).
+ * treated as success (ADR-044). {@link #STATUS_CANCELLED} is a third way out
+ * of {@code generating} specifically, kept distinct from {@code failed}
+ * because a deliberate stop is a different fact from generation breaking on
+ * its own (ADR-049).
  *
  * @param stagingPath where a Generate run's disposable working copy lives —
  *     null on the old placeholder path, set once generation starts, cleared
@@ -44,4 +47,5 @@ public record AxRenewalImplementationRun(
     public static final String STATUS_APPLYING = "applying";
     public static final String STATUS_APPLIED = "applied";
     public static final String STATUS_REJECTED = "rejected";
+    public static final String STATUS_CANCELLED = "cancelled";
 }

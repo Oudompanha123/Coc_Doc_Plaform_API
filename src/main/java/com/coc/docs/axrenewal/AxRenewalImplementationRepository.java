@@ -140,6 +140,17 @@ public class AxRenewalImplementationRepository {
                 .update();
     }
 
+    /** A terminal, deliberate stop (ADR-049) — distinct from {@link #markFailed}, the same "a real result vs. generation broke" distinction {@code rejected} already draws. */
+    public void markCancelled(UUID id) {
+        jdbc.sql("""
+                        update ax_renewal_implementation_run
+                        set status = ?, completed_at = now()
+                        where id = ?
+                        """)
+                .params(AxRenewalImplementationRun.STATUS_CANCELLED, id)
+                .update();
+    }
+
     /** A terminal success — the placeholder path's {@code completed}, or Apply's {@code applied}/Reject's {@code rejected}. */
     public void markCompleted(UUID id, String status, JsonNode afterReport) {
         jdbc.sql("""

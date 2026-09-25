@@ -1059,5 +1059,38 @@ class SecurityRulesTest {
                             .with(as(AppRole.USER)))
                     .andExpect(status().isForbidden());
         }
+
+        @Test
+        void starting_a_local_run_refuses_a_plain_user_who_does_not_hold_developer() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/run-locally/start")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void cancelling_a_generate_run_refuses_a_plain_user_who_does_not_hold_developer() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/"
+                            + UUID.randomUUID() + "/cancel")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void stopping_a_local_run_refuses_a_plain_user_who_does_not_hold_developer() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/run-locally/stop")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void a_local_run_s_status_is_a_plain_read_admitted_at_the_user_floor() throws Exception {
+            org.mockito.Mockito.when(axRenewalService.runLocallyStatus(org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(new com.coc.docs.axrenewal.AxRenewalLocalRunner.Status(
+                            com.coc.docs.axrenewal.AxRenewalLocalRunner.Status.STATE_STOPPED, List.of(), null, null));
+
+            mvc.perform(get("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/run-locally/status")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isOk());
+        }
     }
 }

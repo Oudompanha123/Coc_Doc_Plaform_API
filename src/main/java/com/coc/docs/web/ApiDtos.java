@@ -14,6 +14,7 @@ import com.coc.docs.axrenewal.AxRenewalDbConnection;
 import com.coc.docs.axrenewal.AxRenewalDestination;
 import com.coc.docs.axrenewal.AxRenewalGeneratedChange;
 import com.coc.docs.axrenewal.AxRenewalImplementationRun;
+import com.coc.docs.axrenewal.AxRenewalLocalRunner;
 import com.coc.docs.axrenewal.AxRenewalPageMapping;
 import com.coc.docs.axrenewal.AxRenewalProject;
 import com.coc.docs.axrenewal.AxRenewalProjectDetail;
@@ -1244,6 +1245,22 @@ public final class ApiDtos {
                     run.startedAt(),
                     run.completedAt(),
                     run.failureReason());
+        }
+    }
+
+    /**
+     * Live status of the Run Locally dev server for one project (ADR-048) —
+     * in-memory only, never persisted: a live OS process cannot survive a
+     * backend restart regardless of what a row would claim. {@code log} is
+     * the process's own real combined stdout/stderr, a rolling window, never
+     * a summary. {@code url} is null until the process's own output
+     * announces it is ready — never a hardcoded guess at a port.
+     */
+    public record AxRenewalRunLocallyStatusResponse(String status, List<String> log, String url, Instant startedAt) {
+
+        public static AxRenewalRunLocallyStatusResponse of(AxRenewalLocalRunner.Status status) {
+            return new AxRenewalRunLocallyStatusResponse(
+                    status.state(), status.log(), status.url(), status.startedAt());
         }
     }
 

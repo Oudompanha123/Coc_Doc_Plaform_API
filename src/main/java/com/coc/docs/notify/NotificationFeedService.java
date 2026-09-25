@@ -322,8 +322,11 @@ public class NotificationFeedService {
             // wording reads as its own raw constant in the activity feed.
             case AuditAction.AX_RENEWAL_IMPLEMENTATION_APPROVE -> "Approved generated code changes";
             case AuditAction.AX_RENEWAL_IMPLEMENTATION_REJECT -> "Rejected generated code changes";
+            case AuditAction.AX_RENEWAL_IMPLEMENTATION_CANCEL -> "Cancelled a running renewal implementation";
             case AuditAction.AX_RENEWAL_COMMENT_ADD -> "Commented on a renewal project";
             case AuditAction.AX_RENEWAL_COMMENT_DELETE -> "Removed a comment from a renewal project";
+            case AuditAction.AX_RENEWAL_RUN_LOCALLY_START -> "Started a local run of a renewed project";
+            case AuditAction.AX_RENEWAL_RUN_LOCALLY_STOP -> "Stopped a local run of a renewed project";
             case AuditAction.ACCOUNT_CAPABILITY_GRANT -> "Granted a capability";
             case AuditAction.ACCOUNT_CAPABILITY_REVOKE -> "Revoked a capability";
             default -> entry.action();

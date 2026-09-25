@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -108,10 +109,18 @@ public class AxRenewalCodeGenerator {
      * (with whatever the model changed) for {@link #diffAgainstSource} to
      * read afterward and, if approved, for {@link AxRenewalService} to copy
      * out of. Returns empty on any failure — a missing binary, a timeout, a
-     * non-zero exit, an unreadable result — the caller records why via its
-     * own logging/state, exactly {@link LocalClaudeAnalyzer}'s own contract.
+     * non-zero exit, an unreadable result, or the process having been killed
+     * from outside this call — the caller records why via its own
+     * logging/state, exactly {@link LocalClaudeAnalyzer}'s own contract.
+     *
+     * @param onProcessStarted invoked with the real, live {@link Process}
+     *     the instant it exists — the same "hand the caller a live handle
+     *     immediately" shape {@code AxRenewalLocalRunner#start} already
+     *     uses, so a caller can register it somewhere reachable enough to
+     *     cancel this run later (ADR-049). Never invoked at all if starting
+     *     the process itself fails.
      */
-    public Optional<Result> generate(String confirmedPlan, Path stagingDir) {
+    public Optional<Result> generate(String confirmedPlan, Path stagingDir, Consumer<Process> onProcessStarted) {
         if (!canGenerate()) {
             return Optional.empty();
         }
@@ -148,6 +157,7 @@ public class AxRenewalCodeGenerator {
             builder.directory(stagingDir.toFile());
             builder.redirectErrorStream(false);
             Process process = builder.start();
+            onProcessStarted.accept(process);
 
             try (OutputStream stdin = process.getOutputStream()) {
                 stdin.write(prompt(confirmedPlan).getBytes(StandardCharsets.UTF_8));

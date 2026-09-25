@@ -56,6 +56,7 @@ public class AxRenewalService {
     private final AxRenewalProperties properties;
     private final AxRenewalCodeGenerator generator;
     private final AxRenewalImplementationRunner runner;
+    private final AxRenewalLocalRunner localRunner;
 
     public AxRenewalService(
             AxRenewalProjectRepository projects,
@@ -72,7 +73,8 @@ public class AxRenewalService {
             LocalClaudeChat localChat,
             AxRenewalProperties properties,
             AxRenewalCodeGenerator generator,
-            AxRenewalImplementationRunner runner) {
+            AxRenewalImplementationRunner runner,
+            AxRenewalLocalRunner localRunner) {
         this.projects = projects;
         this.analyses = analyses;
         this.plan = plan;
@@ -88,6 +90,7 @@ public class AxRenewalService {
         this.properties = properties;
         this.generator = generator;
         this.runner = runner;
+        this.localRunner = localRunner;
     }
 
     // -----------------------------------------------------------------------
@@ -839,6 +842,38 @@ public class AxRenewalService {
         return implementations.findLatest(projectId).orElseThrow();
     }
 
+    /**
+     * Stops a run that is still {@code generating} (ADR-049) — the actual
+     * kill happens in {@link AxRenewalImplementationRunner#cancel}; this only
+     * validates the run is in a state where cancelling means anything and
+     * records that someone asked. The run's own status flips to {@code
+     * cancelled} moments later, once the killed process actually unblocks
+     * {@code runGeneration}'s own failure branch — not synchronously here,
+     * the same "the caller polls, this does not wait" shape {@code
+     * approveImplementation}'s own async sibling steps already have.
+     */
+    @Transactional
+    public AxRenewalImplementationRun cancelImplementation(UUID projectId, UUID runId, CurrentUser actor) {
+        AxRenewalProject project = requireProject(projectId);
+        AxRenewalImplementationRun run = requireOwnRun(projectId, runId);
+        if (!AxRenewalImplementationRun.STATUS_GENERATING.equals(run.status())) {
+            throw ApiException.conflict("this run is not currently generating");
+        }
+        if (!runner.cancel(runId)) {
+            throw ApiException.conflict("this run has no active process to cancel");
+        }
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_IMPLEMENTATION_CANCEL,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode().put("project", project.name()));
+
+        return requireOwnRun(projectId, runId);
+    }
+
     /** The files a Generate run actually found different, for the review screen. */
     public List<AxRenewalGeneratedChange> findGeneratedChanges(UUID projectId, UUID runId) {
         requireOwnRun(projectId, runId);
@@ -852,6 +887,98 @@ public class AxRenewalService {
             throw ApiException.notFound("implementation run");
         }
         return run;
+    }
+
+    // -----------------------------------------------------------------------
+    // Run locally (ADR-048)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Starts the applied destination as a live local dev server. Requires the
+     * latest implementation run to have actually reached {@code applied} —
+     * the exact "a real generated build to point at" precondition the Run
+     * Locally tab has always been locked behind, satisfiable now that
+     * Approve (ADR-044) produces exactly that.
+     */
+    @Transactional
+    public AxRenewalLocalRunner.Status startRunLocally(UUID projectId, CurrentUser actor) {
+        AxRenewalProject project = requireProject(projectId);
+        AxRenewalDestination destination = requireAppliedDestination(projectId);
+        Path destinationRoot = Path.of(destination.target()).toAbsolutePath().normalize();
+        String devScript = requireDevScript(destinationRoot);
+
+        try {
+            localRunner.start(projectId, destinationRoot, devScript);
+        } catch (IllegalStateException e) {
+            throw ApiException.conflict(e.getMessage());
+        } catch (IOException e) {
+            throw ApiException.conflict("could not start the local dev server: " + e.getMessage());
+        }
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_RUN_LOCALLY_START,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode().put("project", project.name()).put("destination", destination.target()));
+
+        return localRunner.status(projectId);
+    }
+
+    @Transactional
+    public AxRenewalLocalRunner.Status stopRunLocally(UUID projectId, CurrentUser actor) {
+        AxRenewalProject project = requireProject(projectId);
+        localRunner.stop(projectId);
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_RUN_LOCALLY_STOP,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode().put("project", project.name()));
+
+        return localRunner.status(projectId);
+    }
+
+    /** A plain read — never audited, matching every other status poll in this feature. */
+    public AxRenewalLocalRunner.Status runLocallyStatus(UUID projectId) {
+        requireProject(projectId);
+        return localRunner.status(projectId);
+    }
+
+    private AxRenewalDestination requireAppliedDestination(UUID projectId) {
+        AxRenewalImplementationRun run = implementations
+                .findLatest(projectId)
+                .orElseThrow(() -> ApiException.conflict("no implementation has been applied yet"));
+        if (!AxRenewalImplementationRun.STATUS_APPLIED.equals(run.status())) {
+            throw ApiException.conflict("the latest implementation run has not been applied yet");
+        }
+        AxRenewalDestination destination =
+                destinations.find(projectId).orElseThrow(() -> ApiException.conflict("no destination set"));
+        if (!AxRenewalDestination.KIND_FILESYSTEM_PATH.equals(destination.kind())) {
+            throw ApiException.conflict("only a filesystem destination can be run locally");
+        }
+        return destination;
+    }
+
+    /** Reads the real {@code scripts.dev} key out of the destination's own {@code package.json} — never assumed, and never the value, only that it exists. */
+    private String requireDevScript(Path destinationRoot) {
+        Path packageJson = destinationRoot.resolve("package.json");
+        if (!Files.isRegularFile(packageJson)) {
+            throw ApiException.conflict("no package.json found in the destination — nothing to run");
+        }
+        JsonNode manifest;
+        try {
+            manifest = json.readTree(Files.readString(packageJson, StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw ApiException.conflict("could not read the destination's package.json: " + e.getMessage());
+        }
+        if (!manifest.path("scripts").path("dev").isTextual()) {
+            throw ApiException.conflict("this project's package.json has no \"dev\" script to run");
+        }
+        return "dev";
     }
 
     // -----------------------------------------------------------------------

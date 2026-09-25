@@ -75,7 +75,8 @@ class AxRenewalApproveImplementationTest {
                 mock(LocalClaudeChat.class),
                 new AxRenewalProperties(null, null, null),
                 mock(AxRenewalCodeGenerator.class),
-                mock(AxRenewalImplementationRunner.class));
+                mock(AxRenewalImplementationRunner.class),
+                mock(AxRenewalLocalRunner.class));
     }
 
     @Test

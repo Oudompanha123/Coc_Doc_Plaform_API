@@ -411,6 +411,21 @@ public class SecurityConfig {
                         .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/reject")
                         .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        // Cancel a still-generating run (ADR-049) — kills a
+                        // real process on the backend's own machine, the
+                        // same class of action as the three routes above.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/cancel")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        // Run Locally start/stop (ADR-048) — this executes the
+                        // destination's own npm scripts on the backend's
+                        // machine, the same class of action as starting/
+                        // approving/rejecting an implementation run, so it
+                        // gets the same floor, not a lower one. Status is a
+                        // plain read and falls through to the GET rule above.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/run-locally/start")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/run-locally/stop")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
 
                         // --- editorial writes and admin reads ----------------
                         .requestMatchers("/api/v1/admin/**").hasRole(AppRole.ADMIN.name())
