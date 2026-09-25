@@ -10,9 +10,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -775,7 +775,17 @@ public class AxRenewalService {
                     Files.deleteIfExists(target);
                 } else {
                     Files.createDirectories(target.getParent());
-                    Files.copy(stagingRoot.resolve(c.path()), target, StandardCopyOption.REPLACE_EXISTING);
+                    // Written from the content this run already captured at
+                    // diff time (the same text the review screen showed),
+                    // never re-read off the disposable staging copy — that
+                    // copy is a plain OS temp directory with no retention
+                    // guarantee, and Approve can happen long after Generate
+                    // finished or from a different machine than the one that
+                    // ran it. The real content was already durably recorded
+                    // the moment generation succeeded; there is no reason
+                    // Apply should depend on that temp directory still being
+                    // there.
+                    Files.writeString(target, c.afterContent(), StandardCharsets.UTF_8);
                 }
             }
         } catch (IOException e) {
