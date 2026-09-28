@@ -34,7 +34,7 @@ import org.springframework.http.HttpStatus;
  * {@code claude_usage_ingest_token} minting, listing, revocation, and the
  * {@link ClaudeUsageIngestTokenService#resolve} check {@code
  * ClaudeUsageIngestController} relies on for the per-account credential
- * ADR-047 adds (V35).
+ * ADR-047 adds (V35) — self-mintable at USER rank per ADR-053.
  */
 class ClaudeUsageIngestTokenServiceTest {
 
@@ -174,15 +174,29 @@ class ClaudeUsageIngestTokenServiceTest {
         }
 
         @Test
-        @DisplayName("a role downgrade below ADMIN stops the token working immediately, with the row untouched")
-        void emptyWhenRoleBelowAdmin() {
+        @DisplayName("a role downgrade below USER (ADR-053's floor) stops the token working immediately, with the row untouched")
+        void emptyWhenRoleBelowUser() {
+            Account guest = TestCallers.user(AppRole.GUEST).account();
+            ClaudeUsageIngestToken tokenRow = row(guest.id(), "h");
+            when(tokens.findActiveByHash(anyString())).thenReturn(Optional.of(tokenRow));
+            when(accounts.findById(guest.id())).thenReturn(Optional.of(guest));
+
+            assertThat(service.resolve("coc_x")).isEmpty();
+            verify(tokens, never()).touchLastUsed(any());
+        }
+
+        @Test
+        @DisplayName("an active plain user's token resolves to that account and marks it used (ADR-053: self-service, not admin-only)")
+        void resolvesActiveUser() {
             Account plainUser = TestCallers.user(AppRole.USER).account();
             ClaudeUsageIngestToken tokenRow = row(plainUser.id(), "h");
             when(tokens.findActiveByHash(anyString())).thenReturn(Optional.of(tokenRow));
             when(accounts.findById(plainUser.id())).thenReturn(Optional.of(plainUser));
 
-            assertThat(service.resolve("coc_x")).isEmpty();
-            verify(tokens, never()).touchLastUsed(any());
+            Optional<Account> resolved = service.resolve("coc_x");
+
+            assertThat(resolved).contains(plainUser);
+            verify(tokens).touchLastUsed(tokenRow.id());
         }
 
         @Test
@@ -199,7 +213,7 @@ class ClaudeUsageIngestTokenServiceTest {
         }
 
         @Test
-        @DisplayName("a super_admin's token resolves too (at least ADMIN, by rank)")
+        @DisplayName("a super_admin's token resolves too (at least USER, by rank)")
         void resolvesSuperAdminByRank() {
             Account superAdmin = TestCallers.user(AppRole.SUPER_ADMIN).account();
             ClaudeUsageIngestToken tokenRow = row(superAdmin.id(), "h");

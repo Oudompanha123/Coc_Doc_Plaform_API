@@ -687,17 +687,54 @@ class SecurityRulesTest {
         }
 
         @Test
+        void my_dashboard_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(get("/api/v1/claude-usage/me")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void my_dashboard_admits_a_plain_user() throws Exception {
+            // The whole point of ADR-052: unlike the team-wide roster above
+            // (ADMIN floor), a plain user reads their own usage here.
+            org.mockito.Mockito.when(claudeUsageService.myDashboard(org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageMyDashboard(
+                            "user@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null));
+
+            mvc.perform(get("/api/v1/claude-usage/me").with(as(AppRole.USER)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void my_dashboard_admits_an_admin_too() throws Exception {
+            org.mockito.Mockito.when(claudeUsageService.myDashboard(org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageMyDashboard(
+                            "admin@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null));
+
+            mvc.perform(get("/api/v1/claude-usage/me").with(as(AppRole.ADMIN)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
         void usage_tokens_refuses_a_caller_with_no_session() throws Exception {
             mvc.perform(get("/api/v1/me/usage-tokens")).andExpect(status().isUnauthorized());
         }
 
         @Test
-        void usage_tokens_refuses_a_plain_user() throws Exception {
-            // Floored at ADMIN (V35, ADR-047) — a plain user may report their
-            // own usage via a token someone else mints for them, but may not
-            // mint one, the same asymmetry FR-AUTH-008 already draws between
-            // "may act" and "may grant/administer" elsewhere in this system.
-            mvc.perform(get("/api/v1/me/usage-tokens").with(as(AppRole.USER))).andExpect(status().isForbidden());
+        void usage_tokens_refuses_a_guest() throws Exception {
+            // Floored at USER (ADR-053, widened from ADMIN) — a guest
+            // (ADR-017's pending/unapproved rank) still may not mint or list
+            // a token, but any actual member may, self-service.
+            mvc.perform(get("/api/v1/me/usage-tokens").with(as(AppRole.GUEST))).andExpect(status().isForbidden());
+        }
+
+        @Test
+        void usage_tokens_admits_a_plain_user() throws Exception {
+            // The whole point of ADR-053: a plain user can self-mint the
+            // token their own "Download push-usage.mjs" button needs,
+            // without asking an admin for one.
+            org.mockito.Mockito.when(claudeUsageIngestTokenService.list(org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/me/usage-tokens").with(as(AppRole.USER))).andExpect(status().isOk());
         }
 
         @Test

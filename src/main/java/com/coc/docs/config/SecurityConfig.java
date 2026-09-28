@@ -283,11 +283,23 @@ public class SecurityConfig {
                         // Self-service /api/ingest tokens (ADR-047, revision of ADR-035
                         // §2): the human minting/listing/revoking their own credential,
                         // unlike POST /api/ingest above which is the machine presenting
-                        // one. Floored at ADMIN, matching V35's own stated design ("each
-                        // admin / super_admin generates their own token") -- resolved
-                        // from the session as usual, never from the body.
-                        // // req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-047
-                        .requestMatchers("/api/v1/me/usage-tokens/**").hasRole(AppRole.ADMIN.name())
+                        // one. Floored at USER, widened from ADMIN on direct developer
+                        // instruction (ADR-053) so any signed-in account can self-mint
+                        // the token its own "Download push-usage.mjs" button needs --
+                        // resolved from the session as usual, never from the body.
+                        // // req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-050, ADR-053
+                        .requestMatchers("/api/v1/me/usage-tokens/**").hasRole(AppRole.USER.name())
+
+                        // The personal "My Claude Usage" screen (ADR-052):
+                        // every signed-in account's own read of its own
+                        // usage, unlike AdminClaudeUsageController's
+                        // team-wide roster below, which stays ADMIN+. USER
+                        // floor, not ADMIN -- ClaudeUsageMeController
+                        // resolves the caller's rows from the session email,
+                        // never from a request parameter, so widening this
+                        // floor cannot let one account read another's usage.
+                        // // req: FR-USAGE-005, ADR-052
+                        .requestMatchers(HttpMethod.GET, "/api/v1/claude-usage/me").hasRole(AppRole.USER.name())
 
                         // Liveness only. Carries no version, no configuration and
                         // no dependency status, so it discloses nothing.

@@ -73,6 +73,9 @@ public class ClaudeUsageService {
     /** Bounded so a hand-edited query cannot walk arbitrarily far into the past. */
     private static final int MIN_OFFSET = -60;
 
+    /** Days of history the personal "My Claude Usage" screen shows (ADR-052) — a fixed window, not a period picker like the admin dashboard's. */
+    static final int MY_HISTORY_DAYS = 30;
+
     private final ClaudeUsageMemberRepository members;
     private final ClaudeUsageDailyRepository daily;
     private final AuditRepository audit;
@@ -373,6 +376,50 @@ public class ClaudeUsageService {
                 rows.stream().map(ClaudeUsageDaily::reportedAt).max(Instant::compareTo).orElse(null);
 
         return new ClaudeUsageDashboard(period, from, to, memberUsages, dailyPoints, totals, activeUsers, nearLimit, lastUpdated);
+    }
+
+    // -----------------------------------------------------------------------
+    // Personal dashboard ("My Claude Usage", ADR-052)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Everything {@code GET /api/v1/claude-usage/me} renders: the caller's
+     * own today/history, nobody else's. {@code actor} is resolved server-side
+     * from the authenticated session by the controller — there is no id or
+     * email parameter here to trust from the client (FR-USAGE-005, ADR-052).
+     */
+    public ClaudeUsageMyDashboard myDashboard(CurrentUser actor) {
+        return myDashboard(actor, LocalDate.now(REPORT_ZONE));
+    }
+
+    /** As {@link #myDashboard(CurrentUser)}, with "today" taken as a parameter so a test can fix it. */
+    ClaudeUsageMyDashboard myDashboard(CurrentUser actor, LocalDate today) {
+        String email = normalizeEmail(actor.email());
+        ClaudeUsageMember member = members.findByEmail(email).orElse(null);
+
+        LocalDate from = today.minusDays(MY_HISTORY_DAYS - 1);
+        List<ClaudeUsageDaily> rows =
+                member == null ? List.of() : daily.listInRangeForMember(member.id(), from, today);
+
+        Map<LocalDate, ClaudeUsageDaily> byDate =
+                rows.stream().collect(Collectors.toMap(ClaudeUsageDaily::usageDate, row -> row));
+
+        List<ClaudeUsageMyDashboardPoint> history = new ArrayList<>();
+        for (LocalDate d = from; !d.isAfter(today); d = d.plusDays(1)) {
+            ClaudeUsageDaily row = byDate.get(d);
+            history.add(row == null
+                    ? new ClaudeUsageMyDashboardPoint(d, 0, 0)
+                    : new ClaudeUsageMyDashboardPoint(d, row.inputTokens(), row.outputTokens()));
+        }
+
+        ClaudeUsageDaily todayRow = byDate.get(today);
+        long todayInput = todayRow == null ? 0 : todayRow.inputTokens();
+        long todayOutput = todayRow == null ? 0 : todayRow.outputTokens();
+
+        Instant lastUpdated = rows.stream().map(ClaudeUsageDaily::reportedAt).max(Instant::compareTo).orElse(null);
+        String displayName = member != null ? member.displayName() : displayNameOrFallback(actor.account().displayName(), email);
+
+        return new ClaudeUsageMyDashboard(email, displayName, today, todayInput, todayOutput, history, lastUpdated);
     }
 
     private ClaudeUsageMemberUsage rollupMember(ClaudeUsageMember member, List<ClaudeUsageDaily> rows, long daysInRange) {

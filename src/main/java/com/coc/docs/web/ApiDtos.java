@@ -31,6 +31,8 @@ import com.coc.docs.section.Section;
 import com.coc.docs.claudeusage.ClaudeUsageDailyPoint;
 import com.coc.docs.claudeusage.ClaudeUsageDashboard;
 import com.coc.docs.claudeusage.ClaudeUsageMemberUsage;
+import com.coc.docs.claudeusage.ClaudeUsageMyDashboard;
+import com.coc.docs.claudeusage.ClaudeUsageMyDashboardPoint;
 import com.coc.docs.claudeusage.ClaudeUsageTotals;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
@@ -920,6 +922,43 @@ public final class ApiDtos {
                     ClaudeUsageTotalsResponse.of(dashboard.totals()),
                     dashboard.activeUsers(),
                     dashboard.nearLimit(),
+                    dashboard.lastUpdated());
+        }
+    }
+
+    /** One day of the "My Claude Usage" personal history (ADR-052) — no per-member breakdown, unlike {@link ClaudeUsageDailyPointResponse}. */
+    public record ClaudeUsageMyDashboardPointResponse(LocalDate date, long inputTokens, long outputTokens, long totalTokens) {
+
+        public static ClaudeUsageMyDashboardPointResponse of(ClaudeUsageMyDashboardPoint point) {
+            return new ClaudeUsageMyDashboardPointResponse(
+                    point.date(), point.inputTokens(), point.outputTokens(), point.totalTokens());
+        }
+    }
+
+    /**
+     * Everything {@code GET /api/v1/claude-usage/me} renders — the caller's
+     * own usage only, resolved server-side (ADR-052). {@code email} echoes
+     * back who this is, for the header, never who was asked for.
+     */
+    public record ClaudeUsageMyDashboardResponse(
+            String email,
+            String displayName,
+            LocalDate today,
+            long todayInputTokens,
+            long todayOutputTokens,
+            long todayTotalTokens,
+            List<ClaudeUsageMyDashboardPointResponse> daily,
+            Instant lastUpdated) {
+
+        public static ClaudeUsageMyDashboardResponse of(ClaudeUsageMyDashboard dashboard) {
+            return new ClaudeUsageMyDashboardResponse(
+                    dashboard.email(),
+                    dashboard.displayName(),
+                    dashboard.today(),
+                    dashboard.todayInputTokens(),
+                    dashboard.todayOutputTokens(),
+                    dashboard.todayTotalTokens(),
+                    dashboard.daily().stream().map(ClaudeUsageMyDashboardPointResponse::of).toList(),
                     dashboard.lastUpdated());
         }
     }

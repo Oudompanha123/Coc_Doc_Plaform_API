@@ -53,6 +53,26 @@ public class ClaudeUsageDailyRepository {
     }
 
     /**
+     * As {@link #listInRange}, scoped to one member — the personal "My Claude
+     * Usage" screen's own history (ADR-052). A dedicated query rather than
+     * filtering {@code listInRange}'s result in Java: the caller only ever
+     * needs their own rows, so there is no reason to pull every other
+     * member's data out of the database first.
+     */
+    public List<ClaudeUsageDaily> listInRangeForMember(UUID memberId, LocalDate from, LocalDate to) {
+        return jdbc.sql("""
+                        select id, member_id, usage_date, input_tokens, output_tokens,
+                               cache_read_tokens, cache_creation_tokens, cost_usd, models, reported_at
+                        from claude_usage_daily
+                        where member_id = ? and usage_date between ? and ?
+                        order by usage_date
+                        """)
+                .params(memberId, from, to)
+                .query(this::map)
+                .list();
+    }
+
+    /**
      * Idempotent upsert keyed on {@code (member_id, usage_date)} (ADR-035
      * decision 3): the reporter always sends the day's whole running total, so
      * a replay overwrites rather than adds on top of what is already there.

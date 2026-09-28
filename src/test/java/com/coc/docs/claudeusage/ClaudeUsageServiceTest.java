@@ -447,6 +447,86 @@ class ClaudeUsageServiceTest {
     }
 
     @Nested
+    @DisplayName("My Claude Usage (ADR-052)")
+    class MyDashboard {
+
+        @Test
+        @DisplayName("reads the caller's own email from the session, not a parameter")
+        void resolvesCallerFromSession() {
+            LocalDate today = LocalDate.of(2026, 9, 17);
+            CurrentUser actor = TestCallers.user(AppRole.USER);
+            when(members.findByEmail(actor.email())).thenReturn(Optional.empty());
+
+            var dashboard = service.myDashboard(actor, today);
+
+            assertThat(dashboard.email()).isEqualTo(actor.email());
+            verify(members).findByEmail(actor.email());
+            verify(daily, never()).listInRangeForMember(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a caller who has never reported gets an all-zero dashboard, not an error")
+        void neverReportedIsZeroNotError() {
+            LocalDate today = LocalDate.of(2026, 9, 17);
+            CurrentUser actor = TestCallers.user(AppRole.USER);
+            when(members.findByEmail(actor.email())).thenReturn(Optional.empty());
+
+            var dashboard = service.myDashboard(actor, today);
+
+            assertThat(dashboard.todayInputTokens()).isZero();
+            assertThat(dashboard.todayOutputTokens()).isZero();
+            assertThat(dashboard.todayTotalTokens()).isZero();
+            assertThat(dashboard.daily()).hasSize(ClaudeUsageService.MY_HISTORY_DAYS);
+            assertThat(dashboard.daily()).allMatch(p -> p.totalTokens() == 0);
+            assertThat(dashboard.lastUpdated()).isNull();
+        }
+
+        @Test
+        @DisplayName("today's tokens come from today's row only, not the whole history")
+        void todayIsTodaysRowOnly() {
+            LocalDate today = LocalDate.of(2026, 9, 17);
+            LocalDate yesterday = today.minusDays(1);
+            CurrentUser actor = TestCallers.user(AppRole.USER);
+            ClaudeUsageMember me = member(actor.email(), ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findByEmail(actor.email())).thenReturn(Optional.of(me));
+
+            ClaudeUsageDaily todayRow = new ClaudeUsageDaily(
+                    UUID.randomUUID(), me.id(), today, 300, 100, 0, 0, BigDecimal.ZERO, "Sonnet 5", Instant.now());
+            ClaudeUsageDaily yesterdayRow = new ClaudeUsageDaily(
+                    UUID.randomUUID(), me.id(), yesterday, 9_000, 9_000, 0, 0, BigDecimal.ZERO, "Sonnet 5", Instant.now());
+            when(daily.listInRangeForMember(eq(me.id()), any(), eq(today)))
+                    .thenReturn(List.of(yesterdayRow, todayRow));
+
+            var dashboard = service.myDashboard(actor, today);
+
+            assertThat(dashboard.todayInputTokens()).isEqualTo(300);
+            assertThat(dashboard.todayOutputTokens()).isEqualTo(100);
+            assertThat(dashboard.todayTotalTokens()).isEqualTo(400);
+        }
+
+        @Test
+        @DisplayName("history covers exactly the last 30 days, zero-filled for days with no report")
+        void historyIsThirtyDaysZeroFilled() {
+            LocalDate today = LocalDate.of(2026, 9, 17);
+            CurrentUser actor = TestCallers.user(AppRole.USER);
+            ClaudeUsageMember me = member(actor.email(), ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findByEmail(actor.email())).thenReturn(Optional.of(me));
+
+            ClaudeUsageDaily onlyRow = new ClaudeUsageDaily(
+                    UUID.randomUUID(), me.id(), today, 10, 5, 0, 0, BigDecimal.ZERO, "Sonnet 5", Instant.now());
+            when(daily.listInRangeForMember(eq(me.id()), any(), eq(today))).thenReturn(List.of(onlyRow));
+
+            var dashboard = service.myDashboard(actor, today);
+
+            assertThat(dashboard.daily()).hasSize(ClaudeUsageService.MY_HISTORY_DAYS);
+            assertThat(dashboard.daily().get(0).date()).isEqualTo(today.minusDays(ClaudeUsageService.MY_HISTORY_DAYS - 1));
+            assertThat(dashboard.daily().get(dashboard.daily().size() - 1).date()).isEqualTo(today);
+            long daysWithTokens = dashboard.daily().stream().filter(p -> p.totalTokens() > 0).count();
+            assertThat(daysWithTokens).isEqualTo(1);
+        }
+    }
+
+    @Nested
     class EffectiveBudget {
 
         @Test

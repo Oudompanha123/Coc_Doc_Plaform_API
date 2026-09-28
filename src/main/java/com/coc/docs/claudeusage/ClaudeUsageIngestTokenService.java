@@ -34,7 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
  * rejected per-member tokens, so revoking one person's token, or downgrading
  * their role, no longer affects anyone else's ability to report.
  *
- * <p>// req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-047
+ * <p>// req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-047, ADR-053
  */
 @Service
 public class ClaudeUsageIngestTokenService {
@@ -46,13 +46,18 @@ public class ClaudeUsageIngestTokenService {
     private static final String TOKEN_PREFIX = "coc_";
 
     /**
-     * Only an account at this rank or above may mint or use an ingest token —
-     * matches V35's own stated design ("each admin / super_admin generates
-     * their own token"). Re-checked on every {@link #resolve}, not just at
-     * creation, so a role downgrade takes effect immediately without anyone
-     * having to revoke the token explicitly.
+     * Only an account at this rank or above may mint or use an ingest token.
+     * Widened from {@code ADMIN} to {@code USER} on direct developer
+     * instruction (ADR-053, revising this ADR's own original scoping) — V35's
+     * migration comment still says "each admin / super_admin generates their
+     * own token", which was already stale (it cites a nonexistent "ADR-042";
+     * see ADR-047) and is left unedited per this repo's rule against
+     * modifying an applied migration's SQL. Re-checked on every
+     * {@link #resolve}, not just at creation, so a role downgrade takes
+     * effect immediately without anyone having to revoke the token
+     * explicitly.
      */
-    private static final AppRole MIN_ROLE = AppRole.ADMIN;
+    private static final AppRole MIN_ROLE = AppRole.USER;
 
     private final ClaudeUsageIngestTokenRepository tokens;
     private final AccountRepository accounts;
