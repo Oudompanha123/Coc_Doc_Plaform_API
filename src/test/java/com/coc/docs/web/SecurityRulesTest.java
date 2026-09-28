@@ -1044,6 +1044,7 @@ class SecurityRulesTest {
                     .chat(
                             org.mockito.ArgumentMatchers.any(),
                             org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
                             org.mockito.ArgumentMatchers.any());
 
             // 404 from the stub, not 403 — the route was reached.

@@ -1108,7 +1108,11 @@ public final class ApiDtos {
      */
     public record AxRenewalChatRequest(
             @NotBlank @Size(max = 4_000) String message,
-            @Size(max = 40) List<@Valid AxRenewalChatTurn> history) {}
+            @Size(max = 40) List<@Valid AxRenewalChatTurn> history,
+            // req: ADR-055 — one caller's own legacy checkout for this one
+            // question, in place of the server-side default that used to
+            // exist; null/blank means manifest-only, same as omitting it.
+            @Size(max = 1_024) String sourcePath) {}
 
     /** @param role {@code "you"} or {@code "assistant"}; anything else reads as the person. */
     public record AxRenewalChatTurn(@NotBlank @Size(max = 16) String role, @NotBlank @Size(max = 4_000) String text) {}

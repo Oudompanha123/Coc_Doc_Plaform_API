@@ -73,7 +73,7 @@ class AxRenewalApproveImplementationTest {
                 new ObjectMapper(),
                 mock(LocalClaudeAnalyzer.class),
                 mock(LocalClaudeChat.class),
-                new AxRenewalProperties(null, null, null),
+                new AxRenewalProperties(null, null),
                 mock(AxRenewalCodeGenerator.class),
                 mock(AxRenewalImplementationRunner.class),
                 mock(AxRenewalLocalRunner.class));
@@ -97,6 +97,7 @@ class AxRenewalApproveImplementationTest {
                 actor.id(),
                 null,
                 vanishedStaging.toString(),
+                null,
                 null)));
         when(destinations.find(projectId)).thenReturn(Optional.of(new AxRenewalDestination(
                 projectId,
@@ -123,6 +124,7 @@ class AxRenewalApproveImplementationTest {
                 Instant.EPOCH,
                 actor.id(),
                 Instant.EPOCH,
+                null,
                 null,
                 null)));
 

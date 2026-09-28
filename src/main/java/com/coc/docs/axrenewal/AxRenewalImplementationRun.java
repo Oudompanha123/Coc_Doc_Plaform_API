@@ -26,6 +26,13 @@ import java.util.UUID;
  *     once the run reaches a terminal state and its copy is deleted.
  * @param failureReason why a run failed, in the run's own words — null
  *     unless {@link #STATUS_FAILED}, never left for a bare status to imply.
+ * @param confirmedPlanHash a SHA-256 of the confirmed-plan text this run was
+ *     generated from — null on the placeholder path, which never builds
+ *     one. Compared at Rebuild time (ADR-056) to tell "the plan is still
+ *     exactly what this applied run was built from" from "something was
+ *     edited and reconfirmed since"; a Replay run (see {@link
+ *     #REPORT_MODE_REPLAY}) carries the same hash as the applied run it
+ *     reproduces, since nothing about the plan changed to produce it.
  */
 public record AxRenewalImplementationRun(
         UUID id,
@@ -37,7 +44,11 @@ public record AxRenewalImplementationRun(
         UUID startedBy,
         Instant completedAt,
         String stagingPath,
-        String failureReason) {
+        String failureReason,
+        String confirmedPlanHash) {
+
+    /** {@code beforeReport.mode} for a run that reused a prior applied run's exact generated changes rather than asking the model again (ADR-056). */
+    public static final String REPORT_MODE_REPLAY = "replay";
 
     public static final String STATUS_RUNNING = "running";
     public static final String STATUS_COMPLETED = "completed";

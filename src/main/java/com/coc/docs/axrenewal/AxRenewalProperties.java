@@ -10,6 +10,17 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * boots with nothing configured, and no value here is ever logged or returned
  * in an API response.
  *
+ * <p>There is deliberately no {@code sourcePath} here (ADR-055 revises
+ * ADR-043/051). A fixed, server-side default for "the attached project's
+ * folder on this machine" turned one person's own checkout into every
+ * caller's implicit answer — wrong the moment somebody else's checkout lives
+ * somewhere else, or the same person is working on a second legacy project.
+ * Run analysis, Start implementation and the assistant chat each now take a
+ * {@code sourcePath} argument instead, supplied per call and validated by
+ * {@code AxRenewalService} before any of them ever reads it — see {@link
+ * LocalClaudeAnalyzer#analyse}, {@link AxRenewalCodeGenerator#generate}, and
+ * {@link LocalClaudeChat#reply}.
+ *
  * @param anthropicApiKey a paid API key for a server-side call. Still unread
  *     by any code path — reserved for the phase where the deployed site can
  *     analyse for everybody (ADR-037 §4.3).
@@ -17,15 +28,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *     {@link AxRenewalService#runAnalysis} asks it to read the project instead
  *     of keyword-matching. See {@link LocalClaudeAnalyzer} for why this can
  *     only ever be a local-development capability.
- * @param sourcePath absolute path to the attached project's folder on this
- *     same machine. Optional even when {@code claudeCliPath} is set: without
- *     it the model reads the stored manifest only, which is a real reading of
- *     real content but not of the source. The browser cannot supply this —
- *     the File API deliberately hides absolute paths — so it is configuration,
- *     not something the attach step can fill in.
  */
 @ConfigurationProperties(prefix = "app.ax-renewal")
-public record AxRenewalProperties(String anthropicApiKey, String claudeCliPath, String sourcePath) {
+public record AxRenewalProperties(String anthropicApiKey, String claudeCliPath) {
 
     public boolean anthropicConfigured() {
         return anthropicApiKey != null && !anthropicApiKey.isBlank();
@@ -43,10 +48,5 @@ public record AxRenewalProperties(String anthropicApiKey, String claudeCliPath, 
      */
     public boolean localClaudeConfigured() {
         return claudeCliPath != null && !claudeCliPath.isBlank();
-    }
-
-    /** Whether the model can be pointed at real source, not just the manifest. */
-    public boolean sourcePathConfigured() {
-        return sourcePath != null && !sourcePath.isBlank();
     }
 }
