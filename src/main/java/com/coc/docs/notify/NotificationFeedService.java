@@ -135,14 +135,35 @@ public class NotificationFeedService {
                 ? audit.recent(fetch)
                 : audit.recentForActor(caller.id(), fetch);
 
-        Stream<FeedItem> activity = rows.stream()
+        List<FeedItem> activity = rows.stream()
                 .filter(entry -> !HIDDEN_ACTIONS.contains(entry.action()))
-                .map(entry -> toItem(entry, caller));
+                .map(entry -> toItem(entry, caller))
+                .toList();
+
+        // A reserved share of the list for HRMS, and the reason is arithmetic
+        // rather than taste.
+        //
+        // The two sources arrive at wildly different rates: audit_log gains a
+        // row per sign-in and per edit, while a report arrives once a day. Sort
+        // the merge purely by time and truncate, and the reports are gone the
+        // moment the team is busy -- on this installation 1,878 audit rows were
+        // newer than the newest report, against a cap of 50, so the bell could
+        // never show one at all. It looked like ingestion was broken; nothing
+        // was broken but the arithmetic.
+        //
+        // So each source gets a floor, and neither gets a ceiling it does not
+        // need: HRMS may claim up to a quarter of the list, activity takes the
+        // rest, and whatever one source does not use the other fills. A day
+        // with no report still yields a full page of activity.
+        int hrmsSlots = Math.max(1, capped / 4);
+        List<FeedItem> hrmsItems = hrmsItemsFor(caller, hrmsSlots).toList();
+        List<FeedItem> activityItems =
+                activity.stream().limit(capped - hrmsItems.size()).toList();
 
         // Merged and re-sorted rather than appended: the two sources are each
         // newest-first on their own, and concatenating them would put a
         // three-day-old report above this morning's page edit.
-        return Stream.concat(activity, hrmsItemsFor(caller, capped))
+        return Stream.concat(activityItems.stream(), hrmsItems.stream())
                 .sorted(Comparator.comparing(FeedItem::occurredAt).reversed())
                 .limit(capped)
                 .toList();
@@ -273,6 +294,11 @@ public class NotificationFeedService {
             case AuditAction.SECTION_DB_BACKED -> "Changed a section's content source";
             case AuditAction.ACCOUNT_CREATE -> "Created an account";
             case AuditAction.ACCOUNT_ROLE_CHANGE -> "Changed an account's role";
+            // Deliberately does not name the person or the HRMS name it was set
+            // to: this feed is read by every super admin, and the sentence would
+            // otherwise disclose who is linked to which attendance record. The
+            // detail is in audit_log for anyone who needs it (NFR-SEC-PII).
+            case AuditAction.ACCOUNT_HRMS_LINK -> "Changed an account's attendance link";
             case AuditAction.ACCOUNT_DEACTIVATE -> "Deactivated an account";
             case AuditAction.ACCOUNT_DEACTIVATE_SCHEDULE -> "Scheduled an account to deactivate";
             case AuditAction.ACCOUNT_DEACTIVATE_CANCEL -> "Cancelled a scheduled deactivation";

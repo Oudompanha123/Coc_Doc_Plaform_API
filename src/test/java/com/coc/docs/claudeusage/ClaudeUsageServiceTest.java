@@ -225,20 +225,32 @@ class ClaudeUsageServiceTest {
             verify(members, never()).updateStatus(any(), any());
         }
 
+        /*
+         * There was a promotesInvitedToActive test here. It went with the
+         * status: nothing can put a row into 'invited' any more, V36 deleted
+         * the ones that were, and the branch that lifted them is gone. What it
+         * was really asserting — that reporting is what makes somebody active —
+         * is covered by autoCreatesActiveMember above, which is the only path
+         * into this table now.
+         */
+
         @Test
-        @DisplayName("promotes an invited member to active on their first report")
-        void promotesInvitedToActive() {
+        @DisplayName("an existing active member's status is left alone")
+        void leavesActiveStatusAlone() {
+            // The other half of "status only moves in the direction an admin
+            // chose": a report must not write a status at all for a row that
+            // already has one.
             UUID id = UUID.randomUUID();
-            ClaudeUsageMember invited = new ClaudeUsageMember(
-                    id, "inv@cocdocs.example", "Inv", ClaudeUsageMember.ROLE_MEMBER, ClaudeUsageMember.STATUS_INVITED,
-                    null, UUID.randomUUID(), Instant.now(), Instant.now());
-            when(members.findByEmail("inv@cocdocs.example")).thenReturn(Optional.of(invited));
+            ClaudeUsageMember active = new ClaudeUsageMember(
+                    id, "dev@cocdocs.example", "Dev", ClaudeUsageMember.ROLE_MEMBER, ClaudeUsageMember.STATUS_ACTIVE,
+                    null, null, Instant.now(), Instant.now());
+            when(members.findByEmail("dev@cocdocs.example")).thenReturn(Optional.of(active));
             when(daily.upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any()))
                     .thenReturn(true);
 
-            service.recordUsage("inv@cocdocs.example", null, LocalDate.now(), 10, 10, 0, 0, List.of(), Map.of());
+            service.recordUsage("dev@cocdocs.example", null, LocalDate.now(), 10, 10, 0, 0, List.of(), Map.of());
 
-            verify(members).updateStatus(id, ClaudeUsageMember.STATUS_ACTIVE);
+            verify(members, never()).updateStatus(any(), any());
         }
 
         @Test
@@ -305,6 +317,103 @@ class ClaudeUsageServiceTest {
     // -------------------------------------------------------------------
     // Dashboard rollup
     // -------------------------------------------------------------------
+
+    /**
+     * Who the dashboard is about, decided from the session.
+     *
+     * <p>A plain user reaches this screen to read their own usage; what a
+     * colleague costs is not something this product tells them. The scope is
+     * applied to the roster and the daily rows before the rollup, so these
+     * assert on the derived figures too — a filter that narrowed the member
+     * table while leaving "active users" counting the whole team would pass a
+     * test that only looked at members.
+     */
+    @Nested
+    @DisplayName("scope")
+    class Scope {
+
+        private static final LocalDate DAY = LocalDate.of(2026, 9, 22);
+
+        private ClaudeUsageDaily row(ClaudeUsageMember owner, long tokens) {
+            return new ClaudeUsageDaily(
+                    UUID.randomUUID(), owner.id(), DAY, tokens, tokens, 0, 0,
+                    BigDecimal.ONE, "Opus 5", Instant.now());
+        }
+
+        @Test
+        @DisplayName("a user sees only their own row, and every figure agrees")
+        void userSeesOnlyThemselves() {
+            ClaudeUsageMember mine = member("me@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            ClaudeUsageMember theirs = member("you@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.list()).thenReturn(List.of(mine, theirs));
+            when(daily.listInRange(DAY, DAY)).thenReturn(List.of(row(mine, 10), row(theirs, 999)));
+
+            var dashboard = service.dashboard("day", 0, DAY, "me@cocdocs.example");
+
+            assertThat(dashboard.members()).hasSize(1);
+            assertThat(dashboard.members().get(0).member().email()).isEqualTo("me@cocdocs.example");
+            // The derived figures, which a members-only assertion would miss.
+            assertThat(dashboard.activeUsers()).isEqualTo(1);
+            assertThat(dashboard.totals().totalTokens()).isEqualTo(20);
+        }
+
+        @Test
+        @DisplayName("the email is normalised, so a differently-cased session still matches")
+        void matchesRegardlessOfCase() {
+            ClaudeUsageMember mine = member("me@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.list()).thenReturn(List.of(mine));
+            when(daily.listInRange(DAY, DAY)).thenReturn(List.of(row(mine, 10)));
+
+            assertThat(service.dashboard("day", 0, DAY, "Me@CocDocs.Example").members()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("somebody who has never reported gets an empty dashboard, not an error")
+        void neverReportedIsEmpty() {
+            when(members.list())
+                    .thenReturn(List.of(member("someone@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null)));
+            when(daily.listInRange(DAY, DAY)).thenReturn(List.of());
+
+            var dashboard = service.dashboard("day", 0, DAY, "newcomer@cocdocs.example");
+
+            assertThat(dashboard.members()).isEmpty();
+            assertThat(dashboard.totals().totalTokens()).isZero();
+            assertThat(dashboard.activeUsers()).isZero();
+        }
+
+        @Test
+        @DisplayName("dashboardFor gives a user only themselves, and an admin the team")
+        void dashboardForPicksTheScopeFromTheRole() {
+            // The branch the other tests in this nest skip past: they call the
+            // filter directly, so a dashboardFor that passed the wrong thing --
+            // or null -- would have been invisible to all of them, while the
+            // screen showed a plain user the whole team.
+            ClaudeUsageMember a = member("a@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            ClaudeUsageMember b = member("b@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.list()).thenReturn(List.of(a, b));
+            when(daily.listInRange(any(), any())).thenReturn(List.of());
+
+            CurrentUser plainUser = TestCallers.user(AppRole.USER);
+            assertThat(service.dashboardFor(plainUser, "day", 0).members())
+                    .as("a user whose email is on no roster row sees nothing, not everyone")
+                    .isEmpty();
+
+            assertThat(service.dashboardFor(TestCallers.user(AppRole.ADMIN), "day", 0).members())
+                    .as("an admin still sees the team")
+                    .hasSize(2);
+        }
+
+        @Test
+        @DisplayName("a null scope is the whole team — what an admin gets")
+        void nullScopeIsEveryone() {
+            when(members.list()).thenReturn(List.of(
+                    member("a@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null),
+                    member("b@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null)));
+            when(daily.listInRange(DAY, DAY)).thenReturn(List.of());
+
+            assertThat(service.dashboard("day", 0, DAY, null).members()).hasSize(2);
+        }
+    }
 
     @Nested
     class Dashboard {

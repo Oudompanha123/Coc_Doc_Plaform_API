@@ -447,6 +447,46 @@ public class AccountRepository {
     }
 
     /**
+     * The HRMS attendance name this account is linked to, or empty when it is
+     * linked to none (V47).
+     *
+     * <p>Read on its own rather than carried on {@link Account}: the one caller
+     * that needs it — {@code HrmsNotificationService.report} — already makes an
+     * IMAP round-trip in the same request, next to which a single indexed
+     * lookup costs nothing, and keeping it off the record leaves every
+     * sign-in and session path untouched by a field none of them use.
+     *
+     * <p>Empty for a missing account as well as an unlinked one. The caller
+     * treats both the same way, because both mean "no attendance rows belong
+     * to you" and neither is worth distinguishing to somebody asking.
+     *
+     * <p>// req: FR-OPS-001, NFR-SEC-PII
+     */
+    public Optional<String> hrmsNameOf(UUID id) {
+        return jdbc.sql("select hrms_name from account where id = ?")
+                .param(id)
+                .query(String.class)
+                .optional()
+                .filter(name -> !name.isBlank());
+    }
+
+    /**
+     * Links, re-links or unlinks (null) an account to an HRMS attendance name.
+     *
+     * <p>{@code is distinct from} for the same reason {@link #updateAvatarUrl}
+     * uses it: unlinking writes a null, and {@code <>} is never true against
+     * one, which would make exactly that case a silent no-op.
+     */
+    public int updateHrmsName(UUID id, String hrmsName) {
+        return jdbc.sql("""
+                        update account set hrms_name = ?, updated_at = now()
+                        where id = ? and hrms_name is distinct from ?
+                        """)
+                .params(hrmsName, id, hrmsName)
+                .update();
+    }
+
+    /**
      * Records a self-uploaded photo (ADR-026). Setting {@code avatar_uploaded_at}
      * is what makes this an owner-controlled value from now on — see
      * {@code SessionService.refreshProfile}, which checks it before writing

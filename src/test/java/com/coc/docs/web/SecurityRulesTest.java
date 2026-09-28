@@ -613,20 +613,21 @@ class SecurityRulesTest {
     @DisplayName("Claude Usage (ADR-035)")
     class ClaudeUsagePath {
 
-        @Test
-        void the_dashboard_refuses_a_plain_user() throws Exception {
-            // Falls through to the generic /api/v1/admin/** rule (admin
-            // floor) rather than carrying a floor of its own — this is a
-            // usage/cost monitor, not account authority (FR-AUTH-008 is
-            // about AppRole; team_role here is unrelated to it).
-            mvc.perform(get("/api/v1/admin/claude-usage").with(as(AppRole.USER)))
-                    .andExpect(status().isForbidden());
-        }
+        /*
+         * This nest asserted the dashboard refused a plain user, because the
+         * route sat under /api/v1/admin/**. It moved to /api/v1/claude-usage
+         * so a user could read their OWN row, and the tests moved with it.
+         * What must not move is the write side: the two are asserted together
+         * below, because opening a read and opening a write look identical in
+         * a diff and are not the same thing at all.
+         */
 
         @Test
-        void the_dashboard_admits_an_admin() throws Exception {
-            org.mockito.Mockito.when(claudeUsageService.dashboard(
-                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
+        void the_dashboard_admits_a_plain_user() throws Exception {
+            org.mockito.Mockito.when(claudeUsageService.dashboardFor(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyInt()))
                     .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageDashboard(
                             "week",
                             java.time.LocalDate.now(),
@@ -638,7 +639,46 @@ class SecurityRulesTest {
                             0,
                             null));
 
-            mvc.perform(get("/api/v1/admin/claude-usage").with(as(AppRole.ADMIN)))
+            // Admitted, and then narrowed: ClaudeUsageService.dashboardFor
+            // gives them their own row only. The filter chain's job is to let
+            // them reach it; the scoping is asserted in ClaudeUsageServiceTest.
+            mvc.perform(get("/api/v1/claude-usage").with(as(AppRole.USER)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void the_roster_mutations_still_refuse_a_plain_user() throws Exception {
+            // The half that did not move. Reading your own usage is not a
+            // licence to change somebody's dashboard role, budget or tracking.
+            mvc.perform(patch("/api/v1/admin/claude-usage/members/" + java.util.UUID.randomUUID())
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"teamRole\":\"admin\"}"))
+                    .andExpect(status().isForbidden());
+
+            mvc.perform(post("/api/v1/admin/claude-usage/members/" + java.util.UUID.randomUUID() + "/remove")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void the_dashboard_admits_an_admin() throws Exception {
+            org.mockito.Mockito.when(claudeUsageService.dashboardFor(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyInt()))
+                    .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageDashboard(
+                            "week",
+                            java.time.LocalDate.now(),
+                            java.time.LocalDate.now(),
+                            List.of(),
+                            List.of(),
+                            new com.coc.docs.claudeusage.ClaudeUsageTotals(0, 0, 0, 0, java.math.BigDecimal.ZERO),
+                            0,
+                            0,
+                            null));
+
+            mvc.perform(get("/api/v1/claude-usage").with(as(AppRole.ADMIN)))
                     .andExpect(status().isOk());
         }
 
@@ -646,8 +686,10 @@ class SecurityRulesTest {
         void the_dashboard_admits_a_super_admin_too() throws Exception {
             // Not a fixed floor above admin (unlike /admin/accounts) — both
             // roles manage this roster.
-            org.mockito.Mockito.when(claudeUsageService.dashboard(
-                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
+            org.mockito.Mockito.when(claudeUsageService.dashboardFor(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyInt()))
                     .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageDashboard(
                             "week",
                             java.time.LocalDate.now(),
@@ -659,13 +701,13 @@ class SecurityRulesTest {
                             0,
                             null));
 
-            mvc.perform(get("/api/v1/admin/claude-usage").with(as(AppRole.SUPER_ADMIN)))
+            mvc.perform(get("/api/v1/claude-usage").with(as(AppRole.SUPER_ADMIN)))
                     .andExpect(status().isOk());
         }
 
         @Test
         void the_dashboard_refuses_a_caller_with_no_session() throws Exception {
-            mvc.perform(get("/api/v1/admin/claude-usage")).andExpect(status().isUnauthorized());
+            mvc.perform(get("/api/v1/claude-usage")).andExpect(status().isUnauthorized());
         }
 
         @Test

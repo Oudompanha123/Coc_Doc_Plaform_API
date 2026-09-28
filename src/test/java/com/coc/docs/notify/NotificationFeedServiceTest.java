@@ -40,8 +40,13 @@ class NotificationFeedServiceTest {
     private final NotificationFeedService service = new NotificationFeedService(audit, hrms);
 
     private static AuditEntry entry(long id, String action, String actorEmail) {
+        return entryAt(id, action, actorEmail, Instant.now());
+    }
+
+    /** As {@link #entry}, with the moment fixed — for asserting merge order. */
+    private static AuditEntry entryAt(long id, String action, String actorEmail, Instant occurredAt) {
         return new AuditEntry(
-                id, UUID.randomUUID(), actorEmail, null, action, "account", UUID.randomUUID(), null, Instant.now());
+                id, UUID.randomUUID(), actorEmail, null, action, "account", UUID.randomUUID(), null, occurredAt);
     }
 
     @Nested
@@ -178,6 +183,38 @@ class NotificationFeedServiceTest {
 
         private static HrmsNotification report(long id, String subject, Instant receivedAt) {
             return new HrmsNotification(id, "<" + id + "@hrms>", subject, null, receivedAt);
+        }
+
+        /**
+         * The regression this reserved share exists for.
+         *
+         * <p>A report arrives once a day; audit_log gains a row per sign-in and
+         * per edit. On a busy installation 1,878 audit rows were newer than the
+         * newest report against a cap of 50, so a purely time-sorted merge cut
+         * every report off the end and the bell showed none at all. It read as
+         * broken ingestion; nothing was broken but the arithmetic.
+         */
+        @Test
+        @DisplayName("survive a flood of newer activity rather than being truncated away")
+        void surviveNewerActivityFlood() {
+            CurrentUser caller = TestCallers.user(AppRole.SUPER_ADMIN);
+
+            // 200 audit rows, every one newer than the report.
+            Instant now = Instant.parse("2026-09-28T04:00:00Z");
+            List<AuditEntry> flood = IntStream.range(0, 200)
+                    .<AuditEntry>mapToObj(
+                            i -> entryAt(i + 1L, AuditAction.PAGE_PUBLISH, "a@example.com", now.plusSeconds(i)))
+                    .toList();
+            when(audit.recent(anyInt())).thenReturn(flood);
+            when(hrms.recent(anyInt()))
+                    .thenReturn(List.of(report(7, "Attendance on 08-Sep-2026", now.minus(java.time.Duration.ofDays(14)))));
+
+            List<NotificationFeedService.FeedItem> feed = service.feedFor(caller, 50);
+
+            assertThat(feed).hasSize(50);
+            assertThat(feed)
+                    .extracting(NotificationFeedService.FeedItem::summary)
+                    .contains("Attendance on 08-Sep-2026");
         }
 
         @Test

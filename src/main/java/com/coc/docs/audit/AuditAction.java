@@ -25,6 +25,14 @@ public final class AuditAction {
 
     public static final String ACCOUNT_CREATE = "account.create";
     public static final String ACCOUNT_ROLE_CHANGE = "account.role_change";
+
+    /**
+     * Linked, re-linked or unlinked an account to an HRMS attendance name
+     * (V47). Audited because it decides whose attendance record that account's
+     * holder is shown — a wrong value discloses one employee's times to
+     * another, which is a security change rather than a cosmetic one.
+     */
+    public static final String ACCOUNT_HRMS_LINK = "account.hrms_link";
     public static final String ACCOUNT_DEACTIVATE = "account.deactivate";
     public static final String ACCOUNT_REACTIVATE = "account.reactivate";
 

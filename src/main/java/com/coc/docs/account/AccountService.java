@@ -105,7 +105,12 @@ public class AccountService {
      */
     @Transactional
     public Account update(
-            UUID accountId, Set<AppRole> newRoles, Boolean active, String displayName, CurrentUser actor) {
+            UUID accountId,
+            Set<AppRole> newRoles,
+            Boolean active,
+            String displayName,
+            String hrmsName,
+            CurrentUser actor) {
 
         Account result = accounts
                 .findById(accountId)
@@ -120,7 +125,54 @@ public class AccountService {
         if (displayName != null) {
             result = renameFor(accountId, displayName, actor);
         }
+        if (hrmsName != null) {
+            result = linkHrmsName(accountId, hrmsName, actor);
+        }
         return result;
+    }
+
+    /**
+     * Links this account to the name it appears under in the HRMS attendance
+     * mail, or unlinks it when given a blank string (V47).
+     *
+     * <p><b>Audited, unlike {@link #renameFor}.</b> A display name grants
+     * nothing; this decides whose attendance record somebody is shown, so
+     * setting it wrong discloses one employee's clock-in times to another. The
+     * change belongs in the trail with role and activation changes, not with
+     * cosmetic edits.
+     *
+     * <p>Blank means unlink rather than "leave alone" — {@code null} already
+     * carries "leave alone" for the PATCH above, so a caller that wants the
+     * link removed has a way to say so.
+     *
+     * <p>// req: FR-OPS-001, NFR-SEC-PII, NFR-OPS-AUDIT
+     */
+    @Transactional
+    public Account linkHrmsName(UUID accountId, String hrmsName, CurrentUser actor) {
+        Account before = accounts
+                .findById(accountId)
+                .orElseThrow(() -> ApiException.notFound("account " + accountId));
+
+        String trimmed = hrmsName.trim();
+        String next = trimmed.isEmpty() ? null : trimmed;
+        String previous = accounts.hrmsNameOf(accountId).orElse(null);
+
+        if (accounts.updateHrmsName(accountId, next) == 0) {
+            return before;
+        }
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.ACCOUNT_HRMS_LINK,
+                AuditAction.TARGET_ACCOUNT,
+                accountId,
+                json.createObjectNode()
+                        .put("subject", before.email())
+                        .put("from", previous == null ? "(not linked)" : previous)
+                        .put("to", next == null ? "(not linked)" : next));
+
+        return accounts.findById(accountId).orElseThrow();
     }
 
     /**

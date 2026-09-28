@@ -265,9 +265,10 @@ public class ClaudeUsageService {
                     ClaudeUsageMember.STATUS_ACTIVE,
                     null);
         } else {
-            if (ClaudeUsageMember.STATUS_INVITED.equals(member.status())) {
-                members.updateStatus(member.id(), ClaudeUsageMember.STATUS_ACTIVE);
-            }
+            // No promotion step any more: a row reaches this table by reporting,
+            // so it is already active. The branch that lifted an 'invited' row
+            // went with the invite endpoint and the status itself (V36).
+            //
             // A removed member is never silently reactivated by a new report —
             // status only ever changes in the direction an admin chose here.
             if (rawDisplayName != null && !rawDisplayName.isBlank()) {
@@ -338,7 +339,34 @@ public class ClaudeUsageService {
      * query deserves a sane answer, not an error page.
      */
     public ClaudeUsageDashboard dashboard(String rawPeriod, int rawOffset) {
-        return dashboard(rawPeriod, rawOffset, LocalDate.now(REPORT_ZONE));
+        return dashboard(rawPeriod, rawOffset, LocalDate.now(REPORT_ZONE), null);
+    }
+
+    /**
+     * The dashboard, scoped to what {@code caller} may see.
+     *
+     * <p><b>An {@code admin} and above sees the team; everyone else sees only
+     * their own row.</b> A plain {@code user} is on this roster because they
+     * ran the reporter, and their own tokens and cost are theirs to look at —
+     * but what a colleague costs is not something this product decided to tell
+     * them. That is the same shape {@code NotificationFeedService} already uses
+     * for the activity feed: one route, and the scope decided here from the
+     * session rather than from anything the caller sends.
+     *
+     * <p>The scope is applied by filtering the roster and the daily rows before
+     * the rollup, not by trimming the finished dashboard. Totals, the chart,
+     * "active users", "near limit" and "last updated" are all derived from
+     * those two lists, so narrowing the inputs narrows every figure at once —
+     * there is no second code path that could disagree, and no number that
+     * silently keeps counting people the caller cannot see.
+     *
+     * <p>Someone who has never run the reporter has no roster row, and gets an
+     * empty dashboard rather than an error: nothing has gone wrong, they simply
+     * have no usage yet.
+     */
+    public ClaudeUsageDashboard dashboardFor(CurrentUser caller, String rawPeriod, int rawOffset) {
+        boolean wholeTeam = caller.role().isAtLeast(com.coc.docs.account.AppRole.ADMIN);
+        return dashboard(rawPeriod, rawOffset, LocalDate.now(REPORT_ZONE), wholeTeam ? null : caller.email());
     }
 
     /**
@@ -347,7 +375,16 @@ public class ClaudeUsageService {
      * with the calendar. Mirrors the reference tool's own {@code rollup(rows,
      * period, today, offset)} signature for exactly this reason.
      */
+    /** The whole team, at a fixed "today". The period/range tests' entry point. */
     ClaudeUsageDashboard dashboard(String rawPeriod, int rawOffset, LocalDate today) {
+        return dashboard(rawPeriod, rawOffset, today, null);
+    }
+
+    /**
+     * @param onlyEmail when non-null, the one member this dashboard is about —
+     *     see {@link #dashboardFor}. Null means the whole team.
+     */
+    ClaudeUsageDashboard dashboard(String rawPeriod, int rawOffset, LocalDate today, String onlyEmail) {
         String period = PERIODS.contains(rawPeriod) ? rawPeriod : "week";
         int offset = Math.max(MIN_OFFSET, Math.min(0, rawOffset));
 
@@ -357,6 +394,19 @@ public class ClaudeUsageService {
 
         List<ClaudeUsageMember> roster = members.list();
         List<ClaudeUsageDaily> rows = daily.listInRange(from, to);
+
+        // The one place the scope is applied. Everything below is computed from
+        // these two lists, so narrowing them here narrows the member table, the
+        // chart, the totals and both counters together — rather than leaving a
+        // "3 tracked" that quietly counts people the caller cannot see.
+        if (onlyEmail != null) {
+            String email = normalizeEmail(onlyEmail);
+            roster = roster.stream()
+                    .filter(member -> email.equals(member.email()))
+                    .toList();
+            Set<UUID> visible = roster.stream().map(ClaudeUsageMember::id).collect(Collectors.toSet());
+            rows = rows.stream().filter(row -> visible.contains(row.memberId())).toList();
+        }
 
         Map<UUID, List<ClaudeUsageDaily>> rowsByMember =
                 rows.stream().collect(Collectors.groupingBy(ClaudeUsageDaily::memberId));
