@@ -41,7 +41,8 @@ public class AxRenewalImplementationRepository {
                 rs.getObject("started_by", UUID.class),
                 completedAt == null ? null : completedAt.toInstant(),
                 rs.getString("staging_path"),
-                rs.getString("failure_reason"));
+                rs.getString("failure_reason"),
+                rs.getString("confirmed_plan_hash"));
     }
 
     private AxRenewalGeneratedChange mapChange(ResultSet rs, int rowNum) throws SQLException {
@@ -58,7 +59,7 @@ public class AxRenewalImplementationRepository {
     private static final String COLUMNS =
             "id, project_id, status, before_report::text as before_report, "
                     + "after_report::text as after_report, started_at, started_by, completed_at, "
-                    + "staging_path, failure_reason";
+                    + "staging_path, failure_reason, confirmed_plan_hash";
 
     /**
      * Any run not yet at a terminal status ({@code running}, {@code
@@ -91,19 +92,32 @@ public class AxRenewalImplementationRepository {
                 .optional();
     }
 
-    /** Starts a run already at a terminal-bound status ({@code running}) — the original Phase-1 placeholder path. */
+    /** Starts a run already at a terminal-bound status ({@code running}) — the original Phase-1 placeholder path, which never has a confirmed-plan hash (ADR-053). */
     public AxRenewalImplementationRun insert(UUID projectId, UUID startedBy, JsonNode beforeReport) {
-        return insert(projectId, startedBy, beforeReport, AxRenewalImplementationRun.STATUS_RUNNING);
+        return insert(projectId, startedBy, beforeReport, AxRenewalImplementationRun.STATUS_RUNNING, null);
     }
 
-    /** Starts a run at any initial status — Generate uses {@code generating} directly, skipping the placeholder's {@code running}. */
-    public AxRenewalImplementationRun insert(UUID projectId, UUID startedBy, JsonNode beforeReport, String initialStatus) {
+    /**
+     * Starts a run at any initial status, with the confirmed-plan hash it
+     * was built from (ADR-053) — Generate uses {@code generating} directly,
+     * skipping the placeholder's {@code running}; Replay uses {@code
+     * awaiting_review} directly, skipping generation entirely, carrying the
+     * same hash as the applied run it reproduces.
+     */
+    public AxRenewalImplementationRun insert(
+            UUID projectId, UUID startedBy, JsonNode beforeReport, String initialStatus, String confirmedPlanHash) {
         return jdbc.sql("""
-                        insert into ax_renewal_implementation_run (project_id, started_by, before_report, status)
-                        values (?, ?, ?::jsonb, ?)
+                        insert into ax_renewal_implementation_run
+                          (project_id, started_by, before_report, status, confirmed_plan_hash)
+                        values (?, ?, ?::jsonb, ?, ?)
                         returning
                         """ + COLUMNS)
-                .params(projectId, startedBy, beforeReport == null ? null : jsonb.write(beforeReport), initialStatus)
+                .params(
+                        projectId,
+                        startedBy,
+                        beforeReport == null ? null : jsonb.write(beforeReport),
+                        initialStatus,
+                        confirmedPlanHash)
                 .query(this::map)
                 .single();
     }

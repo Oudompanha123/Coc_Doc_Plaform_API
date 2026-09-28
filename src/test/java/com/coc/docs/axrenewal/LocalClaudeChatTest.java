@@ -49,19 +49,18 @@ class LocalClaudeChatTest {
 
         @Test
         void refuses_rather_than_pretending_to_answer() {
-            LocalClaudeChat chat = new LocalClaudeChat(new AxRenewalProperties(null, null, null), JSON);
+            LocalClaudeChat chat = new LocalClaudeChat(new AxRenewalProperties(null, null), JSON);
 
-            assertThatThrownBy(() -> chat.reply(project("composer.json", "{}"), List.of(), "hello"))
+            assertThatThrownBy(() -> chat.reply(project("composer.json", "{}"), List.of(), "hello", null))
                     .isInstanceOf(ApiException.class)
                     .hasMessageContaining("no local model is configured");
         }
 
         @Test
         void a_configured_path_that_is_not_a_file_says_so() {
-            LocalClaudeChat chat = new LocalClaudeChat(
-                    new AxRenewalProperties(null, "C:\\nope\\claude.exe", null), JSON);
+            LocalClaudeChat chat = new LocalClaudeChat(new AxRenewalProperties(null, "C:\\nope\\claude.exe"), JSON);
 
-            assertThatThrownBy(() -> chat.reply(project(null, null), List.of(), "hello"))
+            assertThatThrownBy(() -> chat.reply(project(null, null), List.of(), "hello", null))
                     .isInstanceOf(ApiException.class)
                     .hasMessageContaining("does not point at a file");
         }

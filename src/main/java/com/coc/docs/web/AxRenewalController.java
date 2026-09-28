@@ -92,13 +92,18 @@ public class AxRenewalController {
      *     per-request choice rather than a stored setting, because the
      *     configuration it overrides is one developer's own machine
      *     (ADR-043) and a persisted flag would outlive the reason for it.
+     * @param sourcePath one caller's own legacy checkout for this one run,
+     *     in place of {@code app.ax-renewal.source-path} — same reasoning as
+     *     {@code useModel} above, one step further (ADR-051). Never stored;
+     *     {@code AxRenewalService} validates it and reports a bad one as 400.
      */
     @PostMapping("/projects/{projectId}/analysis/run")
     ApiDtos.AxRenewalAnalysisResponse runAnalysis(
             @PathVariable UUID projectId,
             @RequestParam(name = "useModel", defaultValue = "true") boolean useModel,
+            @RequestParam(required = false) String sourcePath,
             @AuthenticationPrincipal CurrentUser actor) {
-        return ApiDtos.AxRenewalAnalysisResponse.of(projects.runAnalysis(projectId, useModel, actor));
+        return ApiDtos.AxRenewalAnalysisResponse.of(projects.runAnalysis(projectId, useModel, sourcePath, actor));
     }
 
     @PutMapping("/projects/{projectId}/plan/stack-move")
@@ -192,10 +197,20 @@ public class AxRenewalController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * @param sourcePath one caller's own legacy checkout to generate from —
+     *     only meaningful when this call actually reaches real generation
+     *     (a model configured, a filesystem destination, a concrete
+     *     confirmed plan); ignored otherwise, same as {@code useModel} above
+     *     on Run analysis (ADR-052).
+     */
     @PostMapping("/projects/{projectId}/implementation/start")
     ApiDtos.AxRenewalImplementationRunResponse startImplementation(
-            @PathVariable UUID projectId, @AuthenticationPrincipal CurrentUser actor) {
-        return ApiDtos.AxRenewalImplementationRunResponse.of(projects.startImplementation(projectId, actor));
+            @PathVariable UUID projectId,
+            @RequestParam(required = false) String sourcePath,
+            @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalImplementationRunResponse.of(
+                projects.startImplementation(projectId, sourcePath, actor));
     }
 
     /** The files a Generate run actually found different, once it reaches {@code awaiting_review} (ADR-044). */
@@ -290,7 +305,7 @@ public class AxRenewalController {
                 : request.history().stream()
                         .map(turn -> new LocalClaudeChat.Turn(turn.role(), turn.text()))
                         .toList();
-        LocalClaudeChat.Reply reply = projects.chat(projectId, history, request.message());
+        LocalClaudeChat.Reply reply = projects.chat(projectId, history, request.message(), request.sourcePath());
         return new ApiDtos.AxRenewalChatResponse(reply.text(), reply.readSource());
     }
 

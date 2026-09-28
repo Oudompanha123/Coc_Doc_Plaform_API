@@ -60,9 +60,14 @@ public class AxRenewalImplementationRunner {
      * records exactly why not, never leaving a run silently stuck at {@code
      * generating}. Runs on a background thread; {@code runId}'s row is the
      * only thing the caller can still observe once this returns.
+     *
+     * @param sourcePath the legacy project's folder to copy from — captured
+     *     from the request that started this run (ADR-052) and carried
+     *     across the async boundary, since nothing server-side holds it to
+     *     be read back later.
      */
     @Async
-    public void runGeneration(UUID runId, String confirmedPlan) {
+    public void runGeneration(UUID runId, String confirmedPlan, String sourcePath) {
         Path staging;
         try {
             staging = Files.createTempDirectory("ax-renewal-generate-");
@@ -74,7 +79,8 @@ public class AxRenewalImplementationRunner {
 
         Optional<AxRenewalCodeGenerator.Result> result;
         try {
-            result = generator.generate(confirmedPlan, staging, process -> runningProcesses.put(runId, process));
+            result = generator.generate(
+                    confirmedPlan, staging, process -> runningProcesses.put(runId, process), sourcePath);
         } catch (RuntimeException e) {
             log.warn("generation run {} failed unexpectedly", runId, e);
             deleteQuietly(staging);

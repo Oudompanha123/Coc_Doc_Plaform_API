@@ -154,6 +154,16 @@ public final class AuditAction {
 
     /** A running Generate attempt stopped deliberately, before it ever reached awaiting_review (ADR-049). */
     public static final String AX_RENEWAL_IMPLEMENTATION_CANCEL = "ax_renewal.implementation_cancel";
+
+    /**
+     * Rebuild reused a prior applied run's exact generated changes instead
+     * of asking the model again, because the confirmed plan had not changed
+     * since (ADR-053). {@code detail} carries {@code replayedFromRunId} —
+     * distinct from {@link #AX_RENEWAL_IMPLEMENTATION_START}, since nothing
+     * here actually ran the model.
+     */
+    public static final String AX_RENEWAL_IMPLEMENTATION_REPLAY = "ax_renewal.implementation_replay";
+
     public static final String AX_RENEWAL_COMMENT_ADD = "ax_renewal.comment_add";
 
     /**

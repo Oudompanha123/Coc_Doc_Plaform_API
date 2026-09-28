@@ -12,7 +12,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -139,6 +142,33 @@ public class AxRenewalService {
     }
 
     /**
+     * Validates a caller-supplied source path — one team member's own legacy
+     * checkout, given for one call to Run analysis, Start implementation, or
+     * the assistant chat (ADR-052 revises ADR-051). Null or blank (nobody
+     * gave one) returns null, meaning "no source available for this call" —
+     * there is no server-side default left to defer to. Anything else must
+     * already be a real, readable directory on this backend's own disk, or
+     * the request is refused (400) before a subprocess is ever spawned over
+     * it.
+     */
+    private String requireReadableDirectoryOrNull(String sourcePath) {
+        if (sourcePath == null || sourcePath.isBlank()) {
+            return null;
+        }
+        Path candidate;
+        try {
+            candidate = Path.of(sourcePath.trim());
+        } catch (InvalidPathException e) {
+            throw ApiException.badRequest("that doesn't look like a valid path: " + sourcePath);
+        }
+        if (!Files.isDirectory(candidate)) {
+            throw ApiException.badRequest(
+                    "that path isn't a folder this backend can read: " + sourcePath);
+        }
+        return candidate.toString();
+    }
+
+    /**
      * Deletes a project outright (ADR-050). Every row that hangs off it —
      * analysis, plan, confirmations, comments, implementation runs,
      * destination, database connection — cascades away with it at the
@@ -253,10 +283,26 @@ public class AxRenewalService {
      * derived from simple, disclosed keyword matching against the attached
      * manifest, and {@code findings} always states plainly that no model is
      * connected, the same honest fallback the prototype this replaces used.
+     *
+     * @param sourcePath one caller's own legacy checkout, typed in for this
+     *     one run rather than read from {@code app.ax-renewal.source-path}
+     *     (ADR-051) — null/blank defers to that configured default exactly as
+     *     before. Validated here, not inside {@link LocalClaudeAnalyzer}: a
+     *     path a person just typed deserves an immediate 400 naming what is
+     *     wrong, not the same silent fallback a stale <em>configuration</em>
+     *     value degrades to. Only validated when {@code useModel} is true —
+     *     with it false the override could not affect anything anyway (the
+     *     keyword branch never looks at either the override or the
+     *     configured default), so stale text left in the box from before
+     *     Disconnect was pressed must not turn an otherwise-ordinary
+     *     keyword-stub run into a 400. Never persisted — this machine's disk
+     *     is the only place it means anything, the same reasoning {@code
+     *     app.ax-renewal.source-path} itself was already built on.
      */
     @Transactional
-    public AxRenewalAnalysis runAnalysis(UUID projectId, boolean useModel, CurrentUser actor) {
+    public AxRenewalAnalysis runAnalysis(UUID projectId, boolean useModel, String sourcePath, CurrentUser actor) {
         AxRenewalProject project = requireProject(projectId);
+        String resolvedSourcePath = useModel ? requireReadableDirectoryOrNull(sourcePath) : null;
 
         // A local Claude Code installation, where one is configured and
         // working, and where the caller has not asked for the keyword
@@ -264,7 +310,7 @@ public class AxRenewalService {
         // that has not opted in, which is why the keyword branch below stays
         // -- it is the answer for everybody else, not dead code (ADR-043).
         Optional<LocalClaudeAnalyzer.Result> local =
-                useModel ? localClaude.analyse(project) : Optional.empty();
+                useModel ? localClaude.analyse(project, resolvedSourcePath) : Optional.empty();
         if (local.isPresent()) {
             return persistLocalAnalysis(projectId, project, local.get(), actor);
         }
@@ -359,12 +405,20 @@ public class AxRenewalService {
      * <p>Read by the assistant panel so its banner states the truth rather
      * than a hardcoded "no model connected" -- which was right for every
      * deployment and wrong on a machine that has one (ADR-043).
+     *
+     * <p>{@code readsSource} is always false now (ADR-052): there is no
+     * server-side default left to report on, since Run analysis, Start
+     * implementation and chat each take their own source path per call
+     * instead of reading one from configuration. Whether one particular
+     * call will read source is a fact about what somebody just typed for
+     * it, not about this deployment, so it is not something this
+     * project-independent status check can answer.
      */
     public AxRenewalEngineStatus engineStatus() {
         if (!properties.localClaudeConfigured()) {
             return new AxRenewalEngineStatus(false, false);
         }
-        return new AxRenewalEngineStatus(true, properties.sourcePathConfigured());
+        return new AxRenewalEngineStatus(true, false);
     }
 
     /**
@@ -386,13 +440,18 @@ public class AxRenewalService {
      *
      * <p>The project still has to exist. Asking about one nobody attached is
      * a 404, exactly as reading it would be.
+     *
+     * @param sourcePath one caller's own legacy checkout, given for this one
+     *     question rather than read from configuration (ADR-052) — validated
+     *     the same way {@link #runAnalysis}'s override is, before {@link
+     *     LocalClaudeChat} ever sees it.
      */
-    public LocalClaudeChat.Reply chat(UUID projectId, List<LocalClaudeChat.Turn> history, String message) {
+    public LocalClaudeChat.Reply chat(UUID projectId, List<LocalClaudeChat.Turn> history, String message, String sourcePath) {
         AxRenewalProject project = requireProject(projectId);
         if (message == null || message.isBlank()) {
             throw ApiException.badRequest("say something to the assistant");
         }
-        return localChat.reply(project, history, message.trim());
+        return localChat.reply(project, history, message.trim(), requireReadableDirectoryOrNull(sourcePath));
     }
 
     // -----------------------------------------------------------------------
@@ -595,19 +654,35 @@ public class AxRenewalService {
      * destination is set — a business rule, reported as a 409, not an
      * authorisation decision (see the class Javadoc).
      *
-     * <p>Two paths (ADR-044). Without a local model, or with anything other
-     * than a filesystem destination, this is exactly the original Phase-1
-     * placeholder: completes synchronously, records what was confirmed, and
-     * says plainly that no code was generated — unlike the prototype this
-     * replaces, which fabricated specific before/after metrics for a demo. A
-     * real tool must not invent numbers it did not measure. With both, this
-     * instead kicks off a real Generate run in the background and returns
-     * immediately with the run at {@code generating} — see {@link
-     * #approveImplementation} for what happens once it reaches {@code
-     * awaiting_review}.
+     * <p>Three paths now, not two. Rebuild — pressed after a filesystem
+     * destination already has one <em>applied</em> run, with the confirmed
+     * plan still exactly what produced it (same {@code confirmedPlanHash},
+     * ADR-053) — replays that run's exact generated changes for a fresh
+     * review cycle rather than asking the model again: a real Generate call
+     * is not guaranteed to answer the same way twice, and every other team
+     * member's own machine has its own copy of the legacy source at its own
+     * path, not necessarily byte-identical to whoever ran it first. Without
+     * that (a first build, or the plan changed since), this falls back to
+     * ADR-044's original two: without a local model, without a filesystem
+     * destination, or without a source path given, the Phase-1 placeholder —
+     * completes synchronously, records what was confirmed, and says plainly
+     * that no code was generated, unlike the prototype this replaces, which
+     * fabricated specific before/after metrics for a demo. With a model, a
+     * filesystem destination, and a real source path, a real Generate run in
+     * the background, returning immediately at {@code generating} — see
+     * {@link #approveImplementation} for what happens once it reaches
+     * {@code awaiting_review}, exactly as Replay's own new run also does.
+     *
+     * @param sourcePath one caller's own legacy checkout to generate from —
+     *     never configuration (ADR-052 revises ADR-044). Only checked once
+     *     every other precondition for a fresh real generation already holds
+     *     (a model configured, a filesystem destination, a concrete
+     *     confirmed plan, and Rebuild not already replaying instead):
+     *     requiring a path a path-less Rebuild or the placeholder path was
+     *     never going to use would refuse a request that did not need it.
      */
     @Transactional
-    public AxRenewalImplementationRun startImplementation(UUID projectId, CurrentUser actor) {
+    public AxRenewalImplementationRun startImplementation(UUID projectId, String sourcePath, CurrentUser actor) {
         AxRenewalProject project = requireProject(projectId);
 
         List<AxRenewalSection> missing = Arrays.stream(AxRenewalSection.values())
@@ -624,8 +699,21 @@ public class AxRenewalService {
             throw ApiException.conflict("implementation is already running for this project");
         }
 
-        if (generator.canGenerate() && AxRenewalDestination.KIND_FILESYSTEM_PATH.equals(destination.kind())) {
-            String confirmedPlan = buildConfirmedPlanDescription(projectId);
+        boolean filesystemDestination = AxRenewalDestination.KIND_FILESYSTEM_PATH.equals(destination.kind());
+        String confirmedPlan = buildConfirmedPlanDescription(projectId);
+        String confirmedPlanHash = confirmedPlan.isBlank() ? null : sha256Hex(confirmedPlan);
+
+        if (filesystemDestination) {
+            Optional<AxRenewalImplementationRun> latest = implementations.findLatest(projectId);
+            if (latest.isPresent()
+                    && AxRenewalImplementationRun.STATUS_APPLIED.equals(latest.get().status())
+                    && confirmedPlanHash != null
+                    && confirmedPlanHash.equals(latest.get().confirmedPlanHash())) {
+                return replayAppliedRun(projectId, project, latest.get(), actor);
+            }
+        }
+
+        if (generator.canGenerate() && filesystemDestination) {
             if (confirmedPlan.isBlank()) {
                 // Confirming a section is not the same as having decided
                 // something in it — Stack move can be confirmed with every
@@ -640,9 +728,83 @@ public class AxRenewalService {
                                 + "Stack move target, an Architecture description, a page mapping, or a database "
                                 + "change before rebuilding");
             }
-            return beginGeneration(projectId, project, destination, actor, confirmedPlan);
+            String resolvedSourcePath = requireReadableDirectoryOrNull(sourcePath);
+            if (resolvedSourcePath == null) {
+                throw ApiException.conflict("give this project's legacy source path before starting implementation");
+            }
+            return beginGeneration(projectId, project, destination, actor, confirmedPlan, confirmedPlanHash, resolvedSourcePath);
         }
         return recordPlaceholderCompletion(projectId, project, destination, actor);
+    }
+
+    /**
+     * Reuses a prior <em>applied</em> run's exact generated changes for a
+     * fresh review cycle, instead of asking the model again (ADR-053): the
+     * confirmed plan is byte-for-byte the one that already produced {@code
+     * appliedRun}, so there is nothing new to generate — only to re-review
+     * and write to <em>this</em> destination, which may be a different
+     * machine's folder than whoever approved it the first time (the same
+     * per-machine reality {@code AxRenewalLocalRunner}'s own Javadoc already
+     * notes for a filesystem destination). Carries {@code appliedRun}'s own
+     * {@code confirmedPlanHash} forward unchanged — nothing about the plan
+     * changed to produce this, so nothing about the fact it matches should
+     * either.
+     */
+    private AxRenewalImplementationRun replayAppliedRun(
+            UUID projectId, AxRenewalProject project, AxRenewalImplementationRun appliedRun, CurrentUser actor) {
+        List<AxRenewalGeneratedChange> priorChanges = implementations.findGeneratedChanges(appliedRun.id());
+        ObjectNode beforeReport = json.createObjectNode()
+                .put("mode", AxRenewalImplementationRun.REPORT_MODE_REPLAY)
+                .put("replayedFromRunId", appliedRun.id().toString())
+                .put("filesReplayed", priorChanges.size());
+        AxRenewalImplementationRun run = implementations.insert(
+                projectId,
+                actor.id(),
+                beforeReport,
+                AxRenewalImplementationRun.STATUS_AWAITING_REVIEW,
+                appliedRun.confirmedPlanHash());
+        implementations.insertGeneratedChanges(
+                run.id(),
+                priorChanges.stream()
+                        .map(c -> new AxRenewalImplementationRepository.GeneratedChangeInput(
+                                c.path(), c.changeKind(), c.beforeContent(), c.afterContent()))
+                        .toList());
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_IMPLEMENTATION_REPLAY,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode()
+                        .put("project", project.name())
+                        .put("replayedFromRunId", appliedRun.id().toString())
+                        .put("filesReplayed", priorChanges.size()));
+
+        return run;
+    }
+
+    /**
+     * Hex-encoded SHA-256 — the only thing {@link #startImplementation}
+     * needs from the confirmed-plan text: whether it is the same as before,
+     * never the text itself back out. Package-private, not private, so a
+     * test can compute the same hash a given plan text would produce
+     * without re-implementing SHA-256 itself.
+     */
+    static String sha256Hex(String text) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            // Every JDK distribution ships SHA-256 (JLS-mandated); this is
+            // unreachable outside a broken installation, and there is no
+            // sensible fallback to degrade to.
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
     }
 
     private AxRenewalImplementationRun beginGeneration(
@@ -650,11 +812,17 @@ public class AxRenewalService {
             AxRenewalProject project,
             AxRenewalDestination destination,
             CurrentUser actor,
-            String confirmedPlan) {
+            String confirmedPlan,
+            String confirmedPlanHash,
+            String sourcePath) {
         ObjectNode beforeReport =
                 json.createObjectNode().put("mode", "generate").put("destination", destination.target());
         AxRenewalImplementationRun run = implementations.insert(
-                projectId, actor.id(), beforeReport, AxRenewalImplementationRun.STATUS_GENERATING);
+                projectId,
+                actor.id(),
+                beforeReport,
+                AxRenewalImplementationRun.STATUS_GENERATING,
+                confirmedPlanHash);
 
         audit.append(
                 actor.id(),
@@ -678,7 +846,7 @@ public class AxRenewalService {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                runner.runGeneration(run.id(), confirmedPlan);
+                runner.runGeneration(run.id(), confirmedPlan, sourcePath);
             }
         });
         return run;

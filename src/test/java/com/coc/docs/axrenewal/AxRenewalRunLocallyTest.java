@@ -74,7 +74,7 @@ class AxRenewalRunLocallyTest {
                 new ObjectMapper(),
                 mock(LocalClaudeAnalyzer.class),
                 mock(LocalClaudeChat.class),
-                new AxRenewalProperties(null, null, null),
+                new AxRenewalProperties(null, null),
                 mock(AxRenewalCodeGenerator.class),
                 mock(AxRenewalImplementationRunner.class),
                 localRunner);
@@ -90,6 +90,7 @@ class AxRenewalRunLocallyTest {
                 Instant.EPOCH,
                 actor.id(),
                 Instant.EPOCH,
+                null,
                 null,
                 null)));
         when(destinations.find(projectId)).thenReturn(Optional.of(new AxRenewalDestination(
@@ -125,6 +126,7 @@ class AxRenewalRunLocallyTest {
                 actor.id(),
                 null,
                 null,
+                null,
                 null)));
 
         assertThatThrownBy(() -> service.startRunLocally(projectId, actor))
@@ -145,6 +147,7 @@ class AxRenewalRunLocallyTest {
                 Instant.EPOCH,
                 actor.id(),
                 Instant.EPOCH,
+                null,
                 null,
                 null)));
         when(destinations.find(projectId)).thenReturn(Optional.of(new AxRenewalDestination(

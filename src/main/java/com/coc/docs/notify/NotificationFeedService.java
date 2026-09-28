@@ -324,6 +324,7 @@ public class NotificationFeedService {
             case AuditAction.AX_RENEWAL_IMPLEMENTATION_APPROVE -> "Approved generated code changes";
             case AuditAction.AX_RENEWAL_IMPLEMENTATION_REJECT -> "Rejected generated code changes";
             case AuditAction.AX_RENEWAL_IMPLEMENTATION_CANCEL -> "Cancelled a running renewal implementation";
+            case AuditAction.AX_RENEWAL_IMPLEMENTATION_REPLAY -> "Reused a previous rebuild's exact result";
             case AuditAction.AX_RENEWAL_COMMENT_ADD -> "Commented on a renewal project";
             case AuditAction.AX_RENEWAL_COMMENT_DELETE -> "Removed a comment from a renewal project";
             case AuditAction.AX_RENEWAL_RUN_LOCALLY_START -> "Started a local run of a renewed project";

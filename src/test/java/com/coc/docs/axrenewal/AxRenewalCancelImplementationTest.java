@@ -67,7 +67,7 @@ class AxRenewalCancelImplementationTest {
                 new ObjectMapper(),
                 mock(LocalClaudeAnalyzer.class),
                 mock(LocalClaudeChat.class),
-                new AxRenewalProperties(null, null, null),
+                new AxRenewalProperties(null, null),
                 mock(AxRenewalCodeGenerator.class),
                 runner,
                 mock(AxRenewalLocalRunner.class));
@@ -75,7 +75,7 @@ class AxRenewalCancelImplementationTest {
 
     private AxRenewalImplementationRun runAt(String status) {
         return new AxRenewalImplementationRun(
-                runId, projectId, status, null, null, Instant.EPOCH, actor.id(), null, "/tmp/staging", null);
+                runId, projectId, status, null, null, Instant.EPOCH, actor.id(), null, "/tmp/staging", null, null);
     }
 
     @Test
@@ -122,6 +122,7 @@ class AxRenewalCancelImplementationTest {
                         actor.id(),
                         null,
                         "/tmp/staging",
+                        null,
                         null)));
 
         assertThatThrownBy(() -> service.cancelImplementation(projectId, runId, actor)).isInstanceOf(ApiException.class);
