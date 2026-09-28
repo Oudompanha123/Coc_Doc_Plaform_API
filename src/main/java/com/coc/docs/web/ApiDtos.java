@@ -948,7 +948,9 @@ public final class ApiDtos {
             long todayOutputTokens,
             long todayTotalTokens,
             List<ClaudeUsageMyDashboardPointResponse> daily,
-            Instant lastUpdated) {
+            Instant lastUpdated,
+            /** Null until the caller is on the roster (i.e. has never reported). */
+            ClaudeUsageMemberResponse todayUsage) {
 
         public static ClaudeUsageMyDashboardResponse of(ClaudeUsageMyDashboard dashboard) {
             return new ClaudeUsageMyDashboardResponse(
@@ -959,7 +961,8 @@ public final class ApiDtos {
                     dashboard.todayOutputTokens(),
                     dashboard.todayTotalTokens(),
                     dashboard.daily().stream().map(ClaudeUsageMyDashboardPointResponse::of).toList(),
-                    dashboard.lastUpdated());
+                    dashboard.lastUpdated(),
+                    dashboard.todayUsage() == null ? null : ClaudeUsageMemberResponse.of(dashboard.todayUsage()));
         }
     }
 
@@ -992,6 +995,9 @@ public final class ApiDtos {
                     member.createdAt());
         }
     }
+
+    public record InviteClaudeUsageMemberRequest(
+            @NotBlank @Email String email, String displayName, String teamRole) {}
 
     public record UpdateClaudeUsageMemberRoleRequest(@NotBlank String teamRole) {}
 

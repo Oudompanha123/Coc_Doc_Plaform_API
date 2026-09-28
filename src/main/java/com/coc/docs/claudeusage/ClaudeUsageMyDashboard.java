@@ -14,6 +14,9 @@ import java.util.List;
  *     with no report.
  * @param lastUpdated the newest {@code reported_at} among rows in {@code
  *     daily}, or null if nothing was ever reported.
+ * @param todayUsage the caller's own roster row rolled up over today — models,
+ *     cost, and soft budget, computed exactly as the admin per-user table does
+ *     for a one-day period; null if the caller is not on the roster yet.
  */
 public record ClaudeUsageMyDashboard(
         String email,
@@ -22,7 +25,8 @@ public record ClaudeUsageMyDashboard(
         long todayInputTokens,
         long todayOutputTokens,
         List<ClaudeUsageMyDashboardPoint> daily,
-        Instant lastUpdated) {
+        Instant lastUpdated,
+        ClaudeUsageMemberUsage todayUsage) {
 
     public long todayTotalTokens() {
         return todayInputTokens + todayOutputTokens;

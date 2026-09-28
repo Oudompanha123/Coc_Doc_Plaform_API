@@ -697,7 +697,7 @@ class SecurityRulesTest {
             // (ADMIN floor), a plain user reads their own usage here.
             org.mockito.Mockito.when(claudeUsageService.myDashboard(org.mockito.ArgumentMatchers.any()))
                     .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageMyDashboard(
-                            "user@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null));
+                            "user@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null, null));
 
             mvc.perform(get("/api/v1/claude-usage/me").with(as(AppRole.USER)))
                     .andExpect(status().isOk());
@@ -707,7 +707,7 @@ class SecurityRulesTest {
         void my_dashboard_admits_an_admin_too() throws Exception {
             org.mockito.Mockito.when(claudeUsageService.myDashboard(org.mockito.ArgumentMatchers.any()))
                     .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageMyDashboard(
-                            "admin@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null));
+                            "admin@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null, null));
 
             mvc.perform(get("/api/v1/claude-usage/me").with(as(AppRole.ADMIN)))
                     .andExpect(status().isOk());
