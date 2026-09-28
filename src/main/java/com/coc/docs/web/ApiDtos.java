@@ -1045,11 +1045,18 @@ public final class ApiDtos {
      * The one response that ever carries the raw bearer value — every other
      * read of this account's tokens ({@link ClaudeUsageIngestTokenResponse})
      * carries only the label and timestamps, never anything derived from it.
+     *
+     * <p>{@code ingestUrl} is the absolute {@code /api/ingest} URL of this
+     * deployment ({@link PublicIngestUrl}) — what the personalized
+     * {@code push-usage.mjs} embeds as {@code INGEST_URL}, so the frontend
+     * never has to guess it from a build-time value.
      */
-    public record ClaudeUsageIngestTokenCreateResponse(UUID id, String label, String token, Instant createdAt) {
-        public static ClaudeUsageIngestTokenCreateResponse of(com.coc.docs.claudeusage.ClaudeUsageIngestTokenService.MintedToken minted) {
+    public record ClaudeUsageIngestTokenCreateResponse(
+            UUID id, String label, String token, Instant createdAt, String ingestUrl) {
+        public static ClaudeUsageIngestTokenCreateResponse of(
+                com.coc.docs.claudeusage.ClaudeUsageIngestTokenService.MintedToken minted, String ingestUrl) {
             return new ClaudeUsageIngestTokenCreateResponse(
-                    minted.token().id(), minted.token().label(), minted.rawValue(), minted.token().createdAt());
+                    minted.token().id(), minted.token().label(), minted.rawValue(), minted.token().createdAt(), ingestUrl);
         }
     }
 
