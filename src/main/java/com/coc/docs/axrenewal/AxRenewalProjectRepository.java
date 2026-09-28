@@ -88,4 +88,14 @@ public class AxRenewalProjectRepository {
                 .params(status, id)
                 .update();
     }
+
+    /**
+     * Hard delete. Every child row (analysis, plan, confirmations, comments,
+     * implementation runs, destination, database connection) cascades away
+     * with it — {@code on delete cascade} throughout, V25 — so there is
+     * nothing else here to clean up at the database level.
+     */
+    public void delete(UUID id) {
+        jdbc.sql("delete from ax_renewal_project where id = ?").param(id).update();
+    }
 }

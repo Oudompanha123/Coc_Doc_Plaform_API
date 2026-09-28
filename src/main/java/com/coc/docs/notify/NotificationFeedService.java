@@ -306,6 +306,7 @@ public class NotificationFeedService {
             case AuditAction.CLAUDE_USAGE_INGEST_TOKEN_CREATE -> "Created a usage reporting token";
             case AuditAction.CLAUDE_USAGE_INGEST_TOKEN_REVOKE -> "Revoked a usage reporting token";
             case AuditAction.AX_RENEWAL_PROJECT_CREATE -> "Started an AX Renewal project";
+            case AuditAction.AX_RENEWAL_PROJECT_DELETE -> "Deleted an AX Renewal project";
             case AuditAction.AX_RENEWAL_MANIFEST_ATTACH -> "Attached a codebase manifest";
             case AuditAction.AX_RENEWAL_ANALYSIS_RUN -> "Analysed a codebase";
             case AuditAction.AX_RENEWAL_STACK_MOVE_EDIT -> "Changed a stack move target";

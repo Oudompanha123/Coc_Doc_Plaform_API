@@ -130,6 +130,15 @@ public final class AuditAction {
     /** AX Renewal actions (ADR-037) — a legacy-migration planning workspace, its plan and its implementation runs. */
     public static final String AX_RENEWAL_PROJECT_CREATE = "ax_renewal.project_create";
 
+    /**
+     * The project row is gone — a hard delete, unlike {@link
+     * #AX_RENEWAL_COMMENT_DELETE} (ADR-050). {@code target_id} keeps pointing
+     * at a row that no longer exists, the same as {@link #ACCOUNT_DELETE}, so
+     * {@code detail} carries the project's name since nothing is left to join
+     * to for it.
+     */
+    public static final String AX_RENEWAL_PROJECT_DELETE = "ax_renewal.project_delete";
+
     public static final String AX_RENEWAL_MANIFEST_ATTACH = "ax_renewal.manifest_attach";
     public static final String AX_RENEWAL_ANALYSIS_RUN = "ax_renewal.analysis_run";
     public static final String AX_RENEWAL_STACK_MOVE_EDIT = "ax_renewal.stack_move_edit";

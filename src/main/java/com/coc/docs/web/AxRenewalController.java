@@ -70,6 +70,13 @@ public class AxRenewalController {
         return ApiDtos.AxRenewalProjectDetailResponse.of(projects.detail(projectId));
     }
 
+    /** Deletes a project outright (ADR-050). 204, since there is nothing left to return. */
+    @DeleteMapping("/projects/{projectId}")
+    ResponseEntity<Void> delete(@PathVariable UUID projectId, @AuthenticationPrincipal CurrentUser actor) {
+        projects.delete(projectId, actor);
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/projects/{projectId}/manifest")
     ApiDtos.AxRenewalProjectResponse attachManifest(
             @PathVariable UUID projectId,
