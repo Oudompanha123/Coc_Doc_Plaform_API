@@ -695,9 +695,12 @@ class SecurityRulesTest {
         void my_dashboard_admits_a_plain_user() throws Exception {
             // The whole point of ADR-052: unlike the team-wide roster above
             // (ADMIN floor), a plain user reads their own usage here.
-            org.mockito.Mockito.when(claudeUsageService.myDashboard(org.mockito.ArgumentMatchers.any()))
+            org.mockito.Mockito.when(claudeUsageService.myDashboard(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
                     .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageMyDashboard(
-                            "user@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null, null));
+                            "user@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null, null,
+                            com.coc.docs.claudeusage.ClaudeUsageMyDashboard.ModelBreakdown.empty(
+                                    7, java.time.LocalDate.now(), java.time.LocalDate.now())));
 
             mvc.perform(get("/api/v1/claude-usage/me").with(as(AppRole.USER)))
                     .andExpect(status().isOk());
@@ -705,9 +708,12 @@ class SecurityRulesTest {
 
         @Test
         void my_dashboard_admits_an_admin_too() throws Exception {
-            org.mockito.Mockito.when(claudeUsageService.myDashboard(org.mockito.ArgumentMatchers.any()))
+            org.mockito.Mockito.when(claudeUsageService.myDashboard(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
                     .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageMyDashboard(
-                            "admin@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null, null));
+                            "admin@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null, null,
+                            com.coc.docs.claudeusage.ClaudeUsageMyDashboard.ModelBreakdown.empty(
+                                    7, java.time.LocalDate.now(), java.time.LocalDate.now())));
 
             mvc.perform(get("/api/v1/claude-usage/me").with(as(AppRole.ADMIN)))
                     .andExpect(status().isOk());
