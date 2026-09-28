@@ -13,7 +13,7 @@ import java.util.UUID;
  * and is not recoverable from this row afterwards — same shape {@link
  * com.coc.docs.auth.PasswordResetToken} already uses for the same reason.
  *
- * <p>// req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-044
+ * <p>// req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-050
  */
 public record ClaudeUsageIngestToken(
         UUID id, UUID accountId, String tokenHash, String label, Instant createdAt, Instant lastUsedAt, Instant revokedAt) {

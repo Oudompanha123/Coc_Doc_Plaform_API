@@ -122,7 +122,7 @@ public final class AuditAction {
     public static final String CLAUDE_USAGE_MEMBER_BUDGET_CHANGE = "claude_usage_member.budget_change";
     public static final String CLAUDE_USAGE_MEMBER_REMOVE = "claude_usage_member.remove";
 
-    /** An account minted or revoked its own {@code /api/ingest} bearer token (V35, ADR-044). */
+    /** An account minted or revoked its own {@code /api/ingest} bearer token (V35, ADR-047). */
     public static final String CLAUDE_USAGE_INGEST_TOKEN_CREATE = "claude_usage_ingest_token.create";
 
     public static final String CLAUDE_USAGE_INGEST_TOKEN_REVOKE = "claude_usage_ingest_token.revoke";
@@ -142,6 +142,9 @@ public final class AuditAction {
     public static final String AX_RENEWAL_IMPLEMENTATION_START = "ax_renewal.implementation_start";
     public static final String AX_RENEWAL_IMPLEMENTATION_APPROVE = "ax_renewal.implementation_approve";
     public static final String AX_RENEWAL_IMPLEMENTATION_REJECT = "ax_renewal.implementation_reject";
+
+    /** A running Generate attempt stopped deliberately, before it ever reached awaiting_review (ADR-049). */
+    public static final String AX_RENEWAL_IMPLEMENTATION_CANCEL = "ax_renewal.implementation_cancel";
     public static final String AX_RENEWAL_COMMENT_ADD = "ax_renewal.comment_add";
 
     /**
@@ -153,6 +156,11 @@ public final class AuditAction {
      * reader of this log will actually want to know.
      */
     public static final String AX_RENEWAL_COMMENT_DELETE = "ax_renewal.comment_delete";
+
+    /** Starting/stopping the Run Locally dev server (ADR-048) — the process itself is never persisted, so this entry is the only durable record that it ran at all. */
+    public static final String AX_RENEWAL_RUN_LOCALLY_START = "ax_renewal.run_locally_start";
+
+    public static final String AX_RENEWAL_RUN_LOCALLY_STOP = "ax_renewal.run_locally_stop";
 
     /** Target types, for the {@code target_type} column. */
     public static final String TARGET_PAGE = "page";

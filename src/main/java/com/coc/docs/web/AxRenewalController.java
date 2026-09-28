@@ -212,6 +212,31 @@ public class AxRenewalController {
         return ApiDtos.AxRenewalImplementationRunResponse.of(projects.rejectImplementation(projectId, runId, actor));
     }
 
+    /** Stops a run that is still generating (ADR-049). */
+    @PostMapping("/projects/{projectId}/implementation/{runId}/cancel")
+    ApiDtos.AxRenewalImplementationRunResponse cancelImplementation(
+            @PathVariable UUID projectId, @PathVariable UUID runId, @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalImplementationRunResponse.of(projects.cancelImplementation(projectId, runId, actor));
+    }
+
+    /** Starts the applied destination as a live local dev server (ADR-048). */
+    @PostMapping("/projects/{projectId}/run-locally/start")
+    ApiDtos.AxRenewalRunLocallyStatusResponse startRunLocally(
+            @PathVariable UUID projectId, @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalRunLocallyStatusResponse.of(projects.startRunLocally(projectId, actor));
+    }
+
+    @PostMapping("/projects/{projectId}/run-locally/stop")
+    ApiDtos.AxRenewalRunLocallyStatusResponse stopRunLocally(
+            @PathVariable UUID projectId, @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalRunLocallyStatusResponse.of(projects.stopRunLocally(projectId, actor));
+    }
+
+    @GetMapping("/projects/{projectId}/run-locally/status")
+    ApiDtos.AxRenewalRunLocallyStatusResponse runLocallyStatus(@PathVariable UUID projectId) {
+        return ApiDtos.AxRenewalRunLocallyStatusResponse.of(projects.runLocallyStatus(projectId));
+    }
+
     @PostMapping("/projects/{projectId}/comments")
     ResponseEntity<ApiDtos.AxRenewalCommentResponse> addComment(
             @PathVariable UUID projectId,

@@ -9,7 +9,7 @@ import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/** Reads and writes {@code claude_usage_ingest_token} rows (V35, ADR-044). */
+/** Reads and writes {@code claude_usage_ingest_token} rows (V35, ADR-050). */
 @Repository
 public class ClaudeUsageIngestTokenRepository {
 

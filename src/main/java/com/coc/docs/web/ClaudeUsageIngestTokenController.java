@@ -18,17 +18,19 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Self-service {@code /api/ingest} bearer tokens — an admin/super_admin mints
- * their own, downloads a reporter config already filled in with it, and can
- * revoke it later without affecting anyone else's. {@code SecurityConfig}
- * floors every route here at {@code ADMIN}, matching V35's own stated design.
+ * Self-service {@code /api/ingest} bearer tokens — any signed-in account
+ * mints their own, downloads a personalized `push-usage.mjs` already filled
+ * in with it, and can revoke it later without affecting anyone else's.
+ * {@code SecurityConfig} floors every route here at {@code USER} (widened
+ * from {@code ADMIN} by ADR-052 — V35's own migration comment still says
+ * "each admin / super_admin", which is stale; see ADR-052).
  *
  * <p>Session-authenticated ({@code SessionAuthenticationFilter}), unlike
  * {@link ClaudeUsageIngestController}: that controller is the machine
  * (a reporter script) proving it may write; this one is the human deciding
  * which machines get to.
  *
- * <p>// req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-044
+ * <p>// req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-050, ADR-052
  */
 @RestController
 @RequestMapping("/api/v1/me/usage-tokens")

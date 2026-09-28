@@ -54,7 +54,7 @@ class AxRenewalCodeGeneratorTest {
         Files.createDirectories(source);
         var generator = new AxRenewalCodeGenerator(
                 new AxRenewalProperties(null, tmp.resolve("no-such-claude").toString(), source.toString()), json);
-        assertThat(generator.generate("some plan", tmp.resolve("staging"))).isEmpty();
+        assertThat(generator.generate("some plan", tmp.resolve("staging"), process -> {})).isEmpty();
     }
 
     @Test

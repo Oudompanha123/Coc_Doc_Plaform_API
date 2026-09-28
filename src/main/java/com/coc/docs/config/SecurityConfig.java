@@ -280,14 +280,15 @@ public class SecurityConfig {
                         // // req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-035
                         .requestMatchers(HttpMethod.POST, "/api/ingest").permitAll()
 
-                        // Self-service /api/ingest tokens (ADR-044, revision of ADR-035
+                        // Self-service /api/ingest tokens (ADR-050, revision of ADR-035
                         // §2): the human minting/listing/revoking their own credential,
                         // unlike POST /api/ingest above which is the machine presenting
-                        // one. Floored at ADMIN, matching V35's own stated design ("each
-                        // admin / super_admin generates their own token") -- resolved
-                        // from the session as usual, never from the body.
-                        // // req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-044
-                        .requestMatchers("/api/v1/me/usage-tokens/**").hasRole(AppRole.ADMIN.name())
+                        // one. Floored at USER, widened from ADMIN on direct developer
+                        // instruction (ADR-052) so any signed-in account can self-mint
+                        // the token its own "Download push-usage.mjs" button needs --
+                        // resolved from the session as usual, never from the body.
+                        // // req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-050, ADR-052
+                        .requestMatchers("/api/v1/me/usage-tokens/**").hasRole(AppRole.USER.name())
 
                         // The personal "My Claude Usage" screen (ADR-047):
                         // every signed-in account's own read of its own
@@ -421,6 +422,21 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/approve")
                         .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/reject")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        // Cancel a still-generating run (ADR-049) — kills a
+                        // real process on the backend's own machine, the
+                        // same class of action as the three routes above.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/cancel")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        // Run Locally start/stop (ADR-048) — this executes the
+                        // destination's own npm scripts on the backend's
+                        // machine, the same class of action as starting/
+                        // approving/rejecting an implementation run, so it
+                        // gets the same floor, not a lower one. Status is a
+                        // plain read and falls through to the GET rule above.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/run-locally/start")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/run-locally/stop")
                         .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
 
                         // --- editorial writes and admin reads ----------------

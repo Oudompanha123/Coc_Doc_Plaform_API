@@ -5,8 +5,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,6 +26,14 @@ import org.springframework.stereotype.Component;
  * @Async} on RegistrationNotifier is silently ignored" when called via
  * self-invocation), which is the whole reason this is its own small class
  * rather than a method on {@link AxRenewalService} that would call itself.
+ *
+ * <p>Also owns the one live subprocess a run in progress has, so {@link
+ * #cancel} has something real to reach — the same in-memory-only tracking
+ * {@code AxRenewalLocalRunner} uses for a different long-lived process
+ * (ADR-048), reused here for Generate (ADR-049). Nothing about a live
+ * process is persisted: a database row cannot make a killed JVM's process
+ * handle exist again after a restart, so this is deliberately not backed by
+ * the database the way everything else in this class is.
  */
 @Component
 public class AxRenewalImplementationRunner {
@@ -31,6 +42,11 @@ public class AxRenewalImplementationRunner {
 
     private final AxRenewalCodeGenerator generator;
     private final AxRenewalImplementationRepository implementations;
+
+    /** The one live CLI process a {@code generating} run has, if any — registered the instant it starts, removed once {@link AxRenewalCodeGenerator#generate} returns either way. */
+    private final Map<UUID, Process> runningProcesses = new ConcurrentHashMap<>();
+    /** Runs {@link #cancel} was asked to stop — read once by {@link #runGeneration}'s own failure branch to report "cancelled", not a generic failure, then cleared. */
+    private final Set<UUID> cancelledRuns = ConcurrentHashMap.newKeySet();
 
     public AxRenewalImplementationRunner(
             AxRenewalCodeGenerator generator, AxRenewalImplementationRepository implementations) {
@@ -58,21 +74,31 @@ public class AxRenewalImplementationRunner {
 
         Optional<AxRenewalCodeGenerator.Result> result;
         try {
-            result = generator.generate(confirmedPlan, staging);
+            result = generator.generate(confirmedPlan, staging, process -> runningProcesses.put(runId, process));
         } catch (RuntimeException e) {
             log.warn("generation run {} failed unexpectedly", runId, e);
             deleteQuietly(staging);
             implementations.clearStaging(runId);
             implementations.markFailed(runId, "generation failed unexpectedly: " + e.getMessage());
             return;
+        } finally {
+            runningProcesses.remove(runId);
         }
+        // Read and cleared exactly once, regardless of outcome — a run that
+        // raced a cancel() against its own natural success must not leave a
+        // stale entry behind for a runId nothing will ever ask about again.
+        boolean wasCancelled = cancelledRuns.remove(runId);
 
         if (result.isEmpty()) {
             deleteQuietly(staging);
             implementations.clearStaging(runId);
-            implementations.markFailed(
-                    runId,
-                    "the local model could not be reached, timed out, or the run otherwise failed — see the backend log for the exact reason");
+            if (wasCancelled) {
+                implementations.markCancelled(runId);
+            } else {
+                implementations.markFailed(
+                        runId,
+                        "the local model could not be reached, timed out, or the run otherwise failed — see the backend log for the exact reason");
+            }
             return;
         }
 
@@ -92,6 +118,31 @@ public class AxRenewalImplementationRunner {
                                 f.path(), f.changeKind(), f.beforeContent(), f.afterContent()))
                         .toList());
         implementations.updateStatus(runId, AxRenewalImplementationRun.STATUS_AWAITING_REVIEW);
+    }
+
+    /**
+     * Kills a run's live process, if it still has one (ADR-049). Kills the
+     * whole process tree, not just the top-level handle — the CLI's own
+     * child processes are not reaped by destroying only the top, exactly
+     * {@code AxRenewalLocalRunner#stop}'s own reasoning (ADR-048). Marking
+     * {@code runId} as cancelled here, before destroying anything, is what
+     * lets {@link #runGeneration}'s own failure branch — which the killed
+     * process is about to reach — report "cancelled" rather than a generic
+     * failure.
+     *
+     * @return false if this run has no live process to kill (already
+     *     finished, or never had one) — the caller reports that as a
+     *     conflict rather than a silent no-op.
+     */
+    public boolean cancel(UUID runId) {
+        Process process = runningProcesses.get(runId);
+        if (process == null || !process.isAlive()) {
+            return false;
+        }
+        cancelledRuns.add(runId);
+        process.descendants().forEach(ProcessHandle::destroy);
+        process.destroyForcibly();
+        return true;
     }
 
     /** Best-effort cleanup of a disposable staging copy — a leftover temp directory is not worth failing a run over. */

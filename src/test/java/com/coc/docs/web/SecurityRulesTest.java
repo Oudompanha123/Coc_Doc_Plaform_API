@@ -148,7 +148,7 @@ class SecurityRulesTest {
     @MockitoBean com.coc.docs.claudeusage.ClaudeUsageService claudeUsageService;
 
     // ClaudeUsageIngestController and the new ClaudeUsageIngestTokenController
-    // (ADR-044) both need it to construct. What it resolves is
+    // (ADR-050) both need it to construct. What it resolves is
     // ClaudeUsageIngestTokenServiceTest's job; this class only asserts who may
     // reach POST /api/ingest and /api/v1/me/usage-tokens/**.
     @MockitoBean com.coc.docs.claudeusage.ClaudeUsageIngestTokenService claudeUsageIngestTokenService;
@@ -674,7 +674,7 @@ class SecurityRulesTest {
             // is authorized by its own bearer-credential check, never by a
             // session) — proven here by 401 for a missing Authorization header,
             // which only happens if the filter chain let the request through to
-            // the controller. (ADR-044: a 503 "not configured" no longer exists
+            // the controller. (ADR-050: a 503 "not configured" no longer exists
             // — with no shared secret configured in this slice, the controller
             // falls through to the per-account token check and refuses with the
             // same 401 an invalid credential of either shape gets.)
@@ -719,12 +719,22 @@ class SecurityRulesTest {
         }
 
         @Test
-        void usage_tokens_refuses_a_plain_user() throws Exception {
-            // Floored at ADMIN (V35, ADR-044) — a plain user may report their
-            // own usage via a token someone else mints for them, but may not
-            // mint one, the same asymmetry FR-AUTH-008 already draws between
-            // "may act" and "may grant/administer" elsewhere in this system.
-            mvc.perform(get("/api/v1/me/usage-tokens").with(as(AppRole.USER))).andExpect(status().isForbidden());
+        void usage_tokens_refuses_a_guest() throws Exception {
+            // Floored at USER (ADR-052, widened from ADMIN) — a guest
+            // (ADR-017's pending/unapproved rank) still may not mint or list
+            // a token, but any actual member may, self-service.
+            mvc.perform(get("/api/v1/me/usage-tokens").with(as(AppRole.GUEST))).andExpect(status().isForbidden());
+        }
+
+        @Test
+        void usage_tokens_admits_a_plain_user() throws Exception {
+            // The whole point of ADR-052: a plain user can self-mint the
+            // token their own "Download push-usage.mjs" button needs,
+            // without asking an admin for one.
+            org.mockito.Mockito.when(claudeUsageIngestTokenService.list(org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/me/usage-tokens").with(as(AppRole.USER))).andExpect(status().isOk());
         }
 
         @Test
@@ -1085,6 +1095,39 @@ class SecurityRulesTest {
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/start")
                             .with(as(AppRole.USER)))
                     .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void starting_a_local_run_refuses_a_plain_user_who_does_not_hold_developer() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/run-locally/start")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void cancelling_a_generate_run_refuses_a_plain_user_who_does_not_hold_developer() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/"
+                            + UUID.randomUUID() + "/cancel")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void stopping_a_local_run_refuses_a_plain_user_who_does_not_hold_developer() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/run-locally/stop")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void a_local_run_s_status_is_a_plain_read_admitted_at_the_user_floor() throws Exception {
+            org.mockito.Mockito.when(axRenewalService.runLocallyStatus(org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(new com.coc.docs.axrenewal.AxRenewalLocalRunner.Status(
+                            com.coc.docs.axrenewal.AxRenewalLocalRunner.Status.STATE_STOPPED, List.of(), null, null));
+
+            mvc.perform(get("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/run-locally/status")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isOk());
         }
     }
 }

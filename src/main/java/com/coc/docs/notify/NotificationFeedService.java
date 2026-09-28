@@ -298,6 +298,13 @@ public class NotificationFeedService {
             case AuditAction.CLAUDE_USAGE_MEMBER_ROLE_CHANGE -> "Changed a Claude Usage member's role";
             case AuditAction.CLAUDE_USAGE_MEMBER_BUDGET_CHANGE -> "Changed a Claude Usage member's budget";
             case AuditAction.CLAUDE_USAGE_MEMBER_REMOVE -> "Removed a Claude Usage member";
+            // Added at merge time: feature/claude-usage-ingest-tokens introduced
+            // both actions without a sentence, which the "every visible action
+            // has one" guard catches — the feed would print the raw constant.
+            // Deliberately says nothing about the token itself; a feed line is
+            // read by anyone with the roster, and which token is not their business.
+            case AuditAction.CLAUDE_USAGE_INGEST_TOKEN_CREATE -> "Created a usage reporting token";
+            case AuditAction.CLAUDE_USAGE_INGEST_TOKEN_REVOKE -> "Revoked a usage reporting token";
             case AuditAction.AX_RENEWAL_PROJECT_CREATE -> "Started an AX Renewal project";
             case AuditAction.AX_RENEWAL_MANIFEST_ATTACH -> "Attached a codebase manifest";
             case AuditAction.AX_RENEWAL_ANALYSIS_RUN -> "Analysed a codebase";
@@ -315,8 +322,11 @@ public class NotificationFeedService {
             // wording reads as its own raw constant in the activity feed.
             case AuditAction.AX_RENEWAL_IMPLEMENTATION_APPROVE -> "Approved generated code changes";
             case AuditAction.AX_RENEWAL_IMPLEMENTATION_REJECT -> "Rejected generated code changes";
+            case AuditAction.AX_RENEWAL_IMPLEMENTATION_CANCEL -> "Cancelled a running renewal implementation";
             case AuditAction.AX_RENEWAL_COMMENT_ADD -> "Commented on a renewal project";
             case AuditAction.AX_RENEWAL_COMMENT_DELETE -> "Removed a comment from a renewal project";
+            case AuditAction.AX_RENEWAL_RUN_LOCALLY_START -> "Started a local run of a renewed project";
+            case AuditAction.AX_RENEWAL_RUN_LOCALLY_STOP -> "Stopped a local run of a renewed project";
             case AuditAction.ACCOUNT_CAPABILITY_GRANT -> "Granted a capability";
             case AuditAction.ACCOUNT_CAPABILITY_REVOKE -> "Revoked a capability";
             default -> entry.action();

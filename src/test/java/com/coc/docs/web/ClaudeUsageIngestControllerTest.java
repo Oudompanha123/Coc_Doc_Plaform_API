@@ -25,11 +25,11 @@ import org.springframework.http.HttpStatus;
 
 /**
  * {@code POST /api/ingest}'s own authorization decision — which of the two
- * credential shapes ADR-044 accepts, if either, lets a request through. Who
+ * credential shapes ADR-050 accepts, if either, lets a request through. Who
  * may reach the route at all (the filter chain's {@code permitAll()}) is
  * {@link SecurityRulesTest}'s subject, not this one.
  *
- * <p>// req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-044
+ * <p>// req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-050
  */
 class ClaudeUsageIngestControllerTest {
 
@@ -76,7 +76,7 @@ class ClaudeUsageIngestControllerTest {
     }
 
     @Nested
-    @DisplayName("per-account token (ADR-044) — required push-usage.mjs still works with no INGEST_SECRET configured")
+    @DisplayName("per-account token (ADR-050) — required push-usage.mjs still works with no INGEST_SECRET configured")
     class PerAccountToken {
 
         @Test

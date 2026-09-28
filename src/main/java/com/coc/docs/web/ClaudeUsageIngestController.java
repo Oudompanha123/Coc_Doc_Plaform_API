@@ -33,7 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
  * and per {@code NFR-SEC-CHANNEL}'s own wording this is explicitly not a
  * template for an editorial write path.
  *
- * <p><b>Two credential shapes are accepted (ADR-044, revising ADR-035 §2):</b>
+ * <p><b>Two credential shapes are accepted (ADR-050, revising ADR-035 §2):</b>
  * {@code ClaudeUsageProperties}' single shared secret — unscoped, may report
  * as any email, kept only for deployments already configured with it — and a
  * per-account token minted from {@code POST /api/v1/me/usage-tokens}, which
@@ -42,7 +42,7 @@ import org.springframework.web.bind.annotation.RestController;
  * INGEST_SECRET} is not — see {@code push-usage.mjs}'s own {@code
  * canReport} gate, unaffected by which credential shape fills it.
  *
- * <p>// req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-035, ADR-036, ADR-044
+ * <p>// req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-035, ADR-036, ADR-050
  */
 @RestController
 public class ClaudeUsageIngestController {
