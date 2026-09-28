@@ -382,6 +382,14 @@ public class SecurityConfig {
                         .hasRole(AppRole.USER.name())
 
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects").hasRole(AppRole.ADMIN.name())
+                        // Deleting a project is the symmetric lifecycle action
+                        // to creating one, so it gets the same floor, not a
+                        // higher one (ADR-051) — AxRenewalService still refuses
+                        // it (409) while an implementation run or a local dev
+                        // server is active, which is a business rule, not an
+                        // authorisation decision, so it does not live here.
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/ax-renewal/projects/*")
+                        .hasRole(AppRole.ADMIN.name())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/manifest")
                         .hasRole(AppRole.ADMIN.name())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/analysis/run")

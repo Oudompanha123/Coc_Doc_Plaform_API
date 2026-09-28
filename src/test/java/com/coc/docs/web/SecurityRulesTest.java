@@ -969,6 +969,30 @@ class SecurityRulesTest {
         }
 
         @Test
+        void deleting_a_project_refuses_a_plain_user() throws Exception {
+            mvc.perform(delete("/api/v1/ax-renewal/projects/" + UUID.randomUUID()).with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void deleting_a_project_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(delete("/api/v1/ax-renewal/projects/" + UUID.randomUUID()))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void deleting_a_project_admits_an_admin() throws Exception {
+            org.mockito.Mockito.doThrow(ApiException.notFound("project"))
+                    .when(axRenewalService)
+                    .delete(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+
+            // 404 from the stub, not 403 — proof the route was reached rather
+            // than refused at the security layer.
+            mvc.perform(delete("/api/v1/ax-renewal/projects/" + UUID.randomUUID()).with(as(AppRole.ADMIN)))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
         void removing_a_comment_admits_a_plain_user_and_leaves_ownership_to_the_service() throws Exception {
             // The floor is all a matcher can decide here: whether this caller
             // may remove *this* comment depends on who wrote it, which is row

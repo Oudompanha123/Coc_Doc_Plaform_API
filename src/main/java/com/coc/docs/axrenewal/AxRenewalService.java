@@ -138,6 +138,51 @@ public class AxRenewalService {
         return projects.findById(projectId).orElseThrow(() -> ApiException.notFound("project"));
     }
 
+    /**
+     * Deletes a project outright (ADR-051). Every row that hangs off it —
+     * analysis, plan, confirmations, comments, implementation runs,
+     * destination, database connection — cascades away with it at the
+     * database level ({@code on delete cascade}, V25). Unlike a comment
+     * (ADR-045), there is no soft path here: "delete project" is asked for by
+     * that name, and a workspace nobody can even reach through the picker is
+     * not the same request as "keep it around, hidden".
+     *
+     * <p>Refused (409) while an implementation run is still active (running,
+     * generating, awaiting_review, applying) or a local dev server is still
+     * live for this project — the same "one active thing" shape {@link
+     * #startImplementation} already uses, and a business rule rather than an
+     * authorisation decision, which is why it lives here and not in {@code
+     * SecurityConfig}. Neither is stopped on the caller's behalf: this
+     * method does not cancel a run or kill a process by itself, so nothing
+     * outside this project's own rows is silently torn down by a click meant
+     * only to remove a workspace.
+     *
+     * <p>Audited before the row is gone, the same order {@code
+     * AccountService#delete} uses — {@code target_id} in the entry keeps
+     * pointing at a project that no longer exists, which is why {@code
+     * detail} also carries its name.
+     */
+    @Transactional
+    public void delete(UUID projectId, CurrentUser actor) {
+        AxRenewalProject project = requireProject(projectId);
+        if (implementations.findActive(projectId).isPresent()) {
+            throw ApiException.conflict("cancel or resolve the active implementation run before deleting this project");
+        }
+        if (localRunner.isRunning(projectId)) {
+            throw ApiException.conflict("stop the local run before deleting this project");
+        }
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_PROJECT_DELETE,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode().put("name", project.name()));
+
+        projects.delete(projectId);
+    }
+
     // -----------------------------------------------------------------------
     // Attach
     // -----------------------------------------------------------------------
