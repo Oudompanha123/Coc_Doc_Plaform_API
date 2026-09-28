@@ -448,5 +448,35 @@ class HrmsNotificationServiceTest {
             assertThat(content.rows()).hasSize(1);
             verify(mailbox).htmlBodyOf("msg-9");
         }
+
+        @Test
+        @DisplayName("that fallback stores what it parsed, so the next read needs no mailbox")
+        void fallbackBackfillsTheStore() {
+            when(repository.findById(9L)).thenReturn(Optional.of(saved()));
+            when(contents.findByNotificationId(org.mockito.ArgumentMatchers.eq(9L), any(), any()))
+                    .thenReturn(Optional.empty());
+            when(mailbox.htmlBodyOf("msg-9")).thenReturn(Optional.of(HTML));
+
+            serviceWith(configured()).report(9L);
+
+            ArgumentCaptor<HrmsMailContent> stored = ArgumentCaptor.forClass(HrmsMailContent.class);
+            verify(contents).save(org.mockito.ArgumentMatchers.eq(9L), stored.capture());
+            assertThat(stored.getValue().department()).isEqualTo("COOCON Department");
+            assertThat(stored.getValue().rows()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("a store that fails does not fail the read -- the caller asked for a report, not a write")
+        void aFailedBackfillStillServesTheReport() {
+            when(repository.findById(9L)).thenReturn(Optional.of(saved()));
+            when(contents.findByNotificationId(org.mockito.ArgumentMatchers.eq(9L), any(), any()))
+                    .thenReturn(Optional.empty());
+            when(mailbox.htmlBodyOf("msg-9")).thenReturn(Optional.of(HTML));
+            org.mockito.Mockito.doThrow(new IllegalStateException("disk on fire"))
+                    .when(contents)
+                    .save(org.mockito.ArgumentMatchers.anyLong(), any());
+
+            assertThat(serviceWith(configured()).report(9L)).isPresent();
+        }
     }
 }

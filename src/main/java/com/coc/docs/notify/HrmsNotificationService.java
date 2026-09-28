@@ -229,10 +229,29 @@ public class HrmsNotificationService {
         if (!properties.usable()) {
             return Optional.empty();
         }
-        return mailbox
+        Optional<HrmsMailContent> fetched = mailbox
                 .htmlBodyOf(notification.messageId())
                 .map(html -> HrmsReportParser.parse(
                         notification.subject(), notification.reportDate(), html));
+
+        // Backfill: a report recorded before V49 is stored the first time
+        // somebody opens it, so the fallback heals itself instead of being a
+        // permanent second path. Only reports someone actually looked at are
+        // stored, which is a narrower widening than walking the whole table
+        // would be -- ADR-057's cost arrives gradually and only for reports
+        // that were going to be read anyway.
+        //
+        // Failing to store must not fail the read: the caller asked for a
+        // report, not for a write, and they have already got one.
+        fetched.ifPresent(content -> {
+            try {
+                contents.save(notification.id(), content);
+            } catch (RuntimeException e) {
+                log.warn("HRMS: served report {} from the mailbox but could not store it: {}",
+                        notification.id(), e.getMessage());
+            }
+        });
+        return fetched;
     }
 
     /**
