@@ -135,6 +135,9 @@ public final class AuditAction {
 
     public static final String CLAUDE_USAGE_INGEST_TOKEN_REVOKE = "claude_usage_ingest_token.revoke";
 
+    /** An account approved the claude-team-usage CLI on /cli/authorize (V51, ADR-060); the token it becomes is audited as a CREATE above. */
+    public static final String CLAUDE_USAGE_CLI_AUTHORIZE = "claude_usage_cli_authorization.approve";
+
     /** AX Renewal actions (ADR-037) — a legacy-migration planning workspace, its plan and its implementation runs. */
     public static final String AX_RENEWAL_PROJECT_CREATE = "ax_renewal.project_create";
 
@@ -215,6 +218,8 @@ public final class AuditAction {
     public static final String TARGET_CLAUDE_USAGE_MEMBER = "claude_usage_member";
 
     public static final String TARGET_CLAUDE_USAGE_INGEST_TOKEN = "claude_usage_ingest_token";
+
+    public static final String TARGET_CLAUDE_USAGE_CLI_AUTHORIZATION = "claude_usage_cli_authorization";
 
     public static final String TARGET_AX_RENEWAL_PROJECT = "ax_renewal_project";
 }

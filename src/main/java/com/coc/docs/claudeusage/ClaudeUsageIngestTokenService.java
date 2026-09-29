@@ -88,17 +88,40 @@ public class ClaudeUsageIngestTokenService {
      */
     @Transactional
     public MintedToken create(CurrentUser caller, String label) {
+        return mint(caller.id(), caller.email(), label);
+    }
+
+    /**
+     * Same token, same audit entry, for an account proven by something other
+     * than a session — the CLI browser login's code + PKCE exchange (ADR-060),
+     * which has already checked {@link #MIN_ROLE} and {@link Account#canSignIn()}
+     * itself. Deliberately not a second minting path: this is {@link #create}.
+     */
+    @Transactional
+    public MintedToken createFor(Account account, String label) {
+        if (!mayHoldToken(account)) {
+            throw ApiException.forbidden("this account may not hold an ingest token");
+        }
+        return mint(account.id(), account.email(), label);
+    }
+
+    /** The same live check {@link #resolve} applies on every ingest: can sign in, and at least {@link #MIN_ROLE}. */
+    public static boolean mayHoldToken(Account account) {
+        return account.canSignIn() && account.role().isAtLeast(MIN_ROLE);
+    }
+
+    private MintedToken mint(UUID accountId, String email, String label) {
         String trimmedLabel = label == null ? "" : label.trim();
         if (trimmedLabel.isEmpty()) {
             throw ApiException.badRequest("label is required");
         }
 
         String raw = TOKEN_PREFIX + HexFormat.of().formatHex(randomBytes());
-        ClaudeUsageIngestToken saved = tokens.insert(caller.id(), hash(raw), trimmedLabel);
+        ClaudeUsageIngestToken saved = tokens.insert(accountId, hash(raw), trimmedLabel);
 
         audit.append(
-                caller.id(),
-                caller.email(),
+                accountId,
+                email,
                 AuditAction.CLAUDE_USAGE_INGEST_TOKEN_CREATE,
                 AuditAction.TARGET_CLAUDE_USAGE_INGEST_TOKEN,
                 saved.id(),
@@ -154,7 +177,7 @@ public class ClaudeUsageIngestTokenService {
         ClaudeUsageIngestToken tokenRow = found.get();
 
         Optional<Account> account = accounts.findById(tokenRow.accountId());
-        if (account.isEmpty() || !account.get().canSignIn() || !account.get().role().isAtLeast(MIN_ROLE)) {
+        if (account.isEmpty() || !mayHoldToken(account.get())) {
             return Optional.empty();
         }
 

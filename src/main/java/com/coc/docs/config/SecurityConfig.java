@@ -280,6 +280,16 @@ public class SecurityConfig {
                         // // req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-035
                         .requestMatchers(HttpMethod.POST, "/api/ingest").permitAll()
 
+                        // The claude-team-usage CLI's code exchange (ADR-060): a CLI
+                        // has no session either. Protected by a one-time, two-minute
+                        // code plus the PKCE verifier only that CLI process holds,
+                        // checked in ClaudeUsageCliAuthService#exchange -- the approval
+                        // that issues the code is session-authenticated, under the
+                        // /api/v1/me/usage-tokens/** USER floor below. Same exception
+                        // class as /api/ingest, not a new kind of one.
+                        // // req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-060
+                        .requestMatchers(HttpMethod.POST, "/api/cli/token").permitAll()
+
                         // Self-service /api/ingest tokens (ADR-047, revision of ADR-035
                         // §2): the human minting/listing/revoking their own credential,
                         // unlike POST /api/ingest above which is the machine presenting
