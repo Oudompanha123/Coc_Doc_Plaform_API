@@ -51,8 +51,14 @@ class HrmsNotificationServiceTest {
         return properties(true, "someone@gmail.com", "noreply-hrms@wecambodia.com");
     }
 
+    /** Only reportFor() consults it; every other test here leaves it unstubbed. */
+    private final com.coc.docs.account.AccountRepository accounts =
+            org.mockito.Mockito.mock(com.coc.docs.account.AccountRepository.class);
+
+    private final HrmsReportContentRepository contents = mock(HrmsReportContentRepository.class);
+
     private HrmsNotificationService serviceWith(HrmsMailProperties props) {
-        return new HrmsNotificationService(mailbox, repository, props);
+        return new HrmsNotificationService(mailbox, repository, props, accounts, contents);
     }
 
     private static HrmsMailbox.Arrival arrival(String id, String subject) {
@@ -249,6 +255,198 @@ class HrmsNotificationServiceTest {
         void nonPositiveLimitReadsNothing() {
             assertThat(serviceWith(configured()).recent(0)).isEmpty();
             verify(repository, never()).recent(org.mockito.ArgumentMatchers.anyInt());
+        }
+    }
+
+    /*
+     * Who sees whose attendance. The route is floored at USER, so reaching it
+     * proves nothing about scope -- the narrowing is these tests, and getting
+     * it wrong discloses one employee's clock-in times to another.
+     * // req: FR-OPS-001, NFR-SEC-PII, ADR-042
+     */
+    @Nested
+    class ReportScope {
+
+        private static final String HTML =
+                "<h3><span>BeplePay Department</span></h3><table>"
+                        + "<tr><th>Name</th><th>Yesterday Check-Out</th><th>Today Check-In</th></tr>"
+                        + "<tr><td>Nin Srey Nuth</td>"
+                        + "<td><span>17:00</span> -&gt; <span>17:44</span></td><td><div><span>Normal</span></div></td>"
+                        + "<td><span>08:00</span> -&gt; <span>08:01</span></td><td><div><span>Late Check-In</span></div></td></tr>"
+                        + "<tr><td>Ken Vantha</td>"
+                        + "<td><span>17:00</span> -&gt; <span>00:00</span></td><td><div><span>Missed Check-Out</span></div></td>"
+                        + "<td><span>08:00</span> -&gt; <span>00:00</span></td><td><div><span>Missed Check-In</span></div></td></tr>"
+                        + "</table>";
+
+        private com.coc.docs.auth.CurrentUser caller(com.coc.docs.account.AppRole role) {
+            return com.coc.docs.auth.TestCallers.user(role);
+        }
+
+        private HrmsNotificationService armed() {
+            when(repository.findById(9L))
+                    .thenReturn(Optional.of(new HrmsNotification(
+                            9L, "msg-9", "Attendance on 08-Sep-2026",
+                            LocalDate.of(2026, 9, 8), Instant.parse("2026-09-08T05:02:00Z"))));
+            when(mailbox.htmlBodyOf("msg-9")).thenReturn(Optional.of(HTML));
+            return serviceWith(configured());
+        }
+
+        @Test
+        @DisplayName("an admin sees the whole department, and no per-caller lookup happens")
+        void adminSeesEveryone() {
+            var content = armed()
+                    .reportFor(9L, caller(com.coc.docs.account.AppRole.ADMIN))
+                    .orElseThrow()
+                    .content();
+
+            assertThat(content.rows()).hasSize(2);
+            verifyNoInteractions(accounts);
+            // An admin is never "unlinked": they need no link to read the table.
+            var scoped = armed().reportFor(9L, caller(com.coc.docs.account.AppRole.ADMIN)).orElseThrow();
+            assertThat(scoped.scopedToViewer()).isFalse();
+            assertThat(scoped.viewerLinked()).isTrue();
+        }
+
+        @Test
+        @DisplayName("a plain user sees only the row their account is linked to")
+        void plainUserSeesOnlyTheirOwnRow() {
+            var user = caller(com.coc.docs.account.AppRole.USER);
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.of("Ken Vantha"));
+
+            var content = armed().reportFor(9L, user).orElseThrow().content();
+
+            assertThat(content.rows()).hasSize(1);
+            assertThat(content.rows().get(0).name()).isEqualTo("Ken Vantha");
+            assertThat(content.rows().get(0).todayCheckIn().status()).isEqualTo("Missed Check-In");
+        }
+
+        @Test
+        @DisplayName("matching ignores case and padding, because an admin types what the mail shows")
+        void matchingIsCaseAndWhitespaceInsensitive() {
+            var user = caller(com.coc.docs.account.AppRole.USER);
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.of("  ken   VANTHA "));
+
+            assertThat(armed().reportFor(9L, user).orElseThrow().content().rows()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("an unlinked account gets the report with no rows, not somebody else's")
+        void unlinkedAccountSeesNoRows() {
+            var user = caller(com.coc.docs.account.AppRole.USER);
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.empty());
+
+            var content = armed().reportFor(9L, user).orElseThrow().content();
+
+            assertThat(content.rows()).isEmpty();
+            // The two flags the modal branches on: scoped, but not linked, so the
+            // screen says "your account isn't linked" and never blames HRMS.
+            var scoped = armed().reportFor(9L, user).orElseThrow();
+            assertThat(scoped.scopedToViewer()).isTrue();
+            assertThat(scoped.viewerLinked()).isFalse();
+            // Still a report: the screen can say "not linked" rather than "could not read the mail".
+            assertThat(content.subject()).isEqualTo("Attendance on 08-Sep-2026");
+            assertThat(content.department()).isEqualTo("BeplePay Department");
+        }
+
+        @Test
+        @DisplayName("a name that matches nobody in the table yields no rows, never a near match")
+        void noFuzzyMatching() {
+            var user = caller(com.coc.docs.account.AppRole.USER);
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.of("Ken"));
+
+            assertThat(armed().reportFor(9L, user).orElseThrow().content().rows()).isEmpty();
+        }
+    }
+
+    /*
+     * Storage (V49, ADR-057). The widening V21 asked to be made on purpose, so
+     * these assert the three properties that decision rests on: the body is
+     * stored once at arrival, reads come from the table rather than the
+     * mailbox, and a report older than V49 still reads.
+     * // req: FR-OPS-001, NFR-SEC-PII, ADR-057
+     */
+    @Nested
+    class StoredBody {
+
+        private static final String HTML =
+                "<h3><span>COOCON Department</span></h3><table>"
+                        + "<tr><th>Name</th><th>Yesterday Check-Out</th><th>Today Check-In</th></tr>"
+                        + "<tr><td>Veth Sam Oeun</td>"
+                        + "<td><span>17:00</span> -&gt; <span>17:38</span></td><td><div><span>Normal</span></div></td>"
+                        + "<td><span>08:00</span> -&gt; <span>08:09</span></td><td><div><span>Late Check-In</span></div></td></tr>"
+                        + "</table>";
+
+        private HrmsNotification saved() {
+            return new HrmsNotification(
+                    9L, "msg-9", "Attendance on 25-Aug-2026",
+                    LocalDate.of(2026, 8, 25), Instant.parse("2026-08-25T08:12:00Z"));
+        }
+
+        @Test
+        @DisplayName("a newly recorded report has its body fetched and stored, once")
+        void storesBodyOnFirstRecord() {
+            when(mailbox.arrivalsSince(any())).thenReturn(List.of(arrival("msg-9", "Attendance on 25-Aug-2026")));
+            when(repository.record(any())).thenReturn(true);
+            when(repository.findByMessageId("msg-9")).thenReturn(Optional.of(saved()));
+            when(mailbox.htmlBodyOf("msg-9")).thenReturn(Optional.of(HTML));
+
+            assertThat(serviceWith(configured()).poll()).isEqualTo(1);
+
+            ArgumentCaptor<HrmsMailContent> stored = ArgumentCaptor.forClass(HrmsMailContent.class);
+            verify(contents).save(org.mockito.ArgumentMatchers.eq(9L), stored.capture());
+            assertThat(stored.getValue().department()).isEqualTo("COOCON Department");
+            assertThat(stored.getValue().rows()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("an already-recorded report is not re-fetched -- the mailbox is opened once per report, not per poll")
+        void doesNotRestoreAnAlreadyRecordedReport() {
+            when(mailbox.arrivalsSince(any())).thenReturn(List.of(arrival("msg-9", "Attendance on 25-Aug-2026")));
+            when(repository.record(any())).thenReturn(false);
+
+            assertThat(serviceWith(configured()).poll()).isZero();
+
+            verify(mailbox, never()).htmlBodyOf(any());
+            verifyNoInteractions(contents);
+        }
+
+        @Test
+        @DisplayName("a report is read from the table, without touching the mailbox")
+        void readsFromTheTable() {
+            HrmsMailContent fromDb = HrmsReportParser.parse("Attendance on 25-Aug-2026", LocalDate.of(2026, 8, 25), HTML);
+            when(repository.findById(9L)).thenReturn(Optional.of(saved()));
+            when(contents.findByNotificationId(org.mockito.ArgumentMatchers.eq(9L), any(), any()))
+                    .thenReturn(Optional.of(fromDb));
+
+            var content = serviceWith(configured()).report(9L).orElseThrow();
+
+            assertThat(content.rows()).hasSize(1);
+            verify(mailbox, never()).htmlBodyOf(any());
+        }
+
+        @Test
+        @DisplayName("a stored report still reads with the mailbox unconfigured -- which it could not before V49")
+        void storedReportReadsWithoutTheMailbox() {
+            HrmsMailContent fromDb = HrmsReportParser.parse("Attendance on 25-Aug-2026", LocalDate.of(2026, 8, 25), HTML);
+            when(repository.findById(9L)).thenReturn(Optional.of(saved()));
+            when(contents.findByNotificationId(org.mockito.ArgumentMatchers.eq(9L), any(), any()))
+                    .thenReturn(Optional.of(fromDb));
+
+            assertThat(serviceWith(properties(false, "", "")).report(9L)).isPresent();
+        }
+
+        @Test
+        @DisplayName("a report recorded before V49 falls back to the mailbox rather than becoming unreadable")
+        void fallsBackForPreV49Reports() {
+            when(repository.findById(9L)).thenReturn(Optional.of(saved()));
+            when(contents.findByNotificationId(org.mockito.ArgumentMatchers.eq(9L), any(), any()))
+                    .thenReturn(Optional.empty());
+            when(mailbox.htmlBodyOf("msg-9")).thenReturn(Optional.of(HTML));
+
+            var content = serviceWith(configured()).report(9L).orElseThrow();
+
+            assertThat(content.rows()).hasSize(1);
+            verify(mailbox).htmlBodyOf("msg-9");
         }
     }
 }

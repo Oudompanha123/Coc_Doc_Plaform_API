@@ -61,7 +61,7 @@ import org.springframework.stereotype.Component;
  * shell, and the prompt goes in over stdin. There is no {@code sh -c}, no
  * string concatenation, and so no command injection to get wrong.
  *
- * <p>// req: ADR-037, ADR-043
+ * <p>// req: ADR-037, ADR-043, ADR-054, ADR-055
  */
 @Component
 public class LocalClaudeAnalyzer {
@@ -128,14 +128,25 @@ public class LocalClaudeAnalyzer {
     /**
      * Asks the local model to analyse this project.
      *
-     * <p>Returns empty rather than throwing on every failure mode — a missing
-     * binary, a timeout, a non-zero exit, output that is not the JSON we
-     * asked for. Analysis is a convenience on top of a plan somebody is
-     * writing by hand; it must not be able to fail the request that triggered
-     * it. Each case is logged with enough detail to fix it, because a feature
-     * that silently does nothing is worse than one that is plainly off.
+     * @param sourcePath one caller's own legacy checkout, given for this one
+     *     call — never configuration (ADR-055 revises ADR-043/051). Null or
+     *     blank means manifest-only: there is no server-side default left to
+     *     fall back to, so this is the only way {@code readSource} is ever
+     *     true. Trusted to already be a real directory — {@link
+     *     AxRenewalService#runAnalysis} validates that and refuses the
+     *     request (400) before this is ever reached, since a typo in
+     *     something a person just typed deserves an immediate answer. This
+     *     method re-checks it anyway (defence in depth).
+     *
+     *     <p>Returns empty rather than throwing on every other failure mode —
+     *     a missing binary, a timeout, a non-zero exit, output that is not
+     *     the JSON we asked for. Analysis is a convenience on top of a plan
+     *     somebody is writing by hand; it must not be able to fail the
+     *     request that triggered it. Each case is logged with enough detail
+     *     to fix it, because a feature that silently does nothing is worse
+     *     than one that is plainly off.
      */
-    public Optional<Result> analyse(AxRenewalProject project) {
+    public Optional<Result> analyse(AxRenewalProject project, String sourcePath) {
         if (!properties.localClaudeConfigured()) {
             return Optional.empty();
         }
@@ -149,18 +160,18 @@ public class LocalClaudeAnalyzer {
             return Optional.empty();
         }
 
-        boolean readSource = properties.sourcePathConfigured() && Files.isDirectory(Path.of(properties.sourcePath()));
-        if (properties.sourcePathConfigured() && !readSource) {
+        boolean given = sourcePath != null && !sourcePath.isBlank();
+        boolean readSource = given && Files.isDirectory(Path.of(sourcePath));
+        if (given && !readSource) {
             log.warn(
-                    "app.ax-renewal.source-path is set to {} but that is not a directory; "
-                            + "analysing the stored manifest only",
-                    properties.sourcePath());
+                    "the source path given for this run ({}) is not a directory; analysing the stored manifest only",
+                    sourcePath);
         }
 
         List<String> command = new ArrayList<>(List.of(properties.claudeCliPath(), "--print", "--output-format", "json"));
         if (readSource) {
             command.add("--add-dir");
-            command.add(properties.sourcePath());
+            command.add(sourcePath);
         }
 
         try {

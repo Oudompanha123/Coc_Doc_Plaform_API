@@ -53,7 +53,7 @@ import org.springframework.stereotype.Component;
  * array and no shell, and the prompt still goes over stdin — the same
  * defense {@link LocalClaudeAnalyzer} already uses, carried over unchanged.
  *
- * <p>// req: ADR-044
+ * <p>// req: ADR-044, ADR-055
  */
 @Component
 public class AxRenewalCodeGenerator {
@@ -92,15 +92,13 @@ public class AxRenewalCodeGenerator {
     public record Result(List<GeneratedFile> files) {}
 
     /**
-     * Whether this machine can even attempt generation — the same source-path
-     * precondition {@link LocalClaudeAnalyzer} checks for reading, since
-     * generation needs a real folder to copy from, not just the stored
-     * manifest.
+     * Whether this machine can even attempt generation. Only the CLI itself,
+     * since ADR-055: the source folder to copy from is now supplied per call
+     * to {@link #generate}, not read from configuration, so it is no longer
+     * something this method can check in advance.
      */
     public boolean canGenerate() {
-        return properties.localClaudeConfigured()
-                && properties.sourcePathConfigured()
-                && Files.isDirectory(Path.of(properties.sourcePath()));
+        return properties.localClaudeConfigured();
     }
 
     /**
@@ -113,6 +111,13 @@ public class AxRenewalCodeGenerator {
      * from outside this call — the caller records why via its own
      * logging/state, exactly {@link LocalClaudeAnalyzer}'s own contract.
      *
+     * @param sourcePath the legacy project's folder to copy from — one
+     *     caller's own checkout, given for this one run (ADR-055), never
+     *     configuration. {@link AxRenewalService#startImplementation}
+     *     validates it is a real directory and refuses the request (400)
+     *     before this is ever reached; this method re-checks anyway
+     *     (defence in depth) and degrades to empty, not an exception, if it
+     *     somehow is not.
      * @param onProcessStarted invoked with the real, live {@link Process}
      *     the instant it exists — the same "hand the caller a live handle
      *     immediately" shape {@code AxRenewalLocalRunner#start} already
@@ -120,7 +125,8 @@ public class AxRenewalCodeGenerator {
      *     cancel this run later (ADR-049). Never invoked at all if starting
      *     the process itself fails.
      */
-    public Optional<Result> generate(String confirmedPlan, Path stagingDir, Consumer<Process> onProcessStarted) {
+    public Optional<Result> generate(
+            String confirmedPlan, Path stagingDir, Consumer<Process> onProcessStarted, String sourcePath) {
         if (!canGenerate()) {
             return Optional.empty();
         }
@@ -129,7 +135,11 @@ public class AxRenewalCodeGenerator {
             log.warn("app.ax-renewal.claude-cli-path is set to {} but there is no file there; cannot generate", cli);
             return Optional.empty();
         }
-        Path source = Path.of(properties.sourcePath());
+        if (sourcePath == null || sourcePath.isBlank() || !Files.isDirectory(Path.of(sourcePath))) {
+            log.warn("the source path given for generation ({}) is not a directory; cannot generate", sourcePath);
+            return Optional.empty();
+        }
+        Path source = Path.of(sourcePath);
 
         try {
             copyTree(source, stagingDir);

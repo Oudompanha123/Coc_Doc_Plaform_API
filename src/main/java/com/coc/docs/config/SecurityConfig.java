@@ -447,6 +447,22 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/run-locally/stop")
                         .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
 
+                        // --- Claude Usage, read side (ADR-035) ---------------
+                        // Its own prefix rather than /api/v1/admin/**, for the
+                        // same reason AX Renewal above has one: a plain `user`
+                        // must reach their own row, and the generic admin floor
+                        // below would refuse them before the controller ran.
+                        //
+                        // Not a hole in that floor. The response is scoped from
+                        // the session inside ClaudeUsageService.dashboardFor --
+                        // admin and above see the team, everyone else sees only
+                        // themselves -- and there is no parameter on this route
+                        // that could widen it. The roster mutations stay under
+                        // /api/v1/admin/claude-usage and stay admin-only.
+                        // // req: FR-USAGE-001, NFR-SEC-PII
+                        .requestMatchers(HttpMethod.GET, "/api/v1/claude-usage")
+                        .hasRole(AppRole.USER.name())
+
                         // --- editorial writes and admin reads ----------------
                         .requestMatchers("/api/v1/admin/**").hasRole(AppRole.ADMIN.name())
 

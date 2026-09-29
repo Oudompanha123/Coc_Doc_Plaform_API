@@ -25,6 +25,7 @@ import com.coc.docs.page.PageService;
 import com.coc.docs.page.PageVersion;
 import com.coc.docs.notify.ActivityDigestService;
 import com.coc.docs.notify.HrmsMailContent;
+import com.coc.docs.notify.HrmsNotificationService;
 import com.coc.docs.notify.NotificationFeedService;
 import com.coc.docs.page.PageVersionRepository;
 import com.coc.docs.section.Section;
@@ -499,7 +500,18 @@ public final class ApiDtos {
      * always accepted). {@code role} is kept as the single-role convenience
      * most callers still use; when both are present, {@code roles} wins.
      */
-    public record UpdateAccountRequest(String role, java.util.List<String> roles, Boolean active, String displayName) {}
+    public record UpdateAccountRequest(
+            String role,
+            java.util.List<String> roles,
+            Boolean active,
+            String displayName,
+            /**
+             * The exact Name cell this account's owner appears under in the HRMS
+             * attendance mail (V47). Absent leaves the link alone; a blank string
+             * removes it. Decides whose attendance that person is shown, so it is
+             * audited and never inferred -- see AccountService.linkHrmsName.
+             */
+            String hrmsName) {}
 
     /**
      * One role and what it grants.
@@ -691,16 +703,35 @@ public final class ApiDtos {
             String department,
             List<HrmsAttendanceRow> rows,
             List<HrmsMailDetail> details,
-            String note) {
+            String note,
+            /**
+             * Whether {@code rows} was narrowed to the caller's own attendance
+             * (V47). False for an admin and above, who get the mail as sent.
+             */
+            boolean scopedToViewer,
+            /**
+             * Whether the caller's account is linked to a name in the mail.
+             *
+             * <p>Exists so the screen can tell two empty results apart, which
+             * it could not before and got wrong: an unlinked account and a
+             * report the parser failed on both arrive as zero rows, and showing
+             * "HRMS may have changed its layout" for the first is a false
+             * accusation against the sender. False only ever accompanies
+             * {@code scopedToViewer}; an admin is never "unlinked".
+             */
+            boolean viewerLinked) {
 
-        public static HrmsMailContentResponse of(HrmsMailContent report) {
+        public static HrmsMailContentResponse of(HrmsNotificationService.ScopedReport scoped) {
+            HrmsMailContent report = scoped.content();
             return new HrmsMailContentResponse(
                     report.subject(),
                     report.reportDate(),
                     report.department(),
                     report.rows().stream().map(HrmsAttendanceRow::of).toList(),
                     report.details().stream().map(HrmsMailDetail::of).toList(),
-                    report.note());
+                    report.note(),
+                    scoped.scopedToViewer(),
+                    scoped.viewerLinked());
         }
     }
 
@@ -1115,7 +1146,11 @@ public final class ApiDtos {
      */
     public record AxRenewalChatRequest(
             @NotBlank @Size(max = 4_000) String message,
-            @Size(max = 40) List<@Valid AxRenewalChatTurn> history) {}
+            @Size(max = 40) List<@Valid AxRenewalChatTurn> history,
+            // req: ADR-055 — one caller's own legacy checkout for this one
+            // question, in place of the server-side default that used to
+            // exist; null/blank means manifest-only, same as omitting it.
+            @Size(max = 1_024) String sourcePath) {}
 
     /** @param role {@code "you"} or {@code "assistant"}; anything else reads as the person. */
     public record AxRenewalChatTurn(@NotBlank @Size(max = 16) String role, @NotBlank @Size(max = 4_000) String text) {}

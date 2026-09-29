@@ -79,7 +79,7 @@ class AxRenewalDeleteProjectTest {
                 new ObjectMapper(),
                 mock(LocalClaudeAnalyzer.class),
                 mock(LocalClaudeChat.class),
-                new AxRenewalProperties(null, null, null),
+                new AxRenewalProperties(null, null),
                 mock(AxRenewalCodeGenerator.class),
                 mock(AxRenewalImplementationRunner.class),
                 localRunner);

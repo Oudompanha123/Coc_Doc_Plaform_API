@@ -226,7 +226,7 @@ class AdminAccountControllerTest {
         @Test
         @DisplayName("assigns a new role and returns the updated account")
         void assignsRole() throws Exception {
-            when(accountService.update(eq(ACCOUNT_ID), eq(EnumSet.of(AppRole.ADMIN)), isNull(), isNull(), any()))
+            when(accountService.update(eq(ACCOUNT_ID), eq(EnumSet.of(AppRole.ADMIN)), isNull(), isNull(), isNull(), any()))
                     .thenReturn(account("person@example.com", AppRole.ADMIN));
 
             mvc.perform(patch("/api/v1/admin/accounts/" + ACCOUNT_ID)
@@ -245,6 +245,7 @@ class AdminAccountControllerTest {
             when(accountService.update(
                             eq(ACCOUNT_ID),
                             eq(new java.util.LinkedHashSet<>(List.of(AppRole.USER, AppRole.ADMIN))),
+                            isNull(),
                             isNull(),
                             isNull(),
                             any()))
@@ -283,7 +284,7 @@ class AdminAccountControllerTest {
                     false,
                     true);
 
-            when(accountService.update(eq(ACCOUNT_ID), isNull(), eq(false), isNull(), any()))
+            when(accountService.update(eq(ACCOUNT_ID), isNull(), eq(false), isNull(), isNull(), any()))
                     .thenReturn(deactivated);
 
             mvc.perform(patch("/api/v1/admin/accounts/" + ACCOUNT_ID)
@@ -320,7 +321,7 @@ class AdminAccountControllerTest {
         @DisplayName("answers 409 when demoting or deactivating the last active super admin")
         // req: UC-004 E-4, FR-AUTH-008
         void refusesLastSuperAdmin() throws Exception {
-            when(accountService.update(eq(ACCOUNT_ID), any(), any(), any(), any()))
+            when(accountService.update(eq(ACCOUNT_ID), any(), any(), any(), any(), any()))
                     .thenThrow(ApiException.conflict(
                             "this is the only active super admin; promote someone else first"));
 
@@ -382,7 +383,7 @@ class AdminAccountControllerTest {
                                     {"role":"super_admin"}"""))
                     .andExpect(status().isForbidden());
 
-            verify(accountService, never()).update(any(), any(), any(), any(), any());
+            verify(accountService, never()).update(any(), any(), any(), any(), any(), any());
         }
 
         @Test

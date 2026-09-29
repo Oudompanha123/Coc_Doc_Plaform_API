@@ -95,6 +95,26 @@ public class HrmsNotificationRepository {
         return written > 0;
     }
 
+    /**
+     * One arrival by its {@code Message-ID}, which is how a just-recorded row
+     * is found again (V49/ADR-057): {@link #record} reports only whether it
+     * wrote, and storing the body needs the id it wrote.
+     *
+     * <p>Costs one extra query per genuinely new report -- once a day, not per
+     * poll -- because {@code record} returns false for the repeats that make up
+     * every other run.
+     */
+    public Optional<HrmsNotification> findByMessageId(String messageId) {
+        return jdbc.sql("""
+                        select id, message_id, subject, report_date, received_at
+                        from hrms_notification
+                        where message_id = ?
+                        """)
+                .param(messageId)
+                .query(HrmsNotificationRepository::map)
+                .optional();
+    }
+
     /** The most recent arrivals, newest first. */
     public List<HrmsNotification> recent(int limit) {
         return jdbc.sql(RECENT_SQL).param(limit).query(HrmsNotificationRepository::map).list();

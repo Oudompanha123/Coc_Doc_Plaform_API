@@ -8,14 +8,12 @@ import java.net.URI;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -41,21 +39,14 @@ public class AdminClaudeUsageController {
         this.usage = usage;
     }
 
-    /**
-     * Everything the screen renders for one period: per-member rollup, the
-     * daily chart, and totals — one call, so the pieces cannot disagree.
-     *
-     * @param period {@code day}, {@code week}, or {@code month}; defaults to
-     *     {@code week} for anything else.
-     * @param offset periods back from the current one, 0 or negative. Clamped
-     *     server-side rather than rejected — see {@code ClaudeUsageService}.
+    /*
+     * The dashboard read is not here. It moved to ClaudeUsageController, at
+     * /api/v1/claude-usage, because a plain `user` has to reach their own row
+     * and the generic /api/v1/admin/** floor would refuse them — the same
+     * reason AX Renewal took a prefix of its own. What stays here is what only
+     * an admin may do: change a dashboard role, set a budget, take somebody
+     * off tracking.
      */
-    @GetMapping
-    ApiDtos.ClaudeUsageDashboardResponse dashboard(
-            @RequestParam(defaultValue = "week") String period,
-            @RequestParam(defaultValue = "0") int offset) {
-        return ApiDtos.ClaudeUsageDashboardResponse.of(usage.dashboard(period, offset));
-    }
 
     /**
      * Adds someone to the tracking roster, {@code invited} until their own

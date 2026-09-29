@@ -26,24 +26,16 @@ class AxRenewalCodeGeneratorTest {
     private final ObjectMapper json = new ObjectMapper();
 
     @Test
-    @DisplayName("cannot generate with nothing configured")
+    @DisplayName("cannot generate with no CLI configured")
     void cannotGenerateUnconfigured() {
-        var generator = new AxRenewalCodeGenerator(new AxRenewalProperties(null, null, null), json);
+        var generator = new AxRenewalCodeGenerator(new AxRenewalProperties(null, null), json);
         assertThat(generator.canGenerate()).isFalse();
     }
 
     @Test
-    @DisplayName("cannot generate without a real source-path directory")
-    void cannotGenerateWithoutRealSourcePath(@TempDir Path tmp) {
-        var generator = new AxRenewalCodeGenerator(
-                new AxRenewalProperties(null, "/usr/bin/claude", tmp.resolve("does-not-exist").toString()), json);
-        assertThat(generator.canGenerate()).isFalse();
-    }
-
-    @Test
-    @DisplayName("can generate once a CLI path and a real source directory are both configured")
-    void canGenerateWhenBothConfigured(@TempDir Path tmp) {
-        var generator = new AxRenewalCodeGenerator(new AxRenewalProperties(null, "/usr/bin/claude", tmp.toString()), json);
+    @DisplayName("can generate once a CLI path is configured — the source folder is a per-call argument now, not configuration (ADR-055)")
+    void canGenerateOnceTheCliIsConfigured() {
+        var generator = new AxRenewalCodeGenerator(new AxRenewalProperties(null, "/usr/bin/claude"), json);
         assertThat(generator.canGenerate()).isTrue();
     }
 
@@ -52,9 +44,23 @@ class AxRenewalCodeGeneratorTest {
     void missingBinaryFallsBack(@TempDir Path tmp) throws IOException {
         Path source = tmp.resolve("source");
         Files.createDirectories(source);
-        var generator = new AxRenewalCodeGenerator(
-                new AxRenewalProperties(null, tmp.resolve("no-such-claude").toString(), source.toString()), json);
-        assertThat(generator.generate("some plan", tmp.resolve("staging"), process -> {})).isEmpty();
+        var generator =
+                new AxRenewalCodeGenerator(new AxRenewalProperties(null, tmp.resolve("no-such-claude").toString()), json);
+        assertThat(generator.generate("some plan", tmp.resolve("staging"), process -> {}, source.toString()))
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("falls back rather than throwing when the given source path is not a real directory")
+    void missingSourcePathFallsBack(@TempDir Path tmp) {
+        // The CLI path itself does not need to be real here -- canGenerate()
+        // only checks it is configured, and the source-path check in
+        // generate() is reached (and fails) before the binary is ever
+        // touched.
+        var generator = new AxRenewalCodeGenerator(new AxRenewalProperties(null, "/usr/bin/claude"), json);
+        assertThat(generator.generate(
+                        "some plan", tmp.resolve("staging"), process -> {}, tmp.resolve("no-such-source").toString()))
+                .isEmpty();
     }
 
     @Test

@@ -45,6 +45,43 @@ public record HrmsMailContent(
     }
 
     /**
+     * The same report carrying only the row naming {@code hrmsName}, for a
+     * caller entitled to their own attendance and nobody else's.
+     *
+     * <p>A null or blank name keeps <b>no</b> rows. That is the unlinked
+     * account (V47), and it must not read as "no filter" — an accidental
+     * null here would hand a plain {@code user} the whole department, which
+     * is the failure this method exists to prevent (NFR-SEC-PII).
+     *
+     * <p>Matching is case-insensitive and collapses internal whitespace: HRMS
+     * writes its own cells and pads them inconsistently, and an admin typing
+     * the mapping copies what they see. It goes no further than that — no
+     * prefix, initials or edit-distance matching, because a near-miss shows
+     * one employee's times to a different employee, and silently showing
+     * nothing is a far better failure than silently showing the wrong person.
+     *
+     * <p>{@code details} and {@code note} are kept, not dropped. A leave or
+     * overtime mail has no rows at all and carries its content there; the
+     * person it concerns is the one reading it, and stripping that would be
+     * scoping by accident rather than on purpose.
+     */
+    public HrmsMailContent onlyRowsNamed(String hrmsName) {
+        String wanted = normalizeName(hrmsName);
+        if (wanted.isEmpty()) {
+            return new HrmsMailContent(subject, reportDate, department, List.of(), details, note);
+        }
+        List<Row> mine = rows.stream()
+                .filter(row -> normalizeName(row.name()).equals(wanted))
+                .toList();
+        return new HrmsMailContent(subject, reportDate, department, mine, details, note);
+    }
+
+    /** Lower-cased, trimmed, internal runs of whitespace collapsed to one space. */
+    private static String normalizeName(String raw) {
+        return raw == null ? "" : raw.trim().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /**
      * One label/value pair from the mails that are not attendance reports.
      *
      * <p>HRMS sends more than the daily table: leave and overtime requests

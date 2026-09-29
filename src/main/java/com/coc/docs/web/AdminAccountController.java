@@ -107,8 +107,10 @@ public class AdminAccountController {
         if (request.role() == null
                 && request.roles() == null
                 && request.active() == null
-                && request.displayName() == null) {
-            throw ApiException.badRequest("supply a role, roles, an active flag, a display name, or any combination");
+                && request.displayName() == null
+                && request.hrmsName() == null) {
+            throw ApiException.badRequest(
+                    "supply a role, roles, an active flag, a display name, an HRMS name, or any combination");
         }
 
         // Parsed before anything is written, so an unknown role name is a 400
@@ -137,7 +139,8 @@ public class AdminAccountController {
         // calls let a request that changed both commit the first and fail the
         // second, which reported an error while a role change had already landed.
         return ApiDtos.AccountResponse.of(
-                accounts.update(accountId, roles, request.active(), request.displayName(), actor));
+                accounts.update(
+                        accountId, roles, request.active(), request.displayName(), request.hrmsName(), actor));
     }
 
         // -----------------------------------------------------------------------

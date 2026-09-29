@@ -25,7 +25,7 @@ import org.junit.jupiter.api.io.TempDir;
  * or should have. The parsing that a real run feeds is worth covering
  * separately if it ever grows past reading three fields.
  *
- * <p>// req: ADR-043
+ * <p>// req: ADR-043, ADR-055
  */
 class LocalClaudeAnalyzerTest {
 
@@ -50,17 +50,17 @@ class LocalClaudeAnalyzerTest {
     @Test
     @DisplayName("does nothing at all when no CLI path is configured — the deployed case")
     void unconfiguredIsSilentlyOff() {
-        var analyzer = new LocalClaudeAnalyzer(new AxRenewalProperties(null, null, null), json);
+        var analyzer = new LocalClaudeAnalyzer(new AxRenewalProperties(null, null), json);
 
-        assertThat(analyzer.analyse(project())).isEmpty();
+        assertThat(analyzer.analyse(project(), null)).isEmpty();
     }
 
     @Test
-    @DisplayName("treats a blank path as unconfigured, not as a path to run")
-    void blankPathIsUnconfigured() {
-        var analyzer = new LocalClaudeAnalyzer(new AxRenewalProperties(null, "   ", null), json);
+    @DisplayName("treats a blank CLI path as unconfigured, not as a path to run")
+    void blankCliPathIsUnconfigured() {
+        var analyzer = new LocalClaudeAnalyzer(new AxRenewalProperties(null, "   "), json);
 
-        assertThat(analyzer.analyse(project())).isEmpty();
+        assertThat(analyzer.analyse(project(), null)).isEmpty();
     }
 
     @Test
@@ -69,10 +69,10 @@ class LocalClaudeAnalyzerTest {
         // A developer who mistypes the path gets the keyword analysis and a
         // log line naming what is wrong — never a failed request, because
         // analysis is a convenience on top of a plan somebody writes by hand.
-        var analyzer = new LocalClaudeAnalyzer(
-                new AxRenewalProperties(null, tmp.resolve("no-such-claude").toString(), null), json);
+        var analyzer =
+                new LocalClaudeAnalyzer(new AxRenewalProperties(null, tmp.resolve("no-such-claude").toString()), json);
 
-        assertThat(analyzer.analyse(project())).isEmpty();
+        assertThat(analyzer.analyse(project(), null)).isEmpty();
     }
 
     @Test
@@ -81,18 +81,26 @@ class LocalClaudeAnalyzerTest {
         // The two settings are independent: anthropicApiKey is for a later
         // phase where the deployed site analyses for everyone, and must not
         // make this class start looking for a binary.
-        var analyzer = new LocalClaudeAnalyzer(new AxRenewalProperties("sk-ant-whatever", null, null), json);
+        var analyzer = new LocalClaudeAnalyzer(new AxRenewalProperties("sk-ant-whatever", null), json);
 
-        assertThat(analyzer.analyse(project())).isEmpty();
+        assertThat(analyzer.analyse(project(), null)).isEmpty();
     }
 
     @Test
-    @DisplayName("the two configuration predicates are independent of each other")
+    @DisplayName("localClaudeConfigured is keyed only on the CLI path")
     void predicates() {
-        assertThat(new AxRenewalProperties(null, null, null).localClaudeConfigured()).isFalse();
-        assertThat(new AxRenewalProperties(null, "/usr/bin/claude", null).localClaudeConfigured()).isTrue();
-        assertThat(new AxRenewalProperties(null, "/usr/bin/claude", null).sourcePathConfigured()).isFalse();
-        assertThat(new AxRenewalProperties(null, "/usr/bin/claude", "/src").sourcePathConfigured()).isTrue();
-        assertThat(new AxRenewalProperties(null, null, "/src").localClaudeConfigured()).isFalse();
+        assertThat(new AxRenewalProperties(null, null).localClaudeConfigured()).isFalse();
+        assertThat(new AxRenewalProperties(null, "/usr/bin/claude").localClaudeConfigured()).isTrue();
+    }
+
+    @Test
+    @DisplayName("a null or blank source path is treated as none given, not as a path to run (ADR-055)")
+    void blankSourcePathIsUnconfigured() {
+        // No CLI configured at all -- every spelling of "no source path"
+        // must reach the exact same "off" answer regardless.
+        var analyzer = new LocalClaudeAnalyzer(new AxRenewalProperties(null, null), json);
+
+        assertThat(analyzer.analyse(project(), null)).isEmpty();
+        assertThat(analyzer.analyse(project(), "   ")).isEmpty();
     }
 }

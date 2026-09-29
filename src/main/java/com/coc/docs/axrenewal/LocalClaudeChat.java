@@ -71,7 +71,7 @@ import org.springframework.stereotype.Component;
  *       feature.
  * </ul>
  *
- * <p>// req: ADR-043, ADR-046
+ * <p>// req: ADR-043, ADR-046, ADR-055
  */
 @Component
 public class LocalClaudeChat {
@@ -129,10 +129,15 @@ public class LocalClaudeChat {
      * answer, and a reply that silently never arrives is worse than a line
      * saying why.
      *
+     * @param sourcePath one caller's own legacy checkout, given for this one
+     *     question — never configuration (ADR-055 revises ADR-043). Null or
+     *     blank means the model only knows what this application stores.
+     *     {@code AxRenewalService#chat} validates it is a real directory and
+     *     refuses the request (400) before this is ever reached.
      * @throws ApiException 409 when no local CLI is configured, when every
      *     slot is busy, or when the CLI could not produce an answer.
      */
-    public Reply reply(AxRenewalProject project, List<Turn> history, String message) {
+    public Reply reply(AxRenewalProject project, List<Turn> history, String message, String sourcePath) {
         if (!properties.localClaudeConfigured()) {
             throw ApiException.conflict(
                     "no local model is configured on this machine — chat needs app.ax-renewal.claude-cli-path");
@@ -143,7 +148,7 @@ public class LocalClaudeChat {
             throw ApiException.conflict("the configured Claude Code path does not point at a file");
         }
 
-        boolean readSource = properties.sourcePathConfigured() && Files.isDirectory(Path.of(properties.sourcePath()));
+        boolean readSource = sourcePath != null && !sourcePath.isBlank() && Files.isDirectory(Path.of(sourcePath));
 
         List<String> command = new ArrayList<>(List.of(
                 properties.claudeCliPath(),
@@ -162,7 +167,7 @@ public class LocalClaudeChat {
                 "Grep"));
         if (readSource) {
             command.add("--add-dir");
-            command.add(properties.sourcePath());
+            command.add(sourcePath);
         }
 
         // tryAcquire, not acquire: queueing HTTP requests behind a two-minute
@@ -172,7 +177,8 @@ public class LocalClaudeChat {
             throw ApiException.conflict("the assistant is already answering — wait for that reply and try again");
         }
         try {
-            return new Reply(run(command, prompt(project, history, message, readSource), readSource), readSource);
+            return new Reply(
+                    run(command, prompt(project, history, message, readSource), readSource, sourcePath), readSource);
         } catch (IOException e) {
             log.warn("could not start {}: {}", properties.claudeCliPath(), e.getMessage());
             throw ApiException.conflict("could not start Claude Code on this machine — see the backend log");
@@ -184,14 +190,14 @@ public class LocalClaudeChat {
         }
     }
 
-    private String run(List<String> command, String prompt, boolean readSource)
+    private String run(List<String> command, String prompt, boolean readSource, String sourcePath)
             throws IOException, InterruptedException {
         ProcessBuilder builder = new ProcessBuilder(command);
         // Run where the source is, when there is source: otherwise the
         // process inherits the backend's own working directory, and "read the
         // project" would quietly mean this repository.
         if (readSource) {
-            builder.directory(Path.of(properties.sourcePath()).toFile());
+            builder.directory(Path.of(sourcePath).toFile());
         }
         // Kept separate for the same reason the analyzer keeps it separate —
         // merged into stdout, a CLI warning would corrupt the JSON envelope.

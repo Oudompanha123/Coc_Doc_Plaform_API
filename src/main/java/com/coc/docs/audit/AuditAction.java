@@ -25,6 +25,14 @@ public final class AuditAction {
 
     public static final String ACCOUNT_CREATE = "account.create";
     public static final String ACCOUNT_ROLE_CHANGE = "account.role_change";
+
+    /**
+     * Linked, re-linked or unlinked an account to an HRMS attendance name
+     * (V47). Audited because it decides whose attendance record that account's
+     * holder is shown — a wrong value discloses one employee's times to
+     * another, which is a security change rather than a cosmetic one.
+     */
+    public static final String ACCOUNT_HRMS_LINK = "account.hrms_link";
     public static final String ACCOUNT_DEACTIVATE = "account.deactivate";
     public static final String ACCOUNT_REACTIVATE = "account.reactivate";
 
@@ -154,6 +162,16 @@ public final class AuditAction {
 
     /** A running Generate attempt stopped deliberately, before it ever reached awaiting_review (ADR-049). */
     public static final String AX_RENEWAL_IMPLEMENTATION_CANCEL = "ax_renewal.implementation_cancel";
+
+    /**
+     * Rebuild reused a prior applied run's exact generated changes instead
+     * of asking the model again, because the confirmed plan had not changed
+     * since (ADR-056). {@code detail} carries {@code replayedFromRunId} —
+     * distinct from {@link #AX_RENEWAL_IMPLEMENTATION_START}, since nothing
+     * here actually ran the model.
+     */
+    public static final String AX_RENEWAL_IMPLEMENTATION_REPLAY = "ax_renewal.implementation_replay";
+
     public static final String AX_RENEWAL_COMMENT_ADD = "ax_renewal.comment_add";
 
     /**

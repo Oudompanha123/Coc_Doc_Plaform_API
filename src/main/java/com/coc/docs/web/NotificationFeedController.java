@@ -87,10 +87,14 @@ public class NotificationFeedController {
     @Operation(
             summary = "One HRMS attendance report",
             description = "Fetched from the mailbox on the request and never stored. "
+                    + "An admin and above sees the whole department, as the mail was sent; every "
+                    + "other role sees only the row naming them, matched on account.hrms_name, and "
+                    + "no rows at all when their account is not linked to one. "
                     + "404 if it is unknown, gone from the mailbox, or the mailbox is unreachable.")
     @GetMapping("/hrms/{id}")
-    ResponseEntity<ApiDtos.HrmsMailContentResponse> hrmsReport(@PathVariable long id) {
-        return hrms.report(id)
+    ResponseEntity<ApiDtos.HrmsMailContentResponse> hrmsReport(
+            @PathVariable long id, @AuthenticationPrincipal CurrentUser caller) {
+        return hrms.reportFor(id, caller)
                 .map(ApiDtos.HrmsMailContentResponse::of)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
