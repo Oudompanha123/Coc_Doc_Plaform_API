@@ -88,7 +88,7 @@ public class ClaudeUsageIngestController {
         }
         Map<String, ClaudeUsageModelTokens> out = new LinkedHashMap<>();
         byModel.forEach((model, t) ->
-                out.put(model, new ClaudeUsageModelTokens(t.input(), t.output(), t.cacheRead(), t.cacheCreation())));
+                out.put(model, new ClaudeUsageModelTokens(t.input(), t.output(), t.cacheRead(), t.cacheCreation(), t.cacheCreation1h())));
         return out;
     }
 

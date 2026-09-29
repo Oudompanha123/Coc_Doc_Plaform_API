@@ -5,6 +5,7 @@ import com.coc.docs.claudeusage.ClaudeUsageService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -26,7 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
  * (ADR-044) — a second, differently-floored meaning under the same prefix
  * would be confusing to read in {@code SecurityConfig}.
  *
- * <p>// req: FR-USAGE-005, ADR-052
+ * <p>// req: FR-USAGE-005, ADR-052, ADR-058
  */
 @RestController
 @RequestMapping("/api/v1/claude-usage")
@@ -43,9 +44,14 @@ public class ClaudeUsageMeController {
      * history. {@code actor} is resolved from the authenticated session by
      * Spring Security, never from a request parameter, so there is no
      * {@code userId} a caller could substitute to read someone else's usage.
+     *
+     * <p>{@code days} picks the "Usage by Model" window — 1, 7 or 30
+     * (ADR-058); anything else falls back to 7 rather than a 400. It only
+     * changes the window over the caller's own rows, never whose rows.
      */
     @GetMapping("/me")
-    ApiDtos.ClaudeUsageMyDashboardResponse me(@AuthenticationPrincipal CurrentUser actor) {
-        return ApiDtos.ClaudeUsageMyDashboardResponse.of(usage.myDashboard(actor));
+    ApiDtos.ClaudeUsageMyDashboardResponse me(
+            @AuthenticationPrincipal CurrentUser actor, @RequestParam(defaultValue = "7") int days) {
+        return ApiDtos.ClaudeUsageMyDashboardResponse.of(usage.myDashboard(actor, days));
     }
 }
