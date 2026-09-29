@@ -1349,6 +1349,7 @@ public final class ApiDtos {
             JsonNode runningOnToday,
             JsonNode fileLayout,
             JsonNode moduleCoupling,
+            JsonNode recommendedStackMove,
             boolean modelConnected,
             Instant analyzedAt) {
 
@@ -1361,6 +1362,7 @@ public final class ApiDtos {
                     analysis.runningOnToday(),
                     analysis.fileLayout(),
                     analysis.moduleCoupling(),
+                    analysis.recommendedStackMove(),
                     analysis.modelConnected(),
                     analysis.analyzedAt());
         }

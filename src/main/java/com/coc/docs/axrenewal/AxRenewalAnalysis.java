@@ -31,6 +31,15 @@ import java.util.UUID;
  *     keyword-stub path or a manifest-only run, since tracing an import
  *     graph needs the actual source. Backs the Architecture panel's "Module
  *     coupling" diagram.
+ * @param recommendedStackMove exactly one entry per {@code runningOnToday}
+ *     layer, every time — {@code []} on the keyword-stub path or a
+ *     manifest-only run, the same "never fabricate" rule as {@code
+ *     indexed}/{@code runningOnToday} (ADR-061). Each entry's own {@code
+ *     recommendedTarget} is a real successor when the model is confident, or
+ *     {@code null} when it is not — a null is a complete, honest answer for
+ *     that layer, not a gap. Backs Plan → Stack move's "AI recommends" hint,
+ *     which a person reviews and can accept, change, or ignore entirely —
+ *     this is never itself the recorded plan.
  */
 public record AxRenewalAnalysis(
         UUID projectId,
@@ -41,6 +50,7 @@ public record AxRenewalAnalysis(
         JsonNode runningOnToday,
         JsonNode fileLayout,
         JsonNode moduleCoupling,
+        JsonNode recommendedStackMove,
         boolean modelConnected,
         Instant analyzedAt,
         UUID analyzedBy) {}

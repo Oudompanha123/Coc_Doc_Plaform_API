@@ -3,8 +3,11 @@ package com.coc.docs.axrenewal;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -102,5 +105,37 @@ class LocalClaudeAnalyzerTest {
 
         assertThat(analyzer.analyse(project(), null)).isEmpty();
         assertThat(analyzer.analyse(project(), "   ")).isEmpty();
+    }
+
+    /**
+     * {@code stageFilteredSource} is what keeps a large {@code node_modules}
+     * (or {@code .git}, {@code dist}, ...) from ever being handed to the
+     * model's own filesystem access during analysis — covered directly here,
+     * the same way {@code AxRenewalCodeGeneratorTest} covers {@code
+     * copyTree}'s identical exclusion for Generate, since neither needs a
+     * real CLI to verify.
+     */
+    @Test
+    @DisplayName("stageFilteredSource copies real source but excludes a large dependency folder like node_modules")
+    void stageFilteredSourceExcludesDependencyDirectories(@TempDir Path tmp) throws IOException {
+        Path source = tmp.resolve("source");
+        Files.createDirectories(source.resolve("src"));
+        Files.writeString(source.resolve("src/app.js"), "console.log(1)");
+        Files.createDirectories(source.resolve("node_modules/some-package"));
+        Files.writeString(source.resolve("node_modules/some-package/index.js"), "module.exports = {}");
+
+        Optional<Path> staged = LocalClaudeAnalyzer.stageFilteredSource(source);
+
+        assertThat(staged).isPresent();
+        Path staging = staged.get();
+        assertThat(staging).isNotEqualTo(source);
+        assertThat(Files.readString(staging.resolve("src/app.js"))).isEqualTo("console.log(1)");
+        assertThat(Files.exists(staging.resolve("node_modules"))).isFalse();
+    }
+
+    @Test
+    @DisplayName("stageFilteredSource degrades to empty, rather than throwing, when the source cannot be read")
+    void stageFilteredSourceDegradesOnFailure(@TempDir Path tmp) {
+        assertThat(LocalClaudeAnalyzer.stageFilteredSource(tmp.resolve("no-such-source"))).isEmpty();
     }
 }
