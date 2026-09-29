@@ -733,6 +733,26 @@ public final class ApiDtos {
                     scoped.scopedToViewer(),
                     scoped.viewerLinked());
         }
+
+        /**
+         * The admin Attendance page's own shape: every department's mail as
+         * sent, never narrowed per caller (that page is already floored at
+         * {@code admin} in {@code SecurityConfig}, the same rank {@link
+         * HrmsNotificationService#reportFor} itself stops scoping at) — so
+         * {@code scopedToViewer}/{@code viewerLinked} carry the same constant
+         * values an admin's own {@code ScopedReport} would.
+         */
+        public static HrmsMailContentResponse of(HrmsMailContent report) {
+            return new HrmsMailContentResponse(
+                    report.subject(),
+                    report.reportDate(),
+                    report.department(),
+                    report.rows().stream().map(HrmsAttendanceRow::of).toList(),
+                    report.details().stream().map(HrmsMailDetail::of).toList(),
+                    report.note(),
+                    false,
+                    true);
+        }
     }
 
     /**

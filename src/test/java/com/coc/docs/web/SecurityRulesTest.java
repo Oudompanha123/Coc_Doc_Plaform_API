@@ -835,6 +835,49 @@ class SecurityRulesTest {
     }
 
     @Nested
+    @DisplayName("Attendance (admin surface over HRMS reports)")
+    class AttendancePath {
+
+        @Test
+        void reports_for_date_refuses_a_plain_user() throws Exception {
+            // Falls through to the generic /api/v1/admin/** rule (admin
+            // floor), same as Claude Usage — no floor of its own.
+            mvc.perform(get("/api/v1/admin/attendance/reports")
+                            .param("date", "2026-09-07")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void reports_for_date_admits_an_admin() throws Exception {
+            org.mockito.Mockito.when(hrmsNotificationService.reportsForDate(java.time.LocalDate.of(2026, 9, 7)))
+                    .thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/admin/attendance/reports")
+                            .param("date", "2026-09-07")
+                            .with(as(AppRole.ADMIN)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void reports_for_date_admits_a_super_admin_too() throws Exception {
+            org.mockito.Mockito.when(hrmsNotificationService.reportsForDate(java.time.LocalDate.of(2026, 9, 7)))
+                    .thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/admin/attendance/reports")
+                            .param("date", "2026-09-07")
+                            .with(as(AppRole.SUPER_ADMIN)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void reports_for_date_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(get("/api/v1/admin/attendance/reports").param("date", "2026-09-07"))
+                    .andExpect(status().isUnauthorized());
+        }
+    }
+
+    @Nested
     @DisplayName("default deny")
     class DefaultDeny {
 

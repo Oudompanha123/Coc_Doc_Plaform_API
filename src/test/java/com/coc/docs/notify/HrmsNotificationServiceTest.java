@@ -449,4 +449,66 @@ class HrmsNotificationServiceTest {
             verify(mailbox).htmlBodyOf("msg-9");
         }
     }
+
+    /*
+     * ReportsForDate backs the admin Attendance page (unscoped — that route
+     * sits at the admin floor, not the per-caller one ReportScope covers
+     * above), and reuses StoredBody's own stored-first/mailbox-fallback path
+     * per arrival rather than a separate rule.
+     */
+    @Nested
+    @DisplayName("every department's report for a date")
+    class ReportsForDate {
+
+        private static final LocalDate DAY = LocalDate.of(2026, 9, 7);
+
+        private static HrmsNotification notification(long id, String messageId) {
+            return new HrmsNotification(
+                    id, messageId, "Attendance on 07-Sep-2026", DAY, Instant.parse("2026-09-07T05:02:00Z"));
+        }
+
+        @Test
+        @DisplayName("never opens a mailbox while disabled")
+        void disabledFetchesNothing() {
+            when(repository.byReportDate(DAY)).thenReturn(List.of(notification(1, "<a@hrms>")));
+
+            assertThat(serviceWith(properties(false, "someone@gmail.com", "hrms@example.com")).reportsForDate(DAY))
+                    .isEmpty();
+            verifyNoInteractions(mailbox);
+        }
+
+        @Test
+        @DisplayName("fetches one body per arrival recorded for that date")
+        void fetchesEveryArrival() {
+            when(repository.byReportDate(DAY)).thenReturn(List.of(notification(1, "<a@hrms>"), notification(2, "<b@hrms>")));
+            when(mailbox.htmlBodyOf("<a@hrms>")).thenReturn(Optional.of("<html><body>COOCON</body></html>"));
+            when(mailbox.htmlBodyOf("<b@hrms>")).thenReturn(Optional.of("<html><body>Engineering</body></html>"));
+
+            assertThat(serviceWith(configured()).reportsForDate(DAY)).hasSize(2);
+        }
+
+        /**
+         * A body that has gone from the mailbox between polling and viewing is
+         * left out, not treated as a failure of the whole date — the same
+         * "empty means not available now" contract {@link #report} already
+         * has, applied per-item instead of to the one result.
+         */
+        @Test
+        @DisplayName("silently drops an arrival whose body is no longer available")
+        void dropsUnavailableBody() {
+            when(repository.byReportDate(DAY)).thenReturn(List.of(notification(1, "<a@hrms>"), notification(2, "<b@hrms>")));
+            when(mailbox.htmlBodyOf("<a@hrms>")).thenReturn(Optional.of("<html><body>COOCON</body></html>"));
+            when(mailbox.htmlBodyOf("<b@hrms>")).thenReturn(Optional.empty());
+
+            assertThat(serviceWith(configured()).reportsForDate(DAY)).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("no arrivals for the date is an empty list, not an error")
+        void noArrivalsIsEmpty() {
+            when(repository.byReportDate(DAY)).thenReturn(List.of());
+
+            assertThat(serviceWith(configured()).reportsForDate(DAY)).isEmpty();
+        }
+    }
 }

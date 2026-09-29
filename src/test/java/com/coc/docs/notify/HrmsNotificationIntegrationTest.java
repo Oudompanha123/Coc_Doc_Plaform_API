@@ -137,4 +137,28 @@ class HrmsNotificationIntegrationTest extends PostgresTestBase {
         assertThat(repository.recent(10)).singleElement().extracting(HrmsNotification::subject).isEqualTo(subject);
     }
 
+    /**
+     * The admin Attendance page's own lookup — every arrival for one calendar
+     * date, regardless of how many departments HRMS sent that day, and none
+     * from any other date.
+     */
+    @Test
+    @DisplayName("finds every arrival recorded for one date, and none from another")
+    void byReportDateFindsOnlyThatDate() {
+        LocalDate day = LocalDate.of(2026, 9, 7);
+        repository.record(report("<coocon@hrms>", "Attendance on 07-Sep-2026 (COOCON)", day, MONDAY));
+        repository.record(report("<eng@hrms>", "Attendance on 07-Sep-2026 (Engineering)", day, MONDAY));
+        repository.record(report("<tue@hrms>", "Attendance on 08-Sep-2026", LocalDate.of(2026, 9, 8), TUESDAY));
+
+        assertThat(repository.byReportDate(day))
+                .extracting(HrmsNotification::messageId)
+                .containsExactlyInAnyOrder("<coocon@hrms>", "<eng@hrms>");
+    }
+
+    @Test
+    @DisplayName("a date with no arrivals is an empty list")
+    void byReportDateEmptyWhenNoneMatch() {
+        assertThat(repository.byReportDate(LocalDate.of(2026, 9, 7))).isEmpty();
+    }
+
 }
