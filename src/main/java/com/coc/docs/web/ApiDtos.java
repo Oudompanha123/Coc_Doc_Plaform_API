@@ -1172,6 +1172,24 @@ public final class ApiDtos {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // claude-team-usage CLI browser login (V51, ADR-060)
+    // -----------------------------------------------------------------------
+
+    /** {@code codeChallenge} is the CLI's PKCE S256 challenge; {@code device} its machine name, shown on the consent screen. */
+    public record ClaudeUsageCliAuthorizeRequest(@NotBlank String codeChallenge, String device) {}
+
+    /** The raw one-time code, carried by the browser to the CLI's 127.0.0.1 listener. Never a token. */
+    public record ClaudeUsageCliAuthorizeResponse(String code) {}
+
+    public record ClaudeUsageCliTokenRequest(@NotBlank String code, @NotBlank String codeVerifier) {}
+
+    /**
+     * Everything the CLI saves, so nothing is ever typed: the personal token,
+     * whose it is, and where to send usage ({@link PublicIngestUrl}).
+     */
+    public record ClaudeUsageCliTokenResponse(String token, String email, String displayName, String ingestUrl) {}
+
     public record ClaudeUsageIngestTokenResponse(UUID id, String label, Instant createdAt, Instant lastUsedAt) {
         public static ClaudeUsageIngestTokenResponse of(com.coc.docs.claudeusage.ClaudeUsageIngestToken token) {
             return new ClaudeUsageIngestTokenResponse(token.id(), token.label(), token.createdAt(), token.lastUsedAt());

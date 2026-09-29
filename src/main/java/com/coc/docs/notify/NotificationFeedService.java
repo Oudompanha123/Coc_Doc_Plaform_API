@@ -331,6 +331,7 @@ public class NotificationFeedService {
             // read by anyone with the roster, and which token is not their business.
             case AuditAction.CLAUDE_USAGE_INGEST_TOKEN_CREATE -> "Created a usage reporting token";
             case AuditAction.CLAUDE_USAGE_INGEST_TOKEN_REVOKE -> "Revoked a usage reporting token";
+            case AuditAction.CLAUDE_USAGE_CLI_AUTHORIZE -> "Connected the usage CLI on a machine";
             case AuditAction.AX_RENEWAL_PROJECT_CREATE -> "Started an AX Renewal project";
             case AuditAction.AX_RENEWAL_PROJECT_DELETE -> "Deleted an AX Renewal project";
             case AuditAction.AX_RENEWAL_MANIFEST_ATTACH -> "Attached a codebase manifest";

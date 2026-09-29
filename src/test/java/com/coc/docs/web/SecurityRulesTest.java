@@ -153,6 +153,10 @@ class SecurityRulesTest {
     // reach POST /api/ingest and /api/v1/me/usage-tokens/**.
     @MockitoBean com.coc.docs.claudeusage.ClaudeUsageIngestTokenService claudeUsageIngestTokenService;
 
+    // ClaudeUsageCliAuthController is in this slice too (ADR-060) — mocked for
+    // the same reason: which routes the chain admits, not what the handshake does.
+    @MockitoBean com.coc.docs.claudeusage.ClaudeUsageCliAuthService claudeUsageCliAuthService;
+
     @MockitoBean com.coc.docs.axrenewal.AxRenewalService axRenewalService;
 
     @TestConfiguration
@@ -791,6 +795,57 @@ class SecurityRulesTest {
                     .thenReturn(List.of());
 
             mvc.perform(get("/api/v1/me/usage-tokens").with(as(AppRole.ADMIN))).andExpect(status().isOk());
+        }
+
+        @Test
+        void cli_token_exchange_is_reachable_without_a_session() throws Exception {
+            // permitAll() (ADR-060): a CLI has no session. The 400 comes from the
+            // service's own invalid_grant, which only happens if the chain let
+            // the request through to the controller.
+            org.mockito.Mockito.when(claudeUsageCliAuthService.exchange(
+                            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString()))
+                    .thenThrow(ApiException.badRequest("invalid_grant"));
+
+            mvc.perform(post("/api/cli/token")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"code\":\"c\",\"codeVerifier\":\"v\"}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void cli_token_exchange_is_post_only() throws Exception {
+            mvc.perform(get("/api/cli/token")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void cli_authorization_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(post("/api/v1/me/usage-tokens/cli-authorizations")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"codeChallenge\":\"x\",\"device\":\"d\"}"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void cli_authorization_refuses_a_guest() throws Exception {
+            mvc.perform(post("/api/v1/me/usage-tokens/cli-authorizations").with(as(AppRole.GUEST))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"codeChallenge\":\"x\",\"device\":\"d\"}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void cli_authorization_admits_a_plain_user() throws Exception {
+            org.mockito.Mockito.when(claudeUsageCliAuthService.approve(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any()))
+                    .thenReturn("one-time-code");
+
+            mvc.perform(post("/api/v1/me/usage-tokens/cli-authorizations").with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"codeChallenge\":\"x\",\"device\":\"d\"}"))
+                    .andExpect(status().isCreated())
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                            .jsonPath("$.code").value("one-time-code"));
         }
 
         private void stubMint() {
