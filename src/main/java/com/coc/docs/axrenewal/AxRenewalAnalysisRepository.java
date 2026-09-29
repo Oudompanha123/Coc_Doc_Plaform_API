@@ -32,6 +32,7 @@ public class AxRenewalAnalysisRepository {
                 jsonb.read(rs.getString("running_on_today")),
                 jsonb.read(rs.getString("file_layout")),
                 jsonb.read(rs.getString("module_coupling")),
+                jsonb.read(rs.getString("recommended_stack_move")),
                 rs.getBoolean("model_connected"),
                 rs.getObject("analyzed_at", OffsetDateTime.class).toInstant(),
                 rs.getObject("analyzed_by", UUID.class));
@@ -43,6 +44,7 @@ public class AxRenewalAnalysisRepository {
                                findings::text as findings, pages_detected::text as pages_detected,
                                indexed::text as indexed, running_on_today::text as running_on_today,
                                file_layout::text as file_layout, module_coupling::text as module_coupling,
+                               recommended_stack_move::text as recommended_stack_move,
                                model_connected, analyzed_at, analyzed_by
                         from ax_renewal_analysis
                         where project_id = ?
@@ -62,13 +64,16 @@ public class AxRenewalAnalysisRepository {
             JsonNode runningOnToday,
             JsonNode fileLayout,
             JsonNode moduleCoupling,
+            JsonNode recommendedStackMove,
             boolean modelConnected,
             UUID analyzedBy) {
         jdbc.sql("""
                         insert into ax_renewal_analysis
                           (project_id, stack_detected, findings, pages_detected, indexed, running_on_today,
-                           file_layout, module_coupling, model_connected, analyzed_by, analyzed_at)
-                        values (?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?, now())
+                           file_layout, module_coupling, recommended_stack_move, model_connected, analyzed_by,
+                           analyzed_at)
+                        values (?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb,
+                                ?, ?, now())
                         on conflict (project_id) do update set
                           stack_detected = excluded.stack_detected,
                           findings = excluded.findings,
@@ -77,6 +82,7 @@ public class AxRenewalAnalysisRepository {
                           running_on_today = excluded.running_on_today,
                           file_layout = excluded.file_layout,
                           module_coupling = excluded.module_coupling,
+                          recommended_stack_move = excluded.recommended_stack_move,
                           model_connected = excluded.model_connected,
                           analyzed_by = excluded.analyzed_by,
                           analyzed_at = now()
@@ -90,6 +96,7 @@ public class AxRenewalAnalysisRepository {
                         jsonb.write(runningOnToday),
                         jsonb.write(fileLayout),
                         jsonb.write(moduleCoupling),
+                        jsonb.write(recommendedStackMove),
                         modelConnected,
                         analyzedBy)
                 .update();

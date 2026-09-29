@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
@@ -69,6 +70,11 @@ import org.springframework.stereotype.Component;
  *       real process on somebody's laptop; a panel that can start an
  *       unbounded number of them is a way to wedge the machine, not a
  *       feature.
+ *   <li>{@code --add-dir} names a disposable, filtered copy of {@code
+ *       sourcePath} ({@link LocalClaudeAnalyzer#stageFilteredSource}), not
+ *       the folder itself — {@code Glob}/{@code Grep} above would otherwise
+ *       be free to walk whatever {@code node_modules}/{@code .git}/build
+ *       output the real checkout happens to carry.
  * </ul>
  *
  * <p>// req: ADR-043, ADR-046, ADR-055
@@ -150,6 +156,20 @@ public class LocalClaudeChat {
 
         boolean readSource = sourcePath != null && !sourcePath.isBlank() && Files.isDirectory(Path.of(sourcePath));
 
+        // A disposable, filtered copy, same as LocalClaudeAnalyzer's own
+        // analysis pass -- --allowedTools below grants Glob/Grep over
+        // whatever --add-dir names, and a raw node_modules (or .git, dist,
+        // ...) under those tools is exactly the runaway read this avoids.
+        Path staging = null;
+        if (readSource) {
+            Optional<Path> staged = LocalClaudeAnalyzer.stageFilteredSource(Path.of(sourcePath));
+            if (staged.isPresent()) {
+                staging = staged.get();
+            } else {
+                readSource = false;
+            }
+        }
+
         List<String> command = new ArrayList<>(List.of(
                 properties.claudeCliPath(),
                 "--print",
@@ -167,7 +187,7 @@ public class LocalClaudeChat {
                 "Grep"));
         if (readSource) {
             command.add("--add-dir");
-            command.add(sourcePath);
+            command.add(staging.toString());
         }
 
         // tryAcquire, not acquire: queueing HTTP requests behind a two-minute
@@ -178,7 +198,7 @@ public class LocalClaudeChat {
         }
         try {
             return new Reply(
-                    run(command, prompt(project, history, message, readSource), readSource, sourcePath), readSource);
+                    run(command, prompt(project, history, message, readSource), readSource, staging), readSource);
         } catch (IOException e) {
             log.warn("could not start {}: {}", properties.claudeCliPath(), e.getMessage());
             throw ApiException.conflict("could not start Claude Code on this machine — see the backend log");
@@ -187,17 +207,20 @@ public class LocalClaudeChat {
             throw ApiException.conflict("the assistant was interrupted before it answered");
         } finally {
             slots.release();
+            if (staging != null) {
+                AxRenewalImplementationRunner.deleteQuietly(staging);
+            }
         }
     }
 
-    private String run(List<String> command, String prompt, boolean readSource, String sourcePath)
+    private String run(List<String> command, String prompt, boolean readSource, Path staging)
             throws IOException, InterruptedException {
         ProcessBuilder builder = new ProcessBuilder(command);
-        // Run where the source is, when there is source: otherwise the
-        // process inherits the backend's own working directory, and "read the
-        // project" would quietly mean this repository.
+        // Run where the (filtered, staged) source is, when there is source:
+        // otherwise the process inherits the backend's own working
+        // directory, and "read the project" would quietly mean this repository.
         if (readSource) {
-            builder.directory(Path.of(sourcePath).toFile());
+            builder.directory(staging.toFile());
         }
         // Kept separate for the same reason the analyzer keeps it separate —
         // merged into stdout, a CLI warning would corrupt the JSON envelope.

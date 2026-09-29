@@ -343,6 +343,7 @@ public class AxRenewalService {
                 json.createArrayNode(),
                 json.createArrayNode(),
                 json.createObjectNode(),
+                json.createArrayNode(),
                 false,
                 actor.id());
         if (AxRenewalProject.STATUS_DRAFT.equals(project.status())) {
@@ -379,6 +380,7 @@ public class AxRenewalService {
                 result.runningOnToday(),
                 result.fileLayout(),
                 result.moduleCoupling(),
+                result.recommendedStackMove(),
                 true,
                 actor.id());
         if (AxRenewalProject.STATUS_DRAFT.equals(project.status())) {

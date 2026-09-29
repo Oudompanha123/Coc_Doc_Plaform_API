@@ -241,7 +241,14 @@ public class AxRenewalCodeGenerator {
     // Filesystem helpers
     // -------------------------------------------------------------------
 
-    /** Copies {@code source} to {@code target} (which must not exist yet), skipping the same dependency/build directories the browser's own attach scan already does. */
+    /**
+     * Copies {@code source} to {@code target} (which must not exist yet),
+     * skipping the same dependency/build directories the browser's own
+     * attach scan already does. Package-private, not private: {@link
+     * LocalClaudeAnalyzer#stageFilteredSource} reuses this exact method for
+     * its own staged copy, so Generate and Analyse can never disagree about
+     * what "the project" excludes.
+     */
     static void copyTree(Path source, Path target) throws IOException {
         Files.createDirectories(target);
         Files.walkFileTree(source, new SimpleFileVisitor<>() {

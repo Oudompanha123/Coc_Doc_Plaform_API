@@ -46,12 +46,28 @@ import org.springframework.stereotype.Component;
  *   <li><b>Manifest only</b> (no {@code sourcePath}): the model reasons about
  *       the stack, the dependencies and their risks. Real reading of real
  *       content, but it has not seen a line of the code.
- *   <li><b>With {@code sourcePath}</b>: {@code --add-dir} points it at the
- *       folder, and it reads the source the way it would in a terminal.
+ *   <li><b>With {@code sourcePath}</b>: {@code --add-dir} points it at a
+ *       disposable, filtered copy of the folder (see {@link
+ *       #stageFilteredSource}), and it reads the source the way it would in
+ *       a terminal.
  * </ul>
  *
  * <p>The distinction is reported back, not hidden, so nothing downstream can
  * claim the source was read when it was not.
+ *
+ * <h2>Why a filtered copy, not the folder itself</h2>
+ *
+ * <p>{@code --add-dir} would just as happily point at {@code sourcePath}
+ * directly, and analysis never writes to it either way. But a real checkout
+ * commonly carries a {@code node_modules} (or {@code .git}, {@code dist},
+ * {@code vendor}, ...) many times the size of the actual source — handing the
+ * model raw filesystem access to all of it invites exactly the slow,
+ * expensive read this class exists to keep bounded. {@link
+ * AxRenewalCodeGenerator#copyTree} already solves this for Generate by
+ * staging a filtered copy first; {@link #stageFilteredSource} reuses that
+ * same method and exclusion list here, so the two never disagree about what
+ * "the project" excludes. The copy is deleted the moment this call is done —
+ * unlike Generate's staging copy, nothing downstream ever needs to reread it.
  *
  * <h2>Safety</h2>
  *
@@ -114,6 +130,17 @@ public class LocalClaudeAnalyzer {
      *     real timed run) and "Deployment" (needs a person describing how
      *     they actually ship) are not things reading source can ever answer,
      *     so nothing here attempts either.
+     * @param recommendedStackMove exactly one entry per {@code
+     *     runningOnToday} layer, every time — empty only when {@code
+     *     runningOnToday} itself is (ADR-059, revising ADR-043's "do not
+     *     recommend a target stack" rule). {@code recommendedTarget} is a
+     *     real, specific successor when the model is confident, or {@code
+     *     null} when it is not — a null is a complete, honest answer for
+     *     that layer, never treated as missing data. Backs Plan → Stack
+     *     move's "AI recommends" hint: shown alongside the target field,
+     *     never written into it on its own — a person reviews it and can
+     *     accept, change to one of {@code alternativeTargets}, or ignore it
+     *     entirely and type something else.
      */
     public record Result(
             JsonNode stackDetected,
@@ -123,6 +150,7 @@ public class LocalClaudeAnalyzer {
             JsonNode runningOnToday,
             JsonNode fileLayout,
             JsonNode moduleCoupling,
+            JsonNode recommendedStackMove,
             boolean readSource) {}
 
     /**
@@ -168,10 +196,20 @@ public class LocalClaudeAnalyzer {
                     sourcePath);
         }
 
+        Path staging = null;
+        if (readSource) {
+            Optional<Path> staged = stageFilteredSource(Path.of(sourcePath));
+            if (staged.isPresent()) {
+                staging = staged.get();
+            } else {
+                readSource = false;
+            }
+        }
+
         List<String> command = new ArrayList<>(List.of(properties.claudeCliPath(), "--print", "--output-format", "json"));
         if (readSource) {
             command.add("--add-dir");
-            command.add(sourcePath);
+            command.add(staging.toString());
         }
 
         try {
@@ -181,6 +219,51 @@ public class LocalClaudeAnalyzer {
             return Optional.empty();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            return Optional.empty();
+        } finally {
+            if (staging != null) {
+                AxRenewalImplementationRunner.deleteQuietly(staging);
+            }
+        }
+    }
+
+    /**
+     * Stages a disposable, filtered copy of {@code source} — the same
+     * dependency/build exclusion {@link AxRenewalCodeGenerator#copyTree}
+     * already applies for Generate — for {@code --add-dir} to point at
+     * instead of the real folder. Also reused by {@link
+     * LocalClaudeChat#reply}, which grants the model {@code Glob}/{@code
+     * Grep} over whatever {@code --add-dir} names — a raw {@code
+     * node_modules} under those tools is an even more direct way to wedge a
+     * chat request than analysis's single read-and-summarise pass. Static
+     * and package-private so the exclusion behavior is directly testable
+     * without a real CLI (same reasoning as {@link
+     * AxRenewalCodeGenerator#copyTree} itself).
+     *
+     * @return empty on any I/O failure (disk full, permissions, ...), in
+     *     which case the caller degrades to manifest-only rather than
+     *     failing the request — analysis staying a convenience on top of a
+     *     plan somebody writes by hand, same as every other failure mode
+     *     this class handles.
+     */
+    static Optional<Path> stageFilteredSource(Path source) {
+        Path staging;
+        try {
+            staging = Files.createTempDirectory("ax-renewal-analyse-");
+        } catch (IOException e) {
+            log.warn(
+                    "could not create a staging directory for analysis ({}); analysing the stored manifest only",
+                    e.getMessage());
+            return Optional.empty();
+        }
+        try {
+            AxRenewalCodeGenerator.copyTree(source, staging);
+            return Optional.of(staging);
+        } catch (IOException e) {
+            log.warn(
+                    "could not stage a filtered copy of {} for analysis ({}); analysing the stored manifest only",
+                    source, e.getMessage());
+            AxRenewalImplementationRunner.deleteQuietly(staging);
             return Optional.empty();
         }
     }
@@ -237,6 +320,7 @@ public class LocalClaudeAnalyzer {
                     parsed.path("runningOnToday"),
                     normalizeFileLayout(parsed.path("fileLayout")),
                     normalizeModuleCoupling(parsed.path("moduleCoupling")),
+                    normalizeRecommendedStackMove(parsed.path("recommendedStackMove")),
                     readSource));
         } catch (IOException e) {
             log.warn("local Claude analysis returned output that is not the JSON it was asked for: {}", e.getMessage());
@@ -261,6 +345,51 @@ public class LocalClaudeAnalyzer {
         result.set("hubs", hubs.isArray() ? hubs : json.createArrayNode());
         result.set("cycles", cycles.isArray() ? cycles : json.createArrayNode());
         return result;
+    }
+
+    /**
+     * Defends the "AI recommends" hint the same way {@link
+     * #normalizeModuleCoupling} defends the coupling graph. An entry is
+     * dropped entirely only when it lacks {@code layerKey} — with nothing to
+     * match it back to a {@code runningOnToday} row, it cannot be shown
+     * against anything. {@code recommendedTarget} is deliberately allowed to
+     * come out {@code null}: that is the honest "not confident enough to
+     * name a successor" answer this prompt explicitly asks for, one entry
+     * per layer, every time — not a malformed entry to discard. {@code
+     * alternativeTargets} defaults to {@code []} and {@code why} to {@code
+     * ""} when the model omitted either.
+     *
+     * <p>Reads every string field through {@link #textOr}, not a bare {@code
+     * asText("")}: Jackson's {@code NullNode.asText()} returns the literal
+     * string {@code "null"}, not an empty string, so a model that (correctly,
+     * per the prompt) writes JSON {@code null} for "not confident" would
+     * otherwise come out the other side as the four-character word "null"
+     * shown as if it were a real recommendation.
+     */
+    private ArrayNode normalizeRecommendedStackMove(JsonNode rawEntries) {
+        ArrayNode normalized = json.createArrayNode();
+        if (!rawEntries.isArray()) {
+            return normalized;
+        }
+        for (JsonNode entry : rawEntries) {
+            String layerKey = textOr(entry.path("layerKey"), "");
+            if (layerKey.isBlank()) {
+                continue;
+            }
+            ObjectNode filled = json.createObjectNode();
+            filled.put("layerKey", layerKey);
+            String recommendedTarget = textOr(entry.path("recommendedTarget"), "");
+            if (recommendedTarget.isBlank()) {
+                filled.putNull("recommendedTarget");
+            } else {
+                filled.put("recommendedTarget", recommendedTarget);
+            }
+            JsonNode alternativeTargets = entry.path("alternativeTargets");
+            filled.set("alternativeTargets", alternativeTargets.isArray() ? alternativeTargets : json.createArrayNode());
+            filled.put("why", textOr(entry.path("why"), ""));
+            normalized.add(filled);
+        }
+        return normalized;
     }
 
     /**
@@ -292,6 +421,21 @@ public class LocalClaudeAnalyzer {
             normalized.add(filled);
         }
         return normalized;
+    }
+
+    /**
+     * A JSON string field, or {@code fallback} for anything that is not
+     * actually a JSON string — missing, {@code null}, a number, an object.
+     * Deliberately not a bare {@code node.asText(fallback)}: {@link
+     * JsonNode#asText()}'s own fallback only applies when the node is
+     * missing, and {@code NullNode.asText()} returns the literal string
+     * {@code "null"} rather than an empty string, which would otherwise let
+     * an explicit JSON {@code null} — the exact, honest "not confident"
+     * answer {@link #normalizeRecommendedStackMove} asks the model for —
+     * come out the other side reading as the word "null".
+     */
+    private static String textOr(JsonNode node, String fallback) {
+        return node.isTextual() ? node.asText() : fallback;
     }
 
     /**
@@ -346,7 +490,8 @@ public class LocalClaudeAnalyzer {
                     "testCoveragePercent": number or null
                   },
                   "runningOnToday": [ { "label": "...", "note": "... or null" } ],
-                  "fileLayout": [ { "dir": "...", "files": ["..."], "riskFiles": ["..."] } ]
+                  "fileLayout": [ { "dir": "...", "files": ["..."], "riskFiles": ["..."] } ],
+                  "recommendedStackMove": [ { "layerKey": "...", "recommendedTarget": "... or null", "alternativeTargets": ["..."], "why": "..." } ]
                 }
 
                 Rules:
@@ -387,15 +532,34 @@ public class LocalClaudeAnalyzer {
                   language, data access, UI, styling, build and test tooling you can actually
                   see, each with a "note" only when there is something concretely worth
                   flagging about it right now (age, lack of maintenance, a known end-of-life
-                  date). null the note otherwise. This describes the present, not a
-                  recommendation — do not suggest a target stack; that is decided elsewhere.
+                  date). null the note otherwise. This describes the present only — put any
+                  successor you'd suggest in "recommendedStackMove" below, never here.
                 - fileLayout: empty array unless the source is available to you. Otherwise,
                   the real top-level directories you actually looked at (a handful is enough —
                   do not enumerate every file in a large project), each with the filenames you
                   saw in it. "riskFiles" lists only filenames from that same "files" list that
                   you actually found something concerning in (a hardcoded credential, for
                   example) — empty array, not null, when nothing stood out.
-                - Do not recommend a target stack; that is a decision a person makes later.
+                - recommendedStackMove: exactly one entry per "runningOnToday" entry, every time —
+                  this array's length must equal "runningOnToday"'s, in the same order. "layerKey"
+                  repeats that entry's own "label" text exactly, so it can be matched back to it.
+                  This is a hint a person reviews and can freely accept, change, or ignore, never a
+                  decision made for them.
+                    - Confident about a real, currently-maintained successor: set
+                      "recommendedTarget" to it (a well-known LTS/stable release over the newest
+                      possible one, unless the project's own evidence points somewhere specific —
+                      never invent a version number or product that does not exist), and explain
+                      why in "why", grounded in what you actually found (the old one's
+                      age/end-of-life/limitation, or a concrete, specific benefit of the new one —
+                      never generic filler that would apply to any project). "alternativeTargets" is
+                      zero or more other reasonable choices, real technologies only, empty array
+                      when you have none worth naming.
+                    - Not confident enough to name a specific successor: set "recommendedTarget" to
+                      JSON null (not a guessed value, not an empty string) and "alternativeTargets"
+                      to an empty array — briefly say in "why" what would be needed to be confident.
+                      This is the honest answer far more often than not, never a failure on your
+                      part; do not stretch to fill "recommendedTarget" rather than say null.
+                  Empty array only when "runningOnToday" itself is empty.
 
                 %s
 
