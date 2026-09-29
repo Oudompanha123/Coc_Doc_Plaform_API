@@ -34,8 +34,10 @@ class ClaudeUsageServiceTest {
 
     private final ClaudeUsageMemberRepository members = mock(ClaudeUsageMemberRepository.class);
     private final ClaudeUsageDailyRepository daily = mock(ClaudeUsageDailyRepository.class);
+    private final ClaudeUsageDailyModelRepository dailyModels = mock(ClaudeUsageDailyModelRepository.class);
     private final AuditRepository audit = mock(AuditRepository.class);
-    private final ClaudeUsageService service = new ClaudeUsageService(members, daily, audit, new ObjectMapper());
+    private final ClaudeUsageService service =
+            new ClaudeUsageService(members, daily, dailyModels, audit, new ObjectMapper());
 
     private static final CurrentUser ACTOR = TestCallers.user(AppRole.ADMIN);
 
@@ -708,6 +710,161 @@ class ClaudeUsageServiceTest {
             assertThat(ClaudeUsageService.effectiveBudgetTokens(700_000L, 7)).isEqualTo(700_000L);
             assertThat(ClaudeUsageService.effectiveBudgetTokens(700_000L, 1)).isEqualTo(100_000L);
             assertThat(ClaudeUsageService.effectiveBudgetTokens(null, 7)).isEqualTo(ClaudeUsageService.DEFAULT_SOFT_BUDGET_TOKENS);
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Per-model usage (ADR-058)
+    // -------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("Per-model usage (ADR-058)")
+    class PerModelUsage {
+
+        @SuppressWarnings("unchecked")
+        private List<ClaudeUsageDailyModel> capturedModelRows() {
+            ArgumentCaptor<List<ClaudeUsageDailyModel>> rows = ArgumentCaptor.forClass(List.class);
+            verify(dailyModels).replaceDay(any(), any(), rows.capture());
+            return rows.getValue();
+        }
+
+        @Test
+        @DisplayName("keeps each model's four categories separate and prices 1-hour cache writes at 2x")
+        void persistsPerModelRows() {
+            ClaudeUsageMember active = member("a@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findByEmail("a@cocdocs.example")).thenReturn(Optional.of(active));
+            LocalDate date = LocalDate.now();
+
+            Map<String, ClaudeUsageModelTokens> byModel = new java.util.LinkedHashMap<>();
+            byModel.put("claude-opus-5-5", new ClaudeUsageModelTokens(1_400, 38_300, 5_500_000, 107_900, 107_900));
+            byModel.put("claude-haiku-4-5-20251001", new ClaudeUsageModelTokens(1_900, 16, 0, 0, 0));
+            // Claude Code's <synthetic> pseudo-model, all zero — never stored.
+            byModel.put("<synthetic>", new ClaudeUsageModelTokens(0, 0, 0, 0, 0));
+
+            service.recordUsage(
+                    "a@cocdocs.example", null, date, 3_300, 38_316, 5_500_000, 107_900, List.of(), byModel);
+
+            List<ClaudeUsageDailyModel> rows = capturedModelRows();
+            assertThat(rows).extracting(ClaudeUsageDailyModel::model)
+                    .containsExactly("claude-opus-5-5", "claude-haiku-4-5-20251001");
+            ClaudeUsageDailyModel opus = rows.get(0);
+            assertThat(opus.inputTokens()).isEqualTo(1_400);
+            assertThat(opus.outputTokens()).isEqualTo(38_300);
+            assertThat(opus.cacheReadTokens()).isEqualTo(5_500_000);
+            assertThat(opus.cacheCreationTokens()).isEqualTo(107_900);
+            assertThat(opus.cacheCreation1hTokens()).isEqualTo(107_900);
+            assertThat(opus.costUsd()).isEqualByComparingTo("2.7348");
+            assertThat(rows.get(1).costUsd()).isEqualByComparingTo("0.00198");
+
+            // The day's own cost is the same pricing, summed then rounded once.
+            ArgumentCaptor<BigDecimal> cost = ArgumentCaptor.forClass(BigDecimal.class);
+            verify(daily).upsert(any(), eq(date), anyLong(), anyLong(), anyLong(), anyLong(), cost.capture(), any());
+            assertThat(cost.getValue()).isEqualByComparingTo("2.7368");
+        }
+
+        @Test
+        @DisplayName("a replay of the same day replaces that day's model rows, never adds a second set")
+        void replayReplacesTheDay() {
+            ClaudeUsageMember active = member("a@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findByEmail("a@cocdocs.example")).thenReturn(Optional.of(active));
+            LocalDate date = LocalDate.now();
+            Map<String, ClaudeUsageModelTokens> byModel =
+                    Map.of("claude-opus-5-5", new ClaudeUsageModelTokens(10, 10, 0, 0));
+
+            service.recordUsage("a@cocdocs.example", null, date, 10, 10, 0, 0, List.of(), byModel);
+            service.recordUsage("a@cocdocs.example", null, date, 10, 10, 0, 0, List.of(), byModel);
+
+            // replaceDay (delete-then-insert for that member+date), twice — never an append.
+            verify(dailyModels, times(2)).replaceDay(eq(active.id()), eq(date), any());
+        }
+
+        @Test
+        @DisplayName("refuses a 1-hour split larger than the cache writes it is part of")
+        void refusesOversizedOneHourSplit() {
+            assertThatThrownBy(() -> service.recordUsage(
+                            "a@cocdocs.example", null, LocalDate.now(), 0, 0, 0, 10, List.of(),
+                            Map.of("claude-opus-5-5", new ClaudeUsageModelTokens(0, 0, 0, 10, 11))))
+                    .isInstanceOf(ApiException.class)
+                    .extracting(e -> ((ApiException) e).status())
+                    .isEqualTo(HttpStatus.BAD_REQUEST);
+        }
+
+        @Test
+        @DisplayName("the breakdown sums per model over the window, totals equal the models, and compares the window before")
+        void breakdownAggregatesByModel() {
+            LocalDate today = LocalDate.of(2026, 9, 28);
+            CurrentUser actor = TestCallers.user(AppRole.USER);
+            ClaudeUsageMember me = member(actor.email(), ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findByEmail(actor.email())).thenReturn(Optional.of(me));
+
+            var opusToday = new ClaudeUsageDailyModel(
+                    me.id(), today, "claude-opus-5-5", 1_000, 20_000, 4_000_000, 80_000, 80_000, new BigDecimal("2.000000"));
+            var opusEarlier = new ClaudeUsageDailyModel(
+                    me.id(), today.minusDays(2), "claude-opus-5-5", 400, 18_300, 1_500_000, 27_900, 27_900,
+                    new BigDecimal("0.730000"));
+            var haiku = new ClaudeUsageDailyModel(
+                    me.id(), today.minusDays(1), "claude-haiku-4-5", 1_900, 16, 0, 0, 0, new BigDecimal("0.001980"));
+            // Eight days back: the previous 7-day window, not this one.
+            var previous = new ClaudeUsageDailyModel(
+                    me.id(), today.minusDays(8), "claude-opus-5-5", 1, 1, 0, 0, 0, new BigDecimal("1.500000"));
+            when(dailyModels.listInRangeForMember(me.id(), today.minusDays(13), today))
+                    .thenReturn(List.of(opusToday, haiku, opusEarlier, previous));
+            when(daily.listInRangeForMember(eq(me.id()), any(), eq(today))).thenReturn(List.of());
+
+            var usage = service.myDashboard(actor, today, 7).usage();
+
+            assertThat(usage.rangeDays()).isEqualTo(7);
+            assertThat(usage.from()).isEqualTo(today.minusDays(6));
+            assertThat(usage.byModel()).extracting(ClaudeUsageMyDashboard.ModelUsage::model)
+                    .containsExactly("claude-opus-5-5", "claude-haiku-4-5");
+            var opus = usage.byModel().get(0);
+            assertThat(opus.inputTokens()).isEqualTo(1_400);
+            assertThat(opus.outputTokens()).isEqualTo(38_300);
+            assertThat(opus.cacheReadTokens()).isEqualTo(5_500_000);
+            assertThat(opus.cacheCreationTokens()).isEqualTo(107_900);
+            assertThat(opus.costUsd()).isEqualByComparingTo("2.73");
+
+            assertThat(usage.totals().inputTokens()).isEqualTo(3_300);
+            assertThat(usage.totals().cacheReadTokens()).isEqualTo(5_500_000);
+            assertThat(usage.totals().costUsd()).isEqualByComparingTo("2.73198");
+            assertThat(usage.previousCostUsd()).isEqualByComparingTo("1.5");
+            assertThat(usage.recent()).extracting(ClaudeUsageDailyModel::usageDate)
+                    .containsExactly(today, today.minusDays(1), today.minusDays(2));
+        }
+
+        @Test
+        @DisplayName("a day reported before per-model rows existed shows as 'unattributed', so totals still add up")
+        void legacyDayIsUnattributed() {
+            LocalDate today = LocalDate.of(2026, 9, 28);
+            CurrentUser actor = TestCallers.user(AppRole.USER);
+            ClaudeUsageMember me = member(actor.email(), ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findByEmail(actor.email())).thenReturn(Optional.of(me));
+
+            when(dailyModels.listInRangeForMember(eq(me.id()), any(), eq(today))).thenReturn(List.of());
+            ClaudeUsageDaily legacy = new ClaudeUsageDaily(
+                    UUID.randomUUID(), me.id(), today.minusDays(1), 100, 50, 7, 3, new BigDecimal("0.4000"), "x", Instant.now());
+            when(daily.listInRangeForMember(eq(me.id()), any(), eq(today))).thenReturn(List.of(legacy));
+
+            var usage = service.myDashboard(actor, today, 7).usage();
+
+            assertThat(usage.byModel()).singleElement().satisfies(m -> {
+                assertThat(m.model()).isEqualTo(ClaudeUsageService.UNATTRIBUTED_MODEL);
+                assertThat(m.cacheReadTokens()).isEqualTo(7);
+                assertThat(m.cacheCreationTokens()).isEqualTo(3);
+                assertThat(m.costUsd()).isEqualByComparingTo("0.40");
+            });
+            assertThat(usage.totals().costUsd()).isEqualByComparingTo("0.40");
+        }
+
+        @Test
+        @DisplayName("an unsupported window falls back to 7 days rather than failing")
+        void unsupportedWindowFallsBack() {
+            LocalDate today = LocalDate.of(2026, 9, 28);
+            CurrentUser actor = TestCallers.user(AppRole.USER);
+            when(members.findByEmail(actor.email())).thenReturn(Optional.empty());
+
+            assertThat(service.myDashboard(actor, today, 999).usage().rangeDays()).isEqualTo(7);
+            assertThat(service.myDashboard(actor, today, 30).usage().rangeDays()).isEqualTo(30);
         }
     }
 }

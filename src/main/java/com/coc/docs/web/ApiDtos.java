@@ -981,7 +981,8 @@ public final class ApiDtos {
             List<ClaudeUsageMyDashboardPointResponse> daily,
             Instant lastUpdated,
             /** Null until the caller is on the roster (i.e. has never reported). */
-            ClaudeUsageMemberResponse todayUsage) {
+            ClaudeUsageMemberResponse todayUsage,
+            ClaudeUsageMyBreakdownResponse usage) {
 
         public static ClaudeUsageMyDashboardResponse of(ClaudeUsageMyDashboard dashboard) {
             return new ClaudeUsageMyDashboardResponse(
@@ -993,7 +994,81 @@ public final class ApiDtos {
                     dashboard.todayTotalTokens(),
                     dashboard.daily().stream().map(ClaudeUsageMyDashboardPointResponse::of).toList(),
                     dashboard.lastUpdated(),
-                    dashboard.todayUsage() == null ? null : ClaudeUsageMemberResponse.of(dashboard.todayUsage()));
+                    dashboard.todayUsage() == null ? null : ClaudeUsageMemberResponse.of(dashboard.todayUsage()),
+                    ClaudeUsageMyBreakdownResponse.of(dashboard.usage()));
+        }
+    }
+
+    /**
+     * One model's usage over the personal screen's window (ADR-058) — the
+     * same four categories Claude Code's own usage page shows, never folded
+     * into input/output. No 1-hour split on the wire: it only ever affects
+     * {@code costUsd}, which is already priced from it.
+     */
+    public record ClaudeUsageModelUsageResponse(
+            String model,
+            long inputTokens,
+            long outputTokens,
+            long cacheReadTokens,
+            long cacheWriteTokens,
+            BigDecimal costUsd) {
+
+        public static ClaudeUsageModelUsageResponse of(ClaudeUsageMyDashboard.ModelUsage usage) {
+            return new ClaudeUsageModelUsageResponse(
+                    usage.model(), usage.inputTokens(), usage.outputTokens(), usage.cacheReadTokens(),
+                    usage.cacheCreationTokens(), usage.costUsd());
+        }
+    }
+
+    /** One (day, model) entry of the personal screen's "Recent Usage" table (ADR-058). */
+    public record ClaudeUsageDayModelResponse(
+            LocalDate date,
+            String model,
+            long inputTokens,
+            long outputTokens,
+            long cacheReadTokens,
+            long cacheWriteTokens,
+            BigDecimal costUsd) {
+
+        public static ClaudeUsageDayModelResponse of(com.coc.docs.claudeusage.ClaudeUsageDailyModel row) {
+            return new ClaudeUsageDayModelResponse(
+                    row.usageDate(), row.model(), row.inputTokens(), row.outputTokens(), row.cacheReadTokens(),
+                    row.cacheCreationTokens(), row.costUsd());
+        }
+    }
+
+    /**
+     * "Usage by Model" over the last {@code rangeDays} days (ADR-058).
+     * {@code costUsd} is the sum of {@code byModel}'s own costs, so the
+     * headline figure can never disagree with the cards under it.
+     */
+    public record ClaudeUsageMyBreakdownResponse(
+            int rangeDays,
+            LocalDate from,
+            LocalDate to,
+            long inputTokens,
+            long outputTokens,
+            long cacheReadTokens,
+            long cacheWriteTokens,
+            BigDecimal costUsd,
+            BigDecimal previousCostUsd,
+            List<ClaudeUsageModelUsageResponse> byModel,
+            List<ClaudeUsageDayModelResponse> recent) {
+
+        public static ClaudeUsageMyBreakdownResponse of(ClaudeUsageMyDashboard.ModelBreakdown breakdown) {
+            var totals = breakdown.totals();
+            return new ClaudeUsageMyBreakdownResponse(
+                    breakdown.rangeDays(),
+                    breakdown.from(),
+                    breakdown.to(),
+                    totals.inputTokens(),
+                    totals.outputTokens(),
+                    totals.cacheReadTokens(),
+                    totals.cacheCreationTokens(),
+                    totals.costUsd(),
+                    breakdown.previousCostUsd(),
+                    breakdown.byModel().stream().map(ClaudeUsageModelUsageResponse::of).toList(),
+                    breakdown.recent().stream().map(ClaudeUsageDayModelResponse::of).toList());
         }
     }
 
@@ -1038,8 +1113,14 @@ public final class ApiDtos {
     /**
      * One model's token counts within a day's ingest — the breakdown real
      * per-model pricing needs (ADR-036, revision of ADR-035 decision 4).
+     *
+     * <p>{@code cacheCreation1h} is the part of {@code cacheCreation} written
+     * with the 1-hour TTL (ADR-058). Absent from a reporter that predates it,
+     * which Jackson reads as 0 — every write then prices as 5-minute, exactly
+     * as before.
      */
-    public record ClaudeUsageModelTokensRequest(long input, long output, long cacheRead, long cacheCreation) {}
+    public record ClaudeUsageModelTokensRequest(
+            long input, long output, long cacheRead, long cacheCreation, long cacheCreation1h) {}
 
     /**
      * The body {@code POST /api/ingest} accepts. No {@code cost_usd} — always
@@ -1076,11 +1157,18 @@ public final class ApiDtos {
      * The one response that ever carries the raw bearer value — every other
      * read of this account's tokens ({@link ClaudeUsageIngestTokenResponse})
      * carries only the label and timestamps, never anything derived from it.
+     *
+     * <p>{@code ingestUrl} is the absolute {@code /api/ingest} URL of this
+     * deployment ({@link PublicIngestUrl}) — what the personalized
+     * {@code push-usage.mjs} embeds as {@code INGEST_URL}, so the frontend
+     * never has to guess it from a build-time value.
      */
-    public record ClaudeUsageIngestTokenCreateResponse(UUID id, String label, String token, Instant createdAt) {
-        public static ClaudeUsageIngestTokenCreateResponse of(com.coc.docs.claudeusage.ClaudeUsageIngestTokenService.MintedToken minted) {
+    public record ClaudeUsageIngestTokenCreateResponse(
+            UUID id, String label, String token, Instant createdAt, String ingestUrl) {
+        public static ClaudeUsageIngestTokenCreateResponse of(
+                com.coc.docs.claudeusage.ClaudeUsageIngestTokenService.MintedToken minted, String ingestUrl) {
             return new ClaudeUsageIngestTokenCreateResponse(
-                    minted.token().id(), minted.token().label(), minted.rawValue(), minted.token().createdAt());
+                    minted.token().id(), minted.token().label(), minted.rawValue(), minted.token().createdAt(), ingestUrl);
         }
     }
 

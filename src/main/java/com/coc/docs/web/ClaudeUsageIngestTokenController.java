@@ -2,6 +2,7 @@ package com.coc.docs.web;
 
 import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.claudeusage.ClaudeUsageIngestTokenService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -37,9 +38,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class ClaudeUsageIngestTokenController {
 
     private final ClaudeUsageIngestTokenService tokens;
+    private final PublicIngestUrl ingestUrl;
 
-    public ClaudeUsageIngestTokenController(ClaudeUsageIngestTokenService tokens) {
+    public ClaudeUsageIngestTokenController(ClaudeUsageIngestTokenService tokens, PublicIngestUrl ingestUrl) {
         this.tokens = tokens;
+        this.ingestUrl = ingestUrl;
     }
 
     @GetMapping
@@ -47,13 +50,19 @@ public class ClaudeUsageIngestTokenController {
         return tokens.list(caller).stream().map(ApiDtos.ClaudeUsageIngestTokenResponse::of).toList();
     }
 
-    /** The label names the machine ("MacBook Pro") — shown back so the owner knows which token to revoke later. */
+    /**
+     * The label names the machine ("MacBook Pro") — shown back so the owner knows which token to revoke later.
+     * The response also carries this deployment's public ingest URL, the one value the personalized script
+     * needs besides the token that only the server can state reliably ({@link PublicIngestUrl}).
+     */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     ApiDtos.ClaudeUsageIngestTokenCreateResponse create(
             @Valid @RequestBody ApiDtos.ClaudeUsageIngestTokenCreateRequest request,
-            @AuthenticationPrincipal CurrentUser caller) {
-        return ApiDtos.ClaudeUsageIngestTokenCreateResponse.of(tokens.create(caller, request.label()));
+            @AuthenticationPrincipal CurrentUser caller,
+            HttpServletRequest httpRequest) {
+        return ApiDtos.ClaudeUsageIngestTokenCreateResponse.of(
+                tokens.create(caller, request.label()), ingestUrl.forRequest(httpRequest));
     }
 
     @DeleteMapping("/{id}")

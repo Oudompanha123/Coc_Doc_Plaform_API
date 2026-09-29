@@ -63,7 +63,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
  * TM-018, TM-019
  */
 @WebMvcTest
-@Import({SecurityConfig.class, ProblemResponses.class, SecurityRulesTest.Beans.class})
+@Import({SecurityConfig.class, ProblemResponses.class, SecurityRulesTest.Beans.class, PublicIngestUrl.class})
 class SecurityRulesTest {
 
     @Autowired MockMvc mvc;
@@ -737,9 +737,12 @@ class SecurityRulesTest {
         void my_dashboard_admits_a_plain_user() throws Exception {
             // The whole point of ADR-052: unlike the team-wide roster above
             // (ADMIN floor), a plain user reads their own usage here.
-            org.mockito.Mockito.when(claudeUsageService.myDashboard(org.mockito.ArgumentMatchers.any()))
+            org.mockito.Mockito.when(claudeUsageService.myDashboard(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
                     .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageMyDashboard(
-                            "user@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null, null));
+                            "user@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null, null,
+                            com.coc.docs.claudeusage.ClaudeUsageMyDashboard.ModelBreakdown.empty(
+                                    7, java.time.LocalDate.now(), java.time.LocalDate.now())));
 
             mvc.perform(get("/api/v1/claude-usage/me").with(as(AppRole.USER)))
                     .andExpect(status().isOk());
@@ -747,9 +750,12 @@ class SecurityRulesTest {
 
         @Test
         void my_dashboard_admits_an_admin_too() throws Exception {
-            org.mockito.Mockito.when(claudeUsageService.myDashboard(org.mockito.ArgumentMatchers.any()))
+            org.mockito.Mockito.when(claudeUsageService.myDashboard(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
                     .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageMyDashboard(
-                            "admin@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null, null));
+                            "admin@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null, null,
+                            com.coc.docs.claudeusage.ClaudeUsageMyDashboard.ModelBreakdown.empty(
+                                    7, java.time.LocalDate.now(), java.time.LocalDate.now())));
 
             mvc.perform(get("/api/v1/claude-usage/me").with(as(AppRole.ADMIN)))
                     .andExpect(status().isOk());
@@ -785,6 +791,46 @@ class SecurityRulesTest {
                     .thenReturn(List.of());
 
             mvc.perform(get("/api/v1/me/usage-tokens").with(as(AppRole.ADMIN))).andExpect(status().isOk());
+        }
+
+        private void stubMint() {
+            java.util.UUID id = java.util.UUID.randomUUID();
+            org.mockito.Mockito.when(claudeUsageIngestTokenService.create(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString()))
+                    .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageIngestTokenService.MintedToken(
+                            new com.coc.docs.claudeusage.ClaudeUsageIngestToken(
+                                    id, java.util.UUID.randomUUID(), "hash", "Laptop",
+                                    java.time.Instant.now(), null, null),
+                            "coc_fixture")); // gitleaks:allow — fixture, not a credential
+        }
+
+        @Test
+        void minting_a_token_returns_the_local_ingest_url_in_development() throws Exception {
+            // The personalized push-usage.mjs embeds this verbatim (ADR-050).
+            stubMint();
+
+            mvc.perform(post("http://localhost:8080/api/v1/me/usage-tokens").with(as(AppRole.USER))
+                            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                            .content("{\"label\":\"Laptop\"}"))
+                    .andExpect(status().isCreated())
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                            .jsonPath("$.token").value("coc_fixture"))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                            .jsonPath("$.ingestUrl").value("http://localhost:8080/api/ingest"));
+        }
+
+        @Test
+        void minting_a_token_behind_the_tls_proxy_returns_the_public_https_url_not_localhost() throws Exception {
+            stubMint();
+
+            mvc.perform(post("https://docs.example.com/api/v1/me/usage-tokens").with(as(AppRole.USER))
+                            .with(r -> { r.setScheme("http"); r.setServerPort(80); r.setSecure(false); return r; })
+                            .header("X-Forwarded-Proto", "https")
+                            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                            .content("{\"label\":\"Laptop\"}"))
+                    .andExpect(status().isCreated())
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                            .jsonPath("$.ingestUrl").value("https://docs.example.com/api/ingest"));
         }
     }
 
