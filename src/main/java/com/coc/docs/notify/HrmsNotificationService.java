@@ -255,6 +255,50 @@ public class HrmsNotificationService {
     }
 
     /**
+     * Every report recorded for one calendar date — normally one per
+     * department, on the day HRMS sends more than one. Backs the admin
+     * Attendance page's date+department picker, which needs to know what
+     * departments exist for a date before a person can even choose one;
+     * there is no cheaper, metadata-only way to learn a report's department
+     * (see {@link HrmsReportParser#parse} — it is only known once a body is
+     * parsed).
+     *
+     * <p>Unscoped, unlike {@link #reportFor} — this exists only for the
+     * admin Attendance page, already floored at {@code admin} in {@code
+     * SecurityConfig}, so it hands back the mail as sent rather than
+     * narrowing per caller the way a lower-floored route would have to.
+     *
+     * <p>An arrival whose content is unavailable (never stored, and now gone
+     * from the mailbox or unreachable) is silently left out rather than
+     * failing the whole date — the same "empty means not available now"
+     * contract as {@link #report}, just applied per-item instead of to the
+     * one result.
+     */
+    public List<HrmsMailContent> reportsForDate(LocalDate date) {
+        return repository.byReportDate(date).stream().flatMap(n -> contentOf(n).stream()).toList();
+    }
+
+    /**
+     * One notification's content, stored body first (V49, ADR-057) and the
+     * mailbox only as the pre-V49 fallback — the same order {@link #report}
+     * uses, just factored out so {@link #reportsForDate} can call it once per
+     * arrival without duplicating the fallback logic.
+     */
+    private Optional<HrmsMailContent> contentOf(HrmsNotification notification) {
+        Optional<HrmsMailContent> stored =
+                contents.findByNotificationId(notification.id(), notification.subject(), notification.reportDate());
+        if (stored.isPresent()) {
+            return stored;
+        }
+        if (!properties.usable()) {
+            return Optional.empty();
+        }
+        return mailbox
+                .htmlBodyOf(notification.messageId())
+                .map(html -> HrmsReportParser.parse(notification.subject(), notification.reportDate(), html));
+    }
+
+    /**
      * The report as one caller is entitled to see it.
      *
      * <p>An {@code admin} and above gets the mail as it was sent — the whole

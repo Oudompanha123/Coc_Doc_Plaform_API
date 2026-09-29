@@ -61,6 +61,15 @@ public class HrmsNotificationRepository {
             where id = ?
             """;
 
+    /** Every arrival parsed as this calendar date's report — normally one per department, on the day HRMS sends more than one. */
+    private static final String BY_REPORT_DATE_SQL =
+            """
+            select id, message_id, subject, report_date, received_at
+            from hrms_notification
+            where report_date = ?
+            order by received_at desc, id desc
+            """;
+
     /**
      * The newest arrival's send time — where the next poll starts from.
      *
@@ -130,6 +139,11 @@ public class HrmsNotificationRepository {
      */
     public Optional<HrmsNotification> findById(long id) {
         return jdbc.sql(BY_ID_SQL).param(id).query(HrmsNotificationRepository::map).optional();
+    }
+
+    /** Every arrival recorded for one calendar date, newest first. */
+    public List<HrmsNotification> byReportDate(LocalDate date) {
+        return jdbc.sql(BY_REPORT_DATE_SQL).param(date).query(HrmsNotificationRepository::map).list();
     }
 
     /** When the newest recorded arrival was sent, if there is one. */
