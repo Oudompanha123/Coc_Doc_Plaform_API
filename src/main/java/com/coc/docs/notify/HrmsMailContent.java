@@ -65,20 +65,108 @@ public record HrmsMailContent(
      * person it concerns is the one reading it, and stripping that would be
      * scoping by accident rather than on purpose.
      */
-    public HrmsMailContent onlyRowsNamed(String hrmsName) {
-        String wanted = normalizeName(hrmsName);
-        if (wanted.isEmpty()) {
-            return new HrmsMailContent(subject, reportDate, department, List.of(), details, note);
-        }
+    /**
+     * The same report carrying only the rows that belong to {@code email} —
+     * the caller's own attendance and nobody else's.
+     *
+     * <p><b>Matched from the address, not from a name somebody typed.</b> The
+     * mail identifies a person only by a name cell, and this team's addresses
+     * encode that same name: {@code samoeunveth99@gmail.com} against a row
+     * reading {@code Veth Sam Oeun}. So the local part is reduced to its
+     * letters ({@code samoeunveth}) and compared against the row's name tokens
+     * ({@code veth}, {@code sam}, {@code oeun}) in every order they could have
+     * been written. A match means the address is exactly those tokens and
+     * nothing else.
+     *
+     * <p><b>Every token must be accounted for.</b> {@code oudompanha} does not
+     * match {@code Chamreun Oudompanha} — one of two tokens is not that person
+     * identified, it is a coincidence waiting to hit somebody who shares a
+     * family name. A partial match shows one employee's clock-in times to
+     * another (NFR-SEC-PII), and no rows is a far better failure than the
+     * wrong rows.
+     *
+     * <p>{@code explicitName} — {@code account.hrms_name}, V47 — still wins
+     * when set. It is the escape hatch for an address the mail's names cannot
+     * be derived from, which is most addresses that are not built this way.
+     *
+     * <p>{@code details} and {@code note} are kept, not dropped: a leave or
+     * overtime mail has no rows at all and carries its content there, and the
+     * person reading it is the one it concerns.
+     */
+    public HrmsMailContent onlyRowsFor(String explicitName, String email) {
+        String wanted = normalizeName(explicitName);
+        String emailKey = emailKey(email);
+
         List<Row> mine = rows.stream()
-                .filter(row -> normalizeName(row.name()).equals(wanted))
+                .filter(row -> wanted.isEmpty()
+                        ? matchesEmail(row.name(), emailKey)
+                        : normalizeName(row.name()).equals(wanted))
                 .toList();
         return new HrmsMailContent(subject, reportDate, department, mine, details, note);
     }
 
+    /**
+     * Whether {@code name}'s tokens, in some order, spell {@code emailKey}
+     * exactly.
+     *
+     * <p>Permutations rather than a sorted-letter comparison: sorting the
+     * letters would make any anagram match, and "Sen Navy" and "Navy Sen" are
+     * the same person while two unrelated names sharing a letter multiset are
+     * not. A name of more than five parts is refused rather than permuted —
+     * 120 orderings is already generous, and the sixth would be the start of a
+     * factorial nobody asked for.
+     */
+    private static boolean matchesEmail(String name, String emailKey) {
+        if (emailKey.isEmpty()) {
+            return false;
+        }
+        List<String> tokens = List.of(normalizeName(name).split(" "));
+        if (tokens.isEmpty() || tokens.size() > 5) {
+            return false;
+        }
+        int total = tokens.stream().mapToInt(String::length).sum();
+        if (total != emailKey.length()) {
+            return false;
+        }
+        return spellsKey(tokens, "", emailKey);
+    }
+
+    /** Depth-first over the orderings, pruning any that already disagrees. */
+    private static boolean spellsKey(List<String> remaining, String built, String key) {
+        if (remaining.isEmpty()) {
+            return built.equals(key);
+        }
+        if (!key.startsWith(built)) {
+            return false;
+        }
+        for (int i = 0; i < remaining.size(); i++) {
+            List<String> rest = new java.util.ArrayList<>(remaining);
+            String token = rest.remove(i);
+            if (spellsKey(rest, built + token, key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The address reduced to comparable letters: local part only, lower-cased,
+     * with digits and punctuation dropped — {@code samoeunveth99@gmail.com}
+     * becomes {@code samoeunveth}. Digits are noise a person added to get a
+     * free address, never part of their name.
+     */
+    private static String emailKey(String email) {
+        if (email == null) {
+            return "";
+        }
+        int at = email.indexOf('@');
+        String local = at < 0 ? email : email.substring(0, at);
+        return local.replaceAll("[^A-Za-z]", "").toLowerCase(java.util.Locale.ROOT);
+    }
+
     /** Lower-cased, trimmed, internal runs of whitespace collapsed to one space. */
     private static String normalizeName(String raw) {
-        return raw == null ? "" : raw.trim().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT);
+        return raw == null ? "" : raw.trim().replaceAll("\s+", " ").toLowerCase(java.util.Locale.ROOT);
     }
 
     /**

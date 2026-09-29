@@ -311,7 +311,7 @@ class HrmsNotificationServiceTest {
         @DisplayName("a plain user sees only the row their account is linked to")
         void plainUserSeesOnlyTheirOwnRow() {
             var user = caller(com.coc.docs.account.AppRole.USER);
-            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.of("Ken Vantha"));
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.of("Ken Vantha"));  // explicit override still wins
 
             var content = armed().reportFor(9L, user).orElseThrow().content();
 

@@ -334,11 +334,20 @@ public class HrmsNotificationService {
         if (caller != null && caller.isAtLeast(AppRole.ADMIN)) {
             return full.map(content -> new ScopedReport(content, false, true));
         }
-        String mine = caller == null
+        String explicitName = caller == null
                 ? null
                 : accounts.hrmsNameOf(caller.id()).orElse(null);
-        boolean linked = mine != null && !mine.isBlank();
-        return full.map(content -> new ScopedReport(content.onlyRowsNamed(mine), true, linked));
+        String email = caller == null ? null : caller.email();
+
+        return full.map(content -> {
+            HrmsMailContent mine = content.onlyRowsFor(explicitName, email);
+            // "Linked" now means the caller could be resolved to a row at all,
+            // by either route. It stopped meaning "an admin typed a name" when
+            // the address became the primary key: an account with no
+            // hrms_name is the normal case, not an unconfigured one.
+            boolean linked = (explicitName != null && !explicitName.isBlank()) || !mine.rows().isEmpty();
+            return new ScopedReport(mine, true, linked);
+        });
     }
 
     /**
