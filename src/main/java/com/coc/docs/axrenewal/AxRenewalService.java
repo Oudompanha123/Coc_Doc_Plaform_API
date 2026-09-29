@@ -60,6 +60,7 @@ public class AxRenewalService {
     private final AxRenewalCodeGenerator generator;
     private final AxRenewalImplementationRunner runner;
     private final AxRenewalLocalRunner localRunner;
+    private final AxRenewalTestRunner testRunner;
 
     public AxRenewalService(
             AxRenewalProjectRepository projects,
@@ -77,7 +78,8 @@ public class AxRenewalService {
             AxRenewalProperties properties,
             AxRenewalCodeGenerator generator,
             AxRenewalImplementationRunner runner,
-            AxRenewalLocalRunner localRunner) {
+            AxRenewalLocalRunner localRunner,
+            AxRenewalTestRunner testRunner) {
         this.projects = projects;
         this.analyses = analyses;
         this.plan = plan;
@@ -94,6 +96,7 @@ public class AxRenewalService {
         this.generator = generator;
         this.runner = runner;
         this.localRunner = localRunner;
+        this.testRunner = testRunner;
     }
 
     // -----------------------------------------------------------------------
@@ -734,9 +737,100 @@ public class AxRenewalService {
             if (resolvedSourcePath == null) {
                 throw ApiException.conflict("give this project's legacy source path before starting implementation");
             }
-            return beginGeneration(projectId, project, destination, actor, confirmedPlan, confirmedPlanHash, resolvedSourcePath);
+            return beginGeneration(
+                    projectId,
+                    project,
+                    destination,
+                    actor,
+                    AxRenewalImplementationRun.RUN_KIND_PLAN,
+                    confirmedPlan,
+                    confirmedPlanHash,
+                    resolvedSourcePath);
         }
         return recordPlaceholderCompletion(projectId, project, destination, actor);
+    }
+
+    /**
+     * Applies (Generate → Review) an AI-suggested fix for the project's
+     * <em>current</em> Run Locally failure (ADR-060 Phase 2) — the natural
+     * next step after {@link #explainRunLocallyFailure} once a suggestion
+     * looks right, but a genuinely separate action: explaining never writes
+     * anything, this generates a real, reviewable candidate fix and still
+     * writes nothing until a person Approves it (unchanged from ADR-044).
+     *
+     * <p>Deliberately bypasses every Plan-section precondition {@link
+     * #startImplementation} enforces — an error fix responds to something
+     * that just happened at Run Locally, not to a re-confirmed Plan, and
+     * requiring one would refuse the one case this exists for. What it does
+     * still require: a real failure to fix right now (the same check {@link
+     * #explainRunLocallyFailure} makes), a local model configured, and no
+     * other implementation run already active for this project.
+     *
+     * <p>The source copied into staging is the <em>destination itself</em>,
+     * not a legacy checkout — this fixes the renewed project's own code, so
+     * that is what {@link AxRenewalCodeGenerator} must see (PM decision,
+     * ADR-060 Phase 2: writes are explicitly allowed here even while Run
+     * Locally is still live against these same files — nothing in this
+     * method or {@link #beginGeneration} touches the live process, and
+     * nothing here stops it either).
+     */
+    @Transactional
+    public AxRenewalImplementationRun startErrorFixImplementation(UUID projectId, CurrentUser actor) {
+        AxRenewalProject project = requireProject(projectId);
+        AxRenewalLocalRunner.Status status = localRunner.status(projectId);
+        if (!hasActionableRunLocallyFailure(status)) {
+            throw ApiException.conflict("there is no failed Run Locally attempt to fix right now");
+        }
+        AxRenewalDestination destination = requireAppliedDestination(projectId);
+        if (!generator.canGenerate()) {
+            throw ApiException.conflict("no local model is configured to generate a fix");
+        }
+        if (implementations.findActive(projectId).isPresent()) {
+            throw ApiException.conflict("implementation is already running for this project");
+        }
+        String errorLog = String.join("\n", status.log());
+        return beginGeneration(
+                projectId,
+                project,
+                destination,
+                actor,
+                AxRenewalImplementationRun.RUN_KIND_ERROR_FIX,
+                errorLog,
+                null,
+                destination.target());
+    }
+
+    /**
+     * Generates a natural-language UI change against the renewed project's
+     * own UI (ADR-060 Phase 2, PM decision: never this admin app's own UI —
+     * that scope question is closed, not merely deferred). Same
+     * preconditions as {@link #startErrorFixImplementation} — an applied
+     * filesystem destination, a local model configured, nothing else already
+     * active — except the trigger is a person's own words instead of a
+     * captured failure.
+     */
+    @Transactional
+    public AxRenewalImplementationRun startUiChangeImplementation(UUID projectId, String description, CurrentUser actor) {
+        AxRenewalProject project = requireProject(projectId);
+        if (description == null || description.isBlank()) {
+            throw ApiException.badRequest("describe the UI change you want");
+        }
+        AxRenewalDestination destination = requireAppliedDestination(projectId);
+        if (!generator.canGenerate()) {
+            throw ApiException.conflict("no local model is configured to generate this change");
+        }
+        if (implementations.findActive(projectId).isPresent()) {
+            throw ApiException.conflict("implementation is already running for this project");
+        }
+        return beginGeneration(
+                projectId,
+                project,
+                destination,
+                actor,
+                AxRenewalImplementationRun.RUN_KIND_UI_CHANGE,
+                description.trim(),
+                null,
+                destination.target());
     }
 
     /**
@@ -809,22 +903,48 @@ public class AxRenewalService {
         }
     }
 
+    /**
+     * Starts a Generate run for any of the three kinds (ADR-060 Phase 2) —
+     * the shared plumbing {@link #startImplementation}, {@link
+     * #startErrorFixImplementation} and {@link #startUiChangeImplementation}
+     * all fund into: insert the row, audit it, and defer the actual model
+     * call to {@code afterCommit} (see the comment further down for why that
+     * deferral is required, not merely tidy).
+     *
+     * @param instruction the confirmed-plan text ({@code RUN_KIND_PLAN}), the
+     *     real captured Run Locally failure log ({@code RUN_KIND_ERROR_FIX}),
+     *     or the person's own UI-change description ({@code
+     *     RUN_KIND_UI_CHANGE}) — stored as-is on the row for {@code
+     *     error_fix}/{@code ui_change} (a plan run rebuilds its own from the
+     *     confirmed Plan tables instead, so it is not stored twice).
+     * @param confirmedPlanHash only meaningful for {@code RUN_KIND_PLAN}
+     *     (ADR-056's Rebuild-replay comparison) — null for the other two
+     *     kinds, which are never replayed.
+     * @param sourcePath the legacy checkout for {@code RUN_KIND_PLAN}; the
+     *     applied destination itself for the other two (they operate on the
+     *     renewed project's own code).
+     */
     private AxRenewalImplementationRun beginGeneration(
             UUID projectId,
             AxRenewalProject project,
             AxRenewalDestination destination,
             CurrentUser actor,
-            String confirmedPlan,
+            String runKind,
+            String instruction,
             String confirmedPlanHash,
             String sourcePath) {
-        ObjectNode beforeReport =
-                json.createObjectNode().put("mode", "generate").put("destination", destination.target());
+        ObjectNode beforeReport = json.createObjectNode()
+                .put("mode", "generate")
+                .put("runKind", runKind)
+                .put("destination", destination.target());
         AxRenewalImplementationRun run = implementations.insert(
                 projectId,
                 actor.id(),
                 beforeReport,
                 AxRenewalImplementationRun.STATUS_GENERATING,
-                confirmedPlanHash);
+                confirmedPlanHash,
+                runKind,
+                AxRenewalImplementationRun.RUN_KIND_PLAN.equals(runKind) ? null : instruction);
 
         audit.append(
                 actor.id(),
@@ -832,7 +952,7 @@ public class AxRenewalService {
                 AuditAction.AX_RENEWAL_IMPLEMENTATION_START,
                 AuditAction.TARGET_AX_RENEWAL_PROJECT,
                 projectId,
-                json.createObjectNode().put("project", project.name()).put("mode", "generate"));
+                json.createObjectNode().put("project", project.name()).put("mode", "generate").put("runKind", runKind));
 
         // Off the request thread from here — AxRenewalImplementationRunner is
         // a separate bean specifically so @Async actually takes effect (see
@@ -848,7 +968,7 @@ public class AxRenewalService {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                runner.runGeneration(run.id(), confirmedPlan, sourcePath);
+                runner.runGeneration(run.id(), runKind, instruction, sourcePath);
             }
         });
         return run;
@@ -1095,6 +1215,117 @@ public class AxRenewalService {
         return implementations.findGeneratedChanges(runId);
     }
 
+    /**
+     * Runs the destination's own {@code test} script against a fresh,
+     * disposable copy of this run's staged changes — never the live
+     * destination (PM decision, ADR-060 Phase 2): a test suite can have real
+     * side effects, and those must never land on what Run Locally or a
+     * person reviewing this same run is actually looking at right now.
+     *
+     * <p>Only meaningful while the run is still {@code awaiting_review} —
+     * once Approved or Rejected, the staging copy this reads is gone (the
+     * same precondition {@link #rejectImplementation} already checks).
+     */
+    @Transactional
+    public AxRenewalTestRunner.Result runTests(UUID projectId, UUID runId, CurrentUser actor) {
+        AxRenewalProject project = requireProject(projectId);
+        AxRenewalImplementationRun run = requireOwnRun(projectId, runId);
+        if (!AxRenewalImplementationRun.STATUS_AWAITING_REVIEW.equals(run.status())) {
+            throw ApiException.conflict("this run is not awaiting review");
+        }
+
+        AxRenewalTestRunner.Result result = testRunner.run(run.stagingPath());
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_IMPLEMENTATION_RUN_TESTS,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode()
+                        .put("project", project.name())
+                        .put("executed", result.executed())
+                        .put("exitCode", result.exitCode())
+                        .put("note", result.note()));
+
+        return result;
+    }
+
+    /**
+     * Undoes one specific applied run (ADR-060 §revert) — restores every
+     * file it touched to its own real recorded {@code beforeContent} (a
+     * created file is deleted instead, since it had no "before").
+     *
+     * <p><b>Safety check:</b> only the current {@link
+     * AxRenewalImplementationRepository#findLatest latest} applied run for
+     * this project may be reverted, never an older one. A file this run
+     * modified may since have been modified again by a newer applied run
+     * (an approved fix, a UI change, or another Rebuild) — reverting past
+     * that would silently discard that newer, later-approved change, not
+     * "undo one run" as asked for it. Once this succeeds the run is no
+     * longer the latest <em>applied</em> one (its status moves to {@code
+     * reverted}), so a second revert attempt on it fails honestly for the
+     * same reason a re-approve of an already-applied run would.
+     */
+    @Transactional
+    public AxRenewalImplementationRun revertImplementation(UUID projectId, UUID runId, CurrentUser actor) {
+        AxRenewalProject project = requireProject(projectId);
+        AxRenewalImplementationRun run = requireOwnRun(projectId, runId);
+        if (!AxRenewalImplementationRun.STATUS_APPLIED.equals(run.status())) {
+            throw ApiException.conflict("this run is not applied, so there is nothing to revert");
+        }
+        AxRenewalImplementationRun latest = implementations
+                .findLatest(projectId)
+                .orElseThrow(() -> ApiException.conflict("no implementation has been applied yet"));
+        if (!latest.id().equals(runId)) {
+            throw ApiException.conflict(
+                    "only the most recently applied run can be reverted — a newer run may depend on files this one touched");
+        }
+        AxRenewalDestination destination =
+                destinations.find(projectId).orElseThrow(() -> ApiException.conflict("no destination set"));
+        if (!AxRenewalDestination.KIND_FILESYSTEM_PATH.equals(destination.kind())) {
+            throw ApiException.conflict("only a filesystem destination can be reverted");
+        }
+
+        List<AxRenewalGeneratedChange> changes = implementations.findGeneratedChanges(runId);
+        Path destinationRoot = Path.of(destination.target()).toAbsolutePath().normalize();
+        try {
+            for (AxRenewalGeneratedChange c : changes) {
+                // Never trust a recorded path to stay inside the destination
+                // on its own — the same defence approveImplementation already
+                // applies for the same reason.
+                Path target = destinationRoot.resolve(c.path()).normalize();
+                if (!target.startsWith(destinationRoot)) {
+                    throw new IOException("refusing to touch a path outside the destination for " + c.path());
+                }
+                if (AxRenewalGeneratedChange.KIND_CREATE.equals(c.changeKind())) {
+                    Files.deleteIfExists(target);
+                } else {
+                    // modify or delete: beforeContent is this file's real
+                    // content before this run touched it -- restoring it is
+                    // correct for both (a deleted file's "before" is exactly
+                    // what recreates it).
+                    Files.createDirectories(target.getParent());
+                    Files.writeString(target, c.beforeContent(), StandardCharsets.UTF_8);
+                }
+            }
+        } catch (IOException e) {
+            throw ApiException.conflict("could not revert this run: " + e.getMessage());
+        }
+
+        implementations.markReverted(runId);
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_IMPLEMENTATION_REVERT,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode().put("project", project.name()).put("filesReverted", changes.size()));
+
+        return implementations.findLatest(projectId).orElseThrow();
+    }
+
     private AxRenewalImplementationRun requireOwnRun(UUID projectId, UUID runId) {
         AxRenewalImplementationRun run =
                 implementations.findById(runId).orElseThrow(() -> ApiException.notFound("implementation run"));
@@ -1161,6 +1392,67 @@ public class AxRenewalService {
     public AxRenewalLocalRunner.Status runLocallyStatus(UUID projectId) {
         requireProject(projectId);
         return localRunner.status(projectId);
+    }
+
+    /**
+     * AI Error Assistant, phase 1 (ADR-060): asks the local model to explain
+     * a Run Locally failure in plain language and suggest a fix — read-only,
+     * exactly like {@link #chat}. Writes nothing, persists nothing, touches
+     * no file; the one thing it may do beyond reading the log is look at the
+     * destination itself (the same "may look, may not touch" floor chat
+     * already sits at, ADR-046), so a suggestion can name a real file rather
+     * than guess at one.
+     *
+     * <p>The log handed to the model is exactly what {@link
+     * AxRenewalLocalRunner} actually captured — never summarised, never
+     * invented. Answering with a suggested edit, and actually making one, are
+     * deliberately two different actions (ADR-060 §Open Items): this is only
+     * the first.
+     *
+     * @throws ApiException 409 when there is no failed Run Locally attempt to
+     *     explain right now, or when no local model is configured to ask.
+     */
+    public LocalClaudeChat.Reply explainRunLocallyFailure(UUID projectId) {
+        AxRenewalProject project = requireProject(projectId);
+        AxRenewalLocalRunner.Status status = localRunner.status(projectId);
+        if (!hasActionableRunLocallyFailure(status)) {
+            throw ApiException.conflict("there is no failed Run Locally attempt to explain right now");
+        }
+        AxRenewalDestination destination = requireAppliedDestination(projectId);
+        String message =
+                """
+                Run Locally just ran this project's own `npm install && npm run dev` and it exited with \
+                an error. Here is the real, complete output that was actually captured:
+
+                %s
+
+                In plain language: what is the root cause? If a specific file needs a specific edit to fix \
+                it, say exactly which file and what the change is — but only describe it. You are being \
+                asked to explain and suggest here, not to make the change.
+                """
+                        .formatted(String.join("\n", status.log()));
+        return localChat.reply(project, List.of(), message, destination.target());
+    }
+
+    /**
+     * Whether there is a real Run Locally problem worth explaining or fixing
+     * right now (ADR-060). A process exit ({@link
+     * AxRenewalLocalRunner.Status#STATE_FAILED}) is one way that shows up,
+     * but not the only one: a dev server that renders an unhandled error for
+     * one request stays up (Next.js catches it and answers 500) or gets
+     * stopped by hand afterward, never reaching {@code failed} — {@link
+     * AxRenewalLocalRunner#hasRuntimeErrorEvidence} is the real signal for
+     * that case, read off the log itself rather than the bare status word.
+     * {@code starting} is never actionable — there is no meaningful log yet.
+     */
+    private boolean hasActionableRunLocallyFailure(AxRenewalLocalRunner.Status status) {
+        if (AxRenewalLocalRunner.Status.STATE_FAILED.equals(status.state())) {
+            return true;
+        }
+        if (AxRenewalLocalRunner.Status.STATE_STARTING.equals(status.state())) {
+            return false;
+        }
+        return AxRenewalLocalRunner.hasRuntimeErrorEvidence(status.log());
     }
 
     private AxRenewalDestination requireAppliedDestination(UUID projectId) {

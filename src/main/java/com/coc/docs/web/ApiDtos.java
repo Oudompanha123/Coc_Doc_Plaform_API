@@ -1420,6 +1420,8 @@ public final class ApiDtos {
     public record AxRenewalImplementationRunResponse(
             UUID id,
             String status,
+            String runKind,
+            String instruction,
             JsonNode beforeReport,
             JsonNode afterReport,
             Instant startedAt,
@@ -1430,11 +1432,30 @@ public final class ApiDtos {
             return new AxRenewalImplementationRunResponse(
                     run.id(),
                     run.status(),
+                    run.runKind(),
+                    run.instruction(),
                     run.beforeReport(),
                     run.afterReport(),
                     run.startedAt(),
                     run.completedAt(),
                     run.failureReason());
+        }
+    }
+
+    /** @param description a person's own free-text UI change request — colors, layout, fonts, spacing, component styles — against the renewed project's own UI (ADR-060 Phase 2). */
+    public record StartUiChangeRequest(@NotBlank @Size(max = 4_000) String description) {}
+
+    /**
+     * @param executed false when nothing was actually run (no staged
+     *     changes, no {@code test} script, a copy/spawn failure, or a
+     *     timeout) — {@code note} says which, honestly. True means {@code
+     *     exitCode}/{@code output} are the real result, whatever it was — a
+     *     nonzero exit is a legitimate answer, not a reason to report false.
+     */
+    public record AxRenewalTestRunResponse(boolean executed, Integer exitCode, List<String> output, String note) {
+
+        public static AxRenewalTestRunResponse of(com.coc.docs.axrenewal.AxRenewalTestRunner.Result result) {
+            return new AxRenewalTestRunResponse(result.executed(), result.exitCode(), result.output(), result.note());
         }
     }
 

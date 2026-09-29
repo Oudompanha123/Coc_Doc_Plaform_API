@@ -142,4 +142,34 @@ class AxRenewalLocalRunnerTest {
 
         waitUntil(() -> runner.status(projectId).state().equals(AxRenewalLocalRunner.Status.STATE_FAILED));
     }
+
+    // -----------------------------------------------------------------------
+    // hasRuntimeErrorEvidence (ADR-060) -- a dev server rendering an
+    // unhandled error for one request never exits the process, so `failed`
+    // never fires for it; this is the real signal the AI Error Assistant
+    // actually needs instead.
+    // -----------------------------------------------------------------------
+
+    @Test
+    void recognizes_a_real_js_error_headline() {
+        assertThat(AxRenewalLocalRunner.hasRuntimeErrorEvidence(
+                        List.of("TypeError: Cannot read properties of undefined (reading 'role')")))
+                .isTrue();
+    }
+
+    @Test
+    void recognizes_a_real_5xx_request_log_line() {
+        assertThat(AxRenewalLocalRunner.hasRuntimeErrorEvidence(List.of("GET / 500 in 4248ms"))).isTrue();
+    }
+
+    @Test
+    void does_not_flag_a_clean_log_with_neither_signal() {
+        assertThat(AxRenewalLocalRunner.hasRuntimeErrorEvidence(List.of("ready on http://localhost:3000", "GET / 200 in 12ms")))
+                .isFalse();
+    }
+
+    @Test
+    void does_not_flag_an_empty_log() {
+        assertThat(AxRenewalLocalRunner.hasRuntimeErrorEvidence(List.of())).isFalse();
+    }
 }

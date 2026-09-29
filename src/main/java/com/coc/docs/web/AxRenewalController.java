@@ -222,6 +222,41 @@ public class AxRenewalController {
                 .toList();
     }
 
+    /**
+     * Applies (Generate → Review) an AI-suggested fix for the project's
+     * current Run Locally failure (ADR-060 Phase 2) — the natural next step
+     * after {@code run-locally/explain} once a suggestion looks right.
+     */
+    @PostMapping("/projects/{projectId}/implementation/error-fix/start")
+    ApiDtos.AxRenewalImplementationRunResponse startErrorFix(
+            @PathVariable UUID projectId, @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalImplementationRunResponse.of(projects.startErrorFixImplementation(projectId, actor));
+    }
+
+    /** Generates a natural-language UI change against the renewed project's own UI (ADR-060 Phase 2). */
+    @PostMapping("/projects/{projectId}/implementation/ui-change/start")
+    ApiDtos.AxRenewalImplementationRunResponse startUiChange(
+            @PathVariable UUID projectId,
+            @Valid @RequestBody ApiDtos.StartUiChangeRequest request,
+            @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalImplementationRunResponse.of(
+                projects.startUiChangeImplementation(projectId, request.description(), actor));
+    }
+
+    /** Runs the destination's own tests against a disposable copy of this run's staged changes (ADR-060 Phase 2). */
+    @PostMapping("/projects/{projectId}/implementation/{runId}/run-tests")
+    ApiDtos.AxRenewalTestRunResponse runTests(
+            @PathVariable UUID projectId, @PathVariable UUID runId, @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalTestRunResponse.of(projects.runTests(projectId, runId, actor));
+    }
+
+    /** Reverts one specific applied run, only while it is still the latest applied state (ADR-060 Phase 2). */
+    @PostMapping("/projects/{projectId}/implementation/{runId}/revert")
+    ApiDtos.AxRenewalImplementationRunResponse revertImplementation(
+            @PathVariable UUID projectId, @PathVariable UUID runId, @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalImplementationRunResponse.of(projects.revertImplementation(projectId, runId, actor));
+    }
+
     @PostMapping("/projects/{projectId}/implementation/{runId}/approve")
     ApiDtos.AxRenewalImplementationRunResponse approveImplementation(
             @PathVariable UUID projectId, @PathVariable UUID runId, @AuthenticationPrincipal CurrentUser actor) {
@@ -257,6 +292,18 @@ public class AxRenewalController {
     @GetMapping("/projects/{projectId}/run-locally/status")
     ApiDtos.AxRenewalRunLocallyStatusResponse runLocallyStatus(@PathVariable UUID projectId) {
         return ApiDtos.AxRenewalRunLocallyStatusResponse.of(projects.runLocallyStatus(projectId));
+    }
+
+    /**
+     * AI Error Assistant, phase 1 (ADR-060) — read-only, same reasoning as
+     * {@code chat} above: nothing is written, so no {@code actor} is taken
+     * and {@code SecurityConfig} sits this at the same read floor as chat,
+     * not the write floor Run Locally start/stop and Approve sit at.
+     */
+    @PostMapping("/projects/{projectId}/run-locally/explain")
+    ApiDtos.AxRenewalChatResponse explainRunLocallyFailure(@PathVariable UUID projectId) {
+        LocalClaudeChat.Reply reply = projects.explainRunLocallyFailure(projectId);
+        return new ApiDtos.AxRenewalChatResponse(reply.text(), reply.readSource());
     }
 
     @PostMapping("/projects/{projectId}/comments")

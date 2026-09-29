@@ -42,7 +42,9 @@ public class AxRenewalImplementationRepository {
                 completedAt == null ? null : completedAt.toInstant(),
                 rs.getString("staging_path"),
                 rs.getString("failure_reason"),
-                rs.getString("confirmed_plan_hash"));
+                rs.getString("confirmed_plan_hash"),
+                rs.getString("run_kind"),
+                rs.getString("instruction"));
     }
 
     private AxRenewalGeneratedChange mapChange(ResultSet rs, int rowNum) throws SQLException {
@@ -59,7 +61,7 @@ public class AxRenewalImplementationRepository {
     private static final String COLUMNS =
             "id, project_id, status, before_report::text as before_report, "
                     + "after_report::text as after_report, started_at, started_by, completed_at, "
-                    + "staging_path, failure_reason, confirmed_plan_hash";
+                    + "staging_path, failure_reason, confirmed_plan_hash, run_kind, instruction";
 
     /**
      * Any run not yet at a terminal status ({@code running}, {@code
@@ -102,14 +104,41 @@ public class AxRenewalImplementationRepository {
      * was built from (ADR-056) — Generate uses {@code generating} directly,
      * skipping the placeholder's {@code running}; Replay uses {@code
      * awaiting_review} directly, skipping generation entirely, carrying the
-     * same hash as the applied run it reproduces.
+     * same hash as the applied run it reproduces. Always {@link
+     * AxRenewalImplementationRun#RUN_KIND_PLAN} with no instruction — both
+     * callers of this overload (fresh Generate, Replay) only ever build a
+     * plan-kind run; {@link #insert(UUID, UUID, JsonNode, String, String,
+     * String, String)} is the one that takes a kind explicitly.
      */
     public AxRenewalImplementationRun insert(
             UUID projectId, UUID startedBy, JsonNode beforeReport, String initialStatus, String confirmedPlanHash) {
+        return insert(
+                projectId,
+                startedBy,
+                beforeReport,
+                initialStatus,
+                confirmedPlanHash,
+                AxRenewalImplementationRun.RUN_KIND_PLAN,
+                null);
+    }
+
+    /**
+     * The general form (ADR-060 Phase 2): every field {@link #insert(UUID,
+     * UUID, JsonNode, String, String)} defaults, spelled out — used by {@link
+     * AxRenewalService#beginGeneration} for all three run kinds.
+     */
+    public AxRenewalImplementationRun insert(
+            UUID projectId,
+            UUID startedBy,
+            JsonNode beforeReport,
+            String initialStatus,
+            String confirmedPlanHash,
+            String runKind,
+            String instruction) {
         return jdbc.sql("""
                         insert into ax_renewal_implementation_run
-                          (project_id, started_by, before_report, status, confirmed_plan_hash)
-                        values (?, ?, ?::jsonb, ?, ?)
+                          (project_id, started_by, before_report, status, confirmed_plan_hash, run_kind, instruction)
+                        values (?, ?, ?::jsonb, ?, ?, ?, ?)
                         returning
                         """ + COLUMNS)
                 .params(
@@ -117,7 +146,9 @@ public class AxRenewalImplementationRepository {
                         startedBy,
                         beforeReport == null ? null : jsonb.write(beforeReport),
                         initialStatus,
-                        confirmedPlanHash)
+                        confirmedPlanHash,
+                        runKind,
+                        instruction)
                 .query(this::map)
                 .single();
     }
@@ -162,6 +193,19 @@ public class AxRenewalImplementationRepository {
                         where id = ?
                         """)
                 .params(AxRenewalImplementationRun.STATUS_CANCELLED, id)
+                .update();
+    }
+
+    /**
+     * A specific applied run, undone on purpose (ADR-060 §revert). Leaves
+     * {@code completed_at} exactly as Apply set it — that timestamp is when
+     * this run was actually applied, and overwriting it here would lose that
+     * fact rather than record the new one; who reverted it and when is the
+     * audit log's job, not a second timestamp on this row.
+     */
+    public void markReverted(UUID id) {
+        jdbc.sql("update ax_renewal_implementation_run set status = ? where id = ?")
+                .params(AxRenewalImplementationRun.STATUS_REVERTED, id)
                 .update();
     }
 

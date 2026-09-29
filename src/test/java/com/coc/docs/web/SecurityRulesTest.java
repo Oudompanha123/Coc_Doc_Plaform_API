@@ -1285,5 +1285,66 @@ class SecurityRulesTest {
                             .with(as(AppRole.USER)))
                     .andExpect(status().isOk());
         }
+
+        @Test
+        void explaining_a_local_run_failure_refuses_a_plain_user() throws Exception {
+            // AI Error Assistant, phase 1 (ADR-060) — read-only, but it can
+            // still point a local model at the destination to read it, so it
+            // sits at the same floor as assistant/chat above, not the plain
+            // read floor run-locally/status sits at just above.
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/run-locally/explain")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void explaining_a_local_run_failure_admits_an_admin() throws Exception {
+            org.mockito.Mockito.doThrow(ApiException.notFound("project"))
+                    .when(axRenewalService)
+                    .explainRunLocallyFailure(org.mockito.ArgumentMatchers.any());
+
+            // 404 from the stub, not 403 — the route was reached.
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/run-locally/explain")
+                            .with(as(AppRole.ADMIN)))
+                    .andExpect(status().isNotFound());
+        }
+
+        // --- AI Error Assistant / UI Customization, Phase 2 (ADR-060) ---
+        // Same Super-Admin-or-Developer-exact floor as start/approve/reject/
+        // cancel above (they all execute real code on the backend's own
+        // machine or write to the real destination) — the exactAuthority()
+        // nuance itself was already proven both ways at confirm/reopen above,
+        // so each of these only needs the refusal case to show the same
+        // matcher is in place.
+
+        @Test
+        void starting_an_error_fix_refuses_a_plain_user_who_does_not_hold_developer() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/error-fix/start")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void starting_a_ui_change_refuses_a_plain_user_who_does_not_hold_developer() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/ui-change/start")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void running_tests_against_a_generate_run_refuses_a_plain_user_who_does_not_hold_developer() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/"
+                            + UUID.randomUUID() + "/run-tests")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void reverting_an_applied_run_refuses_a_plain_user_who_does_not_hold_developer() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/"
+                            + UUID.randomUUID() + "/revert")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
     }
 }

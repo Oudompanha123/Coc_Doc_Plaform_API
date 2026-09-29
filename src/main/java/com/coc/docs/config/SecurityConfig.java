@@ -436,6 +436,22 @@ public class SecurityConfig {
                         // same class of action as the three routes above.
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/cancel")
                         .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        // AI Error Assistant / UI Customization, Phase 2
+                        // (ADR-060) — starting either kind of Generate run
+                        // and running tests all execute real code on the
+                        // backend's own machine, the same class of action as
+                        // start/approve/reject/cancel above, so they share
+                        // that exact floor.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/error-fix/start")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/ui-change/start")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/run-tests")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        // Revert writes to the real destination, exactly the
+                        // class of action Approve is (ADR-044) — same floor.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/revert")
+                        .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         // Run Locally start/stop (ADR-048) — this executes the
                         // destination's own npm scripts on the backend's
                         // machine, the same class of action as starting/
@@ -446,6 +462,14 @@ public class SecurityConfig {
                         .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/run-locally/stop")
                         .hasAnyAuthority(AppRole.SUPER_ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
+                        // AI Error Assistant, phase 1 (ADR-060) — read-only,
+                        // same reasoning and same floor as assistant/chat
+                        // above: it can point a local model at the
+                        // destination to read it, but writes nothing, so it
+                        // sits at the read floor, not Run Locally start/
+                        // stop's write floor just above.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/run-locally/explain")
+                        .hasRole(AppRole.ADMIN.name())
 
                         // --- Claude Usage, read side (ADR-035) ---------------
                         // Its own prefix rather than /api/v1/admin/**, for the

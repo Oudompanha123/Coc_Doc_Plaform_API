@@ -82,7 +82,8 @@ class AxRenewalDeleteProjectTest {
                 new AxRenewalProperties(null, null),
                 mock(AxRenewalCodeGenerator.class),
                 mock(AxRenewalImplementationRunner.class),
-                localRunner);
+                localRunner,
+                mock(AxRenewalTestRunner.class));
     }
 
     @Test

@@ -61,13 +61,16 @@ public class AxRenewalImplementationRunner {
      * generating}. Runs on a background thread; {@code runId}'s row is the
      * only thing the caller can still observe once this returns.
      *
-     * @param sourcePath the legacy project's folder to copy from — captured
-     *     from the request that started this run (ADR-055) and carried
-     *     across the async boundary, since nothing server-side holds it to
-     *     be read back later.
+     * @param sourcePath the folder to copy from — captured from the request
+     *     that started this run and carried across the async boundary, since
+     *     nothing server-side holds it to be read back later. The legacy
+     *     checkout for {@code RUN_KIND_PLAN} (ADR-055); the applied
+     *     destination itself for {@code RUN_KIND_ERROR_FIX}/{@code
+     *     RUN_KIND_UI_CHANGE}, since those two operate on the renewed
+     *     project's own code, not the legacy source (ADR-060 Phase 2).
      */
     @Async
-    public void runGeneration(UUID runId, String confirmedPlan, String sourcePath) {
+    public void runGeneration(UUID runId, String runKind, String instruction, String sourcePath) {
         Path staging;
         try {
             staging = Files.createTempDirectory("ax-renewal-generate-");
@@ -80,7 +83,7 @@ public class AxRenewalImplementationRunner {
         Optional<AxRenewalCodeGenerator.Result> result;
         try {
             result = generator.generate(
-                    confirmedPlan, staging, process -> runningProcesses.put(runId, process), sourcePath);
+                    runKind, instruction, staging, process -> runningProcesses.put(runId, process), sourcePath);
         } catch (RuntimeException e) {
             log.warn("generation run {} failed unexpectedly", runId, e);
             deleteQuietly(staging);
