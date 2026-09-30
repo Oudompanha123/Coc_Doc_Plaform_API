@@ -1004,7 +1004,7 @@ public final class ApiDtos {
             ClaudeUsageMemberResponse todayUsage,
             ClaudeUsageMyBreakdownResponse usage,
             ClaudeUsageWeekResponse week,
-            /** Display only — never subtracted from {@code usage.costUsd} (ADR-063). */
+            /** Display only — never subtracted from {@code usage.costUsd} (ADR-065). */
             BigDecimal subscriptionUsdPerMonth) {
 
         public static ClaudeUsageMyDashboardResponse of(ClaudeUsageMyDashboard dashboard) {
@@ -1024,7 +1024,7 @@ public final class ApiDtos {
         }
     }
 
-    /** The personal screen's "Weekly Usage" card — this Monday to today, against the whole weekly budget (ADR-063). */
+    /** The personal screen's "Weekly Usage" card — this Monday to today, against the whole weekly budget (ADR-065). */
     public record ClaudeUsageWeekResponse(
             LocalDate from,
             LocalDate to,

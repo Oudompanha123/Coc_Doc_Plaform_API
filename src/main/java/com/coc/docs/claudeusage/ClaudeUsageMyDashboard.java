@@ -20,9 +20,9 @@ import java.util.List;
  *     for a one-day period; null if the caller is not on the roster yet.
  * @param usage "Usage by Model" over the selected window (ADR-058).
  * @param week the caller's tokens for the current Monday-to-today week against
- *     their full weekly soft budget (ADR-063).
+ *     their full weekly soft budget (ADR-065).
  * @param subscriptionUsdPerMonth the plan's list price, shown on its own and
- *     never subtracted from or compared with the Reference API Cost (ADR-063).
+ *     never subtracted from or compared with the Reference API Cost (ADR-065).
  */
 public record ClaudeUsageMyDashboard(
         String email,
@@ -103,7 +103,7 @@ public record ClaudeUsageMyDashboard(
      * Input + output tokens from {@code from} (the week's Monday) to {@code
      * to} (today), against the member's whole weekly budget — not a
      * pro-rated slice, so "52% used" on a Wednesday means 52% of the week's
-     * allowance is gone (ADR-063).
+     * allowance is gone (ADR-065).
      *
      * @param budgetTokens the member's weekly override, or the team default.
      */

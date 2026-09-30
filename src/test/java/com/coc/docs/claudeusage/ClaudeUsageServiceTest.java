@@ -701,7 +701,7 @@ class ClaudeUsageServiceTest {
         }
 
         @Test
-        @DisplayName("week sums Monday to today only, against the whole weekly budget (ADR-063)")
+        @DisplayName("week sums Monday to today only, against the whole weekly budget (ADR-065)")
         void weekIsMondayToTodayAgainstWholeBudget() {
             LocalDate today = LocalDate.of(2026, 9, 17); // Thursday
             LocalDate monday = LocalDate.of(2026, 9, 14);
@@ -748,7 +748,7 @@ class ClaudeUsageServiceTest {
         }
 
         @Test
-        @DisplayName("subscription is the plan's list price, independent of any usage (ADR-063)")
+        @DisplayName("subscription is the plan's list price, independent of any usage (ADR-065)")
         void subscriptionIsFixedListPrice() {
             LocalDate today = LocalDate.of(2026, 9, 17);
             CurrentUser actor = TestCallers.user(AppRole.USER);

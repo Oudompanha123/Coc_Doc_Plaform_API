@@ -17,7 +17,7 @@ class ClaudeUsagePricingTest {
     }
 
     @Test
-    @DisplayName("cache read does not affect the Reference API Cost (ADR-064)")
+    @DisplayName("cache read does not affect the Reference API Cost (ADR-066)")
     void cacheReadIsNotPriced() {
         BigDecimal without = ClaudeUsagePricing.costFor("claude-opus-5-5", 1_000, 2_000, 0, 0, 0);
         BigDecimal with = ClaudeUsagePricing.costFor("claude-opus-5-5", 1_000, 2_000, 50_000_000, 0, 0);
@@ -26,7 +26,7 @@ class ClaudeUsagePricingTest {
     }
 
     @Test
-    @DisplayName("cache write, 5-minute or 1-hour, does not affect the Reference API Cost (ADR-064)")
+    @DisplayName("cache write, 5-minute or 1-hour, does not affect the Reference API Cost (ADR-066)")
     void cacheWriteIsNotPriced() {
         BigDecimal without = ClaudeUsagePricing.costFor("claude-opus-5-5", 1_000, 2_000, 0, 0, 0);
         assertThat(ClaudeUsagePricing.costFor("claude-opus-5-5", 1_000, 2_000, 0, 5_000_000, 0))

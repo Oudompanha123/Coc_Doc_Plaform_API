@@ -16,7 +16,7 @@ import java.util.Map;
  * on the API?", a size comparison for spotting who is doing the heavy lifting,
  * never actual spend. The dashboard says so wherever a figure appears.
  *
- * <p>Only input and output are priced (ADR-064). The cache rates below are
+ * <p>Only input and output are priced (ADR-066). The cache rates below are
  * kept for reference but no longer feed {@link #costFor}.
  *
  * <p>Prices are USD per million tokens. Cache reads have their own per-model
@@ -33,7 +33,7 @@ import java.util.Map;
  * API change — {@code ClaudeUsageService.recordUsage} already prices at ingest
  * time server-side for exactly this reason.
  *
- * <p>// req: ADR-036, ADR-058, ADR-064
+ * <p>// req: ADR-036, ADR-058, ADR-066
  */
 public final class ClaudeUsagePricing {
 
@@ -85,7 +85,7 @@ public final class ClaudeUsagePricing {
     /**
      * The team plan's list price per seat, in USD per month — shown beside the
      * Reference API Cost as a separate fact, never as a credit balance the API
-     * figure is drawn down from (ADR-063). A price change is an edit here.
+     * figure is drawn down from (ADR-065). A price change is an edit here.
      */
     public static final BigDecimal SUBSCRIPTION_USD_PER_MONTH = new BigDecimal("25");
 
@@ -117,7 +117,7 @@ public final class ClaudeUsagePricing {
      * {@link ClaudeUsageService} sums this across every model in a day before
      * rounding once, so summing several models never compounds rounding error.
      *
-     * <p>Input and output only (ADR-064, revising ADR-058's cache pricing):
+     * <p>Input and output only (ADR-066, revising ADR-058's cache pricing):
      * {@code cacheRead} and {@code cacheCreation} are still accepted, stored and
      * shown as their own columns, but contribute nothing to the figure.
      */
