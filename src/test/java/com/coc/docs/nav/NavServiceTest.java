@@ -97,6 +97,22 @@ class NavServiceTest {
     }
 
     @Test
+    @DisplayName("refuses every static route added after the reserved list was first written")
+    void refusesLaterStaticRoutes() {
+        // A product keyed "ax-renewal" was created and its sidebar link opened
+        // the AX Renewal workspace instead — app/ax-renewal shadows [productKey].
+        for (String key : List.of("ax-renewal", "attendance", "home", "meeting", "my-claude-usage")) {
+            assertThatThrownBy(() -> service.createProduct(key, "X", "layers", EDITOR))
+                    .as(key)
+                    .isInstanceOf(ApiException.class)
+                    .extracting(e -> ((ApiException) e).status())
+                    .isEqualTo(HttpStatus.BAD_REQUEST);
+        }
+
+        verify(repository, never()).insertProduct(any(), any(), any(), org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    @Test
     @DisplayName("refuses a product key that is not kebab-case")
     void refusesMalformedKey() {
         assertThatThrownBy(() -> service.createProduct("Not Valid!", "X", "layers", EDITOR))
