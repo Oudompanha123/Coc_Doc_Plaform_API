@@ -76,17 +76,22 @@ public class HrmsNotificationService {
     /** The stored report bodies (V49, ADR-057). */
     private final HrmsReportContentRepository contents;
 
+    /** Mails each person their own row when a report arrives. */
+    private final AttendanceMailService attendanceMail;
+
     public HrmsNotificationService(
             HrmsMailbox mailbox,
             HrmsNotificationRepository repository,
             HrmsMailProperties properties,
             AccountRepository accounts,
-            HrmsReportContentRepository contents) {
+            HrmsReportContentRepository contents,
+            AttendanceMailService attendanceMail) {
         this.mailbox = mailbox;
         this.repository = repository;
         this.properties = properties;
         this.accounts = accounts;
         this.contents = contents;
+        this.attendanceMail = attendanceMail;
     }
 
     /**
@@ -173,9 +178,34 @@ public class HrmsNotificationService {
                     .ifPresent(saved -> mailbox
                             .htmlBodyOf(messageId)
                             .map(html -> HrmsReportParser.parse(subject, saved.reportDate(), html))
-                            .ifPresent(content -> contents.save(saved.id(), content)));
+                            .ifPresent(content -> {
+                                contents.save(saved.id(), content);
+                                mailEachPersonTheirOwnRow(content);
+                            }));
         } catch (RuntimeException e) {
             log.warn("HRMS: recorded {} but could not store its body: {}", subject, e.getMessage());
+        }
+    }
+
+    /**
+     * Sends every matched person their own row, once, when the report first
+     * arrives.
+     *
+     * <p>Here rather than in {@link #report}: a read must not send mail, or
+     * opening the same report twice mails everybody twice and a screen refresh
+     * becomes a broadcast. This runs on the poll, in the branch that only a
+     * genuinely new arrival reaches.
+     *
+     * <p>Wrapped separately from the store above, and swallowing its own
+     * failures: a mail relay that is down must not lose the stored body, and
+     * the body is the thing that cannot be recovered later. Mail can be sent
+     * again; a report pruned from the mailbox cannot be re-read.
+     */
+    private void mailEachPersonTheirOwnRow(HrmsMailContent content) {
+        try {
+            attendanceMail.sendPersonalReports(content);
+        } catch (RuntimeException e) {
+            log.warn("attendance: stored {} but could not mail it out: {}", content.subject(), e.getMessage());
         }
     }
 
