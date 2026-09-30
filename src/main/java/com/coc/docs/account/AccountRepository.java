@@ -447,6 +447,41 @@ public class AccountRepository {
     }
 
     /**
+     * An address that can receive mail, with its HRMS link alongside it.
+     *
+     * <p>Both in one row because the one caller —
+     * {@code AttendanceMailService} — needs both for every account, and
+     * {@link #hrmsNameOf} per account would be a query per person on a job
+     * that already runs over the whole roster.
+     *
+     * @param hrmsName null for the normal case: no explicit link, match on the
+     *     address instead
+     */
+    public record MailTarget(UUID accountId, String email, String hrmsName) {}
+
+    /**
+     * Every account that can be written to: active, not deactivated.
+     *
+     * <p>Deliberately not {@code findByStatus(ACTIVE)} — that reads the status
+     * column alone, and an account can be {@code active} with a
+     * {@code deactivated_at} set while a scheduled deactivation is being
+     * finalised. Mailing somebody on their way out is a small wrong, but it is
+     * the kind that gets noticed.
+     */
+    public List<MailTarget> activeMailTargets() {
+        return jdbc.sql("""
+                        select id, email, hrms_name
+                        from account
+                        where status = 'active'::account_status
+                          and deactivated_at is null
+                        order by email
+                        """)
+                .query((rs, rowNum) -> new MailTarget(
+                        rs.getObject("id", UUID.class), rs.getString("email"), rs.getString("hrms_name")))
+                .list();
+    }
+
+    /**
      * The HRMS attendance name this account is linked to, or empty when it is
      * linked to none (V47).
      *

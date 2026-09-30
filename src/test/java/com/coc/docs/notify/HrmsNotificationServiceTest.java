@@ -57,8 +57,11 @@ class HrmsNotificationServiceTest {
 
     private final HrmsReportContentRepository contents = mock(HrmsReportContentRepository.class);
 
+    /** Only the poll path uses it; the read tests leave it unstubbed. */
+    private final AttendanceMailService attendanceMail = mock(AttendanceMailService.class);
+
     private HrmsNotificationService serviceWith(HrmsMailProperties props) {
-        return new HrmsNotificationService(mailbox, repository, props, accounts, contents);
+        return new HrmsNotificationService(mailbox, repository, props, accounts, contents, attendanceMail);
     }
 
     private static HrmsMailbox.Arrival arrival(String id, String subject) {

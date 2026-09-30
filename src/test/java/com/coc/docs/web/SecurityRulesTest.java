@@ -93,6 +93,11 @@ class SecurityRulesTest {
     /** NotificationFeedController's second collaborator, behind GET /notifications/hrms/{id} (ADR-042). */
     @MockitoBean com.coc.docs.notify.HrmsNotificationService hrmsNotificationService;
 
+    // MailCredentialController is in this slice (ADR-063), so its dependency
+    // has to be too. Mocked like the rest: this class asserts which routes the
+    // filter chain admits, not what storing a credential does.
+    @MockitoBean com.coc.docs.notify.AccountMailCredentialRepository accountMailCredentialRepository;
+
     // AdminAuditController is in this slice too, same reasoning.
     @MockitoBean com.coc.docs.audit.AuditRepository auditRepository;
 
