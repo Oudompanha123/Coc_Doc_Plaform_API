@@ -751,7 +751,10 @@ class SecurityRulesTest {
                     .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageMyDashboard(
                             "user@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null, null,
                             com.coc.docs.claudeusage.ClaudeUsageMyDashboard.ModelBreakdown.empty(
-                                    7, java.time.LocalDate.now(), java.time.LocalDate.now())));
+                                    7, java.time.LocalDate.now(), java.time.LocalDate.now()),
+                            new com.coc.docs.claudeusage.ClaudeUsageMyDashboard.WeekUsage(
+                                    java.time.LocalDate.now(), java.time.LocalDate.now(), 0, 0, 0),
+                            java.math.BigDecimal.ZERO));
 
             mvc.perform(get("/api/v1/claude-usage/me").with(as(AppRole.USER)))
                     .andExpect(status().isOk());
@@ -764,7 +767,10 @@ class SecurityRulesTest {
                     .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageMyDashboard(
                             "admin@example.com", "Test", java.time.LocalDate.now(), 0, 0, List.of(), null, null,
                             com.coc.docs.claudeusage.ClaudeUsageMyDashboard.ModelBreakdown.empty(
-                                    7, java.time.LocalDate.now(), java.time.LocalDate.now())));
+                                    7, java.time.LocalDate.now(), java.time.LocalDate.now()),
+                            new com.coc.docs.claudeusage.ClaudeUsageMyDashboard.WeekUsage(
+                                    java.time.LocalDate.now(), java.time.LocalDate.now(), 0, 0, 0),
+                            java.math.BigDecimal.ZERO));
 
             mvc.perform(get("/api/v1/claude-usage/me").with(as(AppRole.ADMIN)))
                     .andExpect(status().isOk());
