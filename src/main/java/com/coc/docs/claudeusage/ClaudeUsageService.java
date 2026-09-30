@@ -547,8 +547,23 @@ public class ClaudeUsageService {
                 ? ClaudeUsageMyDashboard.ModelBreakdown.empty(rangeDays, today.minusDays(rangeDays - 1), today)
                 : modelBreakdown(member.id(), today, rangeDays);
 
+        // The week's Monday is at most 6 days back, so the 30-day rows above already cover it.
+        LocalDate weekFrom = today.with(DayOfWeek.MONDAY);
+        long weekInput = 0;
+        long weekOutput = 0;
+        for (ClaudeUsageDaily row : rows) {
+            if (!row.usageDate().isBefore(weekFrom) && !row.usageDate().isAfter(today)) {
+                weekInput += row.inputTokens();
+                weekOutput += row.outputTokens();
+            }
+        }
+        ClaudeUsageMyDashboard.WeekUsage week = new ClaudeUsageMyDashboard.WeekUsage(
+                weekFrom, today, weekInput, weekOutput,
+                effectiveBudgetTokens(member == null ? null : member.budgetOverrideTokens(), 7));
+
         return new ClaudeUsageMyDashboard(
-                email, displayName, today, todayInput, todayOutput, history, lastUpdated, todayUsage, breakdown);
+                email, displayName, today, todayInput, todayOutput, history, lastUpdated, todayUsage, breakdown, week,
+                ClaudeUsagePricing.SUBSCRIPTION_USD_PER_MONTH);
     }
 
     /**

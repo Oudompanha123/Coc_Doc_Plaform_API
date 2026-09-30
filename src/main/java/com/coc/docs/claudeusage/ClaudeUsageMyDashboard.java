@@ -19,6 +19,10 @@ import java.util.List;
  *     cost, and soft budget, computed exactly as the admin per-user table does
  *     for a one-day period; null if the caller is not on the roster yet.
  * @param usage "Usage by Model" over the selected window (ADR-058).
+ * @param week the caller's tokens for the current Monday-to-today week against
+ *     their full weekly soft budget (ADR-063).
+ * @param subscriptionUsdPerMonth the plan's list price, shown on its own and
+ *     never subtracted from or compared with the Reference API Cost (ADR-063).
  */
 public record ClaudeUsageMyDashboard(
         String email,
@@ -29,7 +33,9 @@ public record ClaudeUsageMyDashboard(
         List<ClaudeUsageMyDashboardPoint> daily,
         Instant lastUpdated,
         ClaudeUsageMemberUsage todayUsage,
-        ModelBreakdown usage) {
+        ModelBreakdown usage,
+        WeekUsage week,
+        BigDecimal subscriptionUsdPerMonth) {
 
     public long todayTotalTokens() {
         return todayInputTokens + todayOutputTokens;
@@ -90,6 +96,31 @@ public record ClaudeUsageMyDashboard(
             return new ModelBreakdown(
                     rangeDays, from, to, new ClaudeUsageTotals(0, 0, 0, 0, BigDecimal.ZERO), BigDecimal.ZERO,
                     List.of(), List.of());
+        }
+    }
+
+    /**
+     * Input + output tokens from {@code from} (the week's Monday) to {@code
+     * to} (today), against the member's whole weekly budget — not a
+     * pro-rated slice, so "52% used" on a Wednesday means 52% of the week's
+     * allowance is gone (ADR-063).
+     *
+     * @param budgetTokens the member's weekly override, or the team default.
+     */
+    public record WeekUsage(LocalDate from, LocalDate to, long inputTokens, long outputTokens, long budgetTokens) {
+
+        public long totalTokens() {
+            return inputTokens + outputTokens;
+        }
+
+        /** Rounded percentage of {@code budgetTokens}; can exceed 100. */
+        public int pctUsed() {
+            return budgetTokens > 0 ? (int) Math.round(totalTokens() * 100.0 / budgetTokens) : 0;
+        }
+
+        /** Never negative — over budget reads as 0 remaining, not a minus figure. */
+        public long remainingTokens() {
+            return Math.max(0, budgetTokens - totalTokens());
         }
     }
 }

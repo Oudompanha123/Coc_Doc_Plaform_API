@@ -1002,7 +1002,10 @@ public final class ApiDtos {
             Instant lastUpdated,
             /** Null until the caller is on the roster (i.e. has never reported). */
             ClaudeUsageMemberResponse todayUsage,
-            ClaudeUsageMyBreakdownResponse usage) {
+            ClaudeUsageMyBreakdownResponse usage,
+            ClaudeUsageWeekResponse week,
+            /** Display only — never subtracted from {@code usage.costUsd} (ADR-063). */
+            BigDecimal subscriptionUsdPerMonth) {
 
         public static ClaudeUsageMyDashboardResponse of(ClaudeUsageMyDashboard dashboard) {
             return new ClaudeUsageMyDashboardResponse(
@@ -1015,7 +1018,27 @@ public final class ApiDtos {
                     dashboard.daily().stream().map(ClaudeUsageMyDashboardPointResponse::of).toList(),
                     dashboard.lastUpdated(),
                     dashboard.todayUsage() == null ? null : ClaudeUsageMemberResponse.of(dashboard.todayUsage()),
-                    ClaudeUsageMyBreakdownResponse.of(dashboard.usage()));
+                    ClaudeUsageMyBreakdownResponse.of(dashboard.usage()),
+                    ClaudeUsageWeekResponse.of(dashboard.week()),
+                    dashboard.subscriptionUsdPerMonth());
+        }
+    }
+
+    /** The personal screen's "Weekly Usage" card — this Monday to today, against the whole weekly budget (ADR-063). */
+    public record ClaudeUsageWeekResponse(
+            LocalDate from,
+            LocalDate to,
+            long inputTokens,
+            long outputTokens,
+            long totalTokens,
+            long budgetTokens,
+            int pctUsed,
+            long remainingTokens) {
+
+        public static ClaudeUsageWeekResponse of(ClaudeUsageMyDashboard.WeekUsage week) {
+            return new ClaudeUsageWeekResponse(
+                    week.from(), week.to(), week.inputTokens(), week.outputTokens(), week.totalTokens(),
+                    week.budgetTokens(), week.pctUsed(), week.remainingTokens());
         }
     }
 

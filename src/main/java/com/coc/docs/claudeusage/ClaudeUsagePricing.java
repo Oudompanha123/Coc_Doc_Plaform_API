@@ -81,6 +81,13 @@ public final class ClaudeUsagePricing {
         PRICES.put("claude-haiku-4-5", price("1", "5"));
     }
 
+    /**
+     * The team plan's list price per seat, in USD per month — shown beside the
+     * Reference API Cost as a separate fact, never as a credit balance the API
+     * figure is drawn down from (ADR-063). A price change is an edit here.
+     */
+    public static final BigDecimal SUBSCRIPTION_USD_PER_MONTH = new BigDecimal("25");
+
     /** Priced as Opus when a model id matches nothing here, so cost is never understated. */
     private static final ModelPrice FALLBACK = price("5", "25");
 

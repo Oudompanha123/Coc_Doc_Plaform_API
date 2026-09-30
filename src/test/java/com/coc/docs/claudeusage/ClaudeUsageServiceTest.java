@@ -699,6 +699,67 @@ class ClaudeUsageServiceTest {
             long daysWithTokens = dashboard.daily().stream().filter(p -> p.totalTokens() > 0).count();
             assertThat(daysWithTokens).isEqualTo(1);
         }
+
+        @Test
+        @DisplayName("week sums Monday to today only, against the whole weekly budget (ADR-063)")
+        void weekIsMondayToTodayAgainstWholeBudget() {
+            LocalDate today = LocalDate.of(2026, 9, 17); // Thursday
+            LocalDate monday = LocalDate.of(2026, 9, 14);
+            CurrentUser actor = TestCallers.user(AppRole.USER);
+            ClaudeUsageMember me = member(actor.email(), ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findByEmail(actor.email())).thenReturn(Optional.of(me));
+
+            ClaudeUsageDaily lastSunday = new ClaudeUsageDaily(
+                    UUID.randomUUID(), me.id(), monday.minusDays(1), 50_000, 50_000, 0, 0, BigDecimal.ZERO, "Sonnet 5", Instant.now());
+            ClaudeUsageDaily mondayRow = new ClaudeUsageDaily(
+                    UUID.randomUUID(), me.id(), monday, 200, 306_700, 9_999, 9_999, BigDecimal.ZERO, "Opus 5", Instant.now());
+            ClaudeUsageDaily todayRow = new ClaudeUsageDaily(
+                    UUID.randomUUID(), me.id(), today, 898, 312_202, 0, 0, BigDecimal.ZERO, "Sonnet 5", Instant.now());
+            when(daily.listInRangeForMember(eq(me.id()), any(), eq(today)))
+                    .thenReturn(List.of(lastSunday, mondayRow, todayRow));
+
+            var week = service.myDashboard(actor, today).week();
+
+            assertThat(week.from()).isEqualTo(monday);
+            assertThat(week.to()).isEqualTo(today);
+            // Cache tokens stay out of the token total, the same as todayTotalTokens.
+            assertThat(week.totalTokens()).isEqualTo(620_000);
+            assertThat(week.budgetTokens()).isEqualTo(ClaudeUsageService.DEFAULT_SOFT_BUDGET_TOKENS);
+            assertThat(week.pctUsed()).isEqualTo(52);
+            assertThat(week.remainingTokens()).isEqualTo(580_000);
+        }
+
+        @Test
+        @DisplayName("week uses the member's own weekly override, and never reports negative remaining")
+        void weekUsesOverrideAndClampsRemaining() {
+            LocalDate today = LocalDate.of(2026, 9, 17);
+            CurrentUser actor = TestCallers.user(AppRole.USER);
+            ClaudeUsageMember me = member(actor.email(), ClaudeUsageMember.STATUS_ACTIVE, 100_000L);
+            when(members.findByEmail(actor.email())).thenReturn(Optional.of(me));
+            ClaudeUsageDaily todayRow = new ClaudeUsageDaily(
+                    UUID.randomUUID(), me.id(), today, 0, 150_000, 0, 0, BigDecimal.ZERO, "Sonnet 5", Instant.now());
+            when(daily.listInRangeForMember(eq(me.id()), any(), eq(today))).thenReturn(List.of(todayRow));
+
+            var week = service.myDashboard(actor, today).week();
+
+            assertThat(week.budgetTokens()).isEqualTo(100_000);
+            assertThat(week.pctUsed()).isEqualTo(150);
+            assertThat(week.remainingTokens()).isZero();
+        }
+
+        @Test
+        @DisplayName("subscription is the plan's list price, independent of any usage (ADR-063)")
+        void subscriptionIsFixedListPrice() {
+            LocalDate today = LocalDate.of(2026, 9, 17);
+            CurrentUser actor = TestCallers.user(AppRole.USER);
+            when(members.findByEmail(actor.email())).thenReturn(Optional.empty());
+
+            var dashboard = service.myDashboard(actor, today);
+
+            assertThat(dashboard.subscriptionUsdPerMonth()).isEqualByComparingTo("25");
+            assertThat(dashboard.week().totalTokens()).isZero();
+            assertThat(dashboard.week().budgetTokens()).isEqualTo(ClaudeUsageService.DEFAULT_SOFT_BUDGET_TOKENS);
+        }
     }
 
     @Nested
