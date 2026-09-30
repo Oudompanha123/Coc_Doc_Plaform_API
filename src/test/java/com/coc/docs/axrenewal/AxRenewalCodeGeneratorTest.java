@@ -46,7 +46,12 @@ class AxRenewalCodeGeneratorTest {
         Files.createDirectories(source);
         var generator =
                 new AxRenewalCodeGenerator(new AxRenewalProperties(null, tmp.resolve("no-such-claude").toString()), json);
-        assertThat(generator.generate("some plan", tmp.resolve("staging"), process -> {}, source.toString()))
+        assertThat(generator.generate(
+                        AxRenewalImplementationRun.RUN_KIND_PLAN,
+                        "some plan",
+                        tmp.resolve("staging"),
+                        process -> {},
+                        source.toString()))
                 .isEmpty();
     }
 
@@ -59,7 +64,11 @@ class AxRenewalCodeGeneratorTest {
         // touched.
         var generator = new AxRenewalCodeGenerator(new AxRenewalProperties(null, "/usr/bin/claude"), json);
         assertThat(generator.generate(
-                        "some plan", tmp.resolve("staging"), process -> {}, tmp.resolve("no-such-source").toString()))
+                        AxRenewalImplementationRun.RUN_KIND_PLAN,
+                        "some plan",
+                        tmp.resolve("staging"),
+                        process -> {},
+                        tmp.resolve("no-such-source").toString()))
                 .isEmpty();
     }
 

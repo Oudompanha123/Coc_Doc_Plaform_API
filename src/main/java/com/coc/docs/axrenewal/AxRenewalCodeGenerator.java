@@ -124,9 +124,23 @@ public class AxRenewalCodeGenerator {
      *     uses, so a caller can register it somewhere reachable enough to
      *     cancel this run later (ADR-049). Never invoked at all if starting
      *     the process itself fails.
+     * @param runKind one of {@link AxRenewalImplementationRun}'s {@code
+     *     RUN_KIND_*} constants — selects which of the three prompt framings
+     *     below wraps {@code instruction} (ADR-062 Phase 2). Unknown values
+     *     fall back to the original {@code RUN_KIND_PLAN} framing, the same
+     *     "degrade rather than throw" posture the rest of this class uses.
+     * @param instruction what {@code confirmedPlan} used to be called before
+     *     this could also be a real captured error log ({@code
+     *     RUN_KIND_ERROR_FIX}) or a person's own free-text UI description
+     *     ({@code RUN_KIND_UI_CHANGE}) — still the confirmed Plan's own text
+     *     for {@code RUN_KIND_PLAN}.
      */
     public Optional<Result> generate(
-            String confirmedPlan, Path stagingDir, Consumer<Process> onProcessStarted, String sourcePath) {
+            String runKind,
+            String instruction,
+            Path stagingDir,
+            Consumer<Process> onProcessStarted,
+            String sourcePath) {
         if (!canGenerate()) {
             return Optional.empty();
         }
@@ -170,7 +184,7 @@ public class AxRenewalCodeGenerator {
             onProcessStarted.accept(process);
 
             try (OutputStream stdin = process.getOutputStream()) {
-                stdin.write(prompt(confirmedPlan).getBytes(StandardCharsets.UTF_8));
+                stdin.write(prompt(runKind, instruction).getBytes(StandardCharsets.UTF_8));
             }
             String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
@@ -213,7 +227,18 @@ public class AxRenewalCodeGenerator {
 
     private static final Pattern PLACEHOLDER = Pattern.compile("[\\r\\n]+");
 
-    private static String prompt(String confirmedPlan) {
+    /** Selects the framing below by {@code runKind} (ADR-062 Phase 2) — an unrecognized value degrades to the original plan framing rather than throwing, matching this class's "fall back rather than fabricate" posture. */
+    private static String prompt(String runKind, String instruction) {
+        if (AxRenewalImplementationRun.RUN_KIND_ERROR_FIX.equals(runKind)) {
+            return errorFixPrompt(instruction);
+        }
+        if (AxRenewalImplementationRun.RUN_KIND_UI_CHANGE.equals(runKind)) {
+            return uiChangePrompt(instruction);
+        }
+        return migrationPlanPrompt(instruction);
+    }
+
+    private static String migrationPlanPrompt(String confirmedPlan) {
         return """
                 You are carrying out an already-decided migration plan against the source
                 you can see in your working directory. Make the real file changes the plan
@@ -235,6 +260,60 @@ public class AxRenewalCodeGenerator {
                 %s
                 """
                 .formatted(PLACEHOLDER.matcher(confirmedPlan).replaceAll("\n"));
+    }
+
+    /** ADR-062 Phase 2 — the source copied for this run is the destination itself (the renewed project), not the legacy checkout; see {@code AxRenewalService#startErrorFixImplementation}. */
+    private static String errorFixPrompt(String errorLog) {
+        return """
+                You are fixing a real error that happened when this project was actually run
+                (`npm install && npm run dev`). The output below is the real, complete output
+                that was actually captured — never invented. Make the real file changes
+                needed to fix the root cause — create, edit, or delete files as needed. Do
+                not ask questions or wait for confirmation; there is nobody to answer. Do not
+                run any command, install any dependency, or start any process — only edit
+                files directly with your file tools.
+
+                Rules:
+                - Only make changes that address this specific error. Do not refactor,
+                  rename, or "improve" anything unrelated to it.
+                - If the root cause is genuinely unclear from the output, make your best real
+                  attempt at a fix rather than leaving every file untouched with nothing
+                  attempted.
+                - Do not add commentary files, README changes, or a summary document. The
+                  only output that matters is the edited source tree itself.
+
+                The real captured error output:
+                %s
+                """
+                .formatted(PLACEHOLDER.matcher(errorLog).replaceAll("\n"));
+    }
+
+    /** ADR-062 Phase 2 — same staging-from-destination reasoning as {@link #errorFixPrompt}; see {@code AxRenewalService#startUiChangeImplementation}. */
+    private static String uiChangePrompt(String description) {
+        return """
+                You are applying a UI change to the project you can see in your working
+                directory, described below in the person's own words. Make the real file
+                changes needed — create or edit files as needed. Do not ask questions or
+                wait for confirmation; there is nobody to answer. Do not run any command,
+                install any dependency, or start any process — only edit files directly with
+                your file tools.
+
+                Rules:
+                - Touch only presentation — colors, layout, fonts, spacing, component
+                  styles, and similar — never behaviour or business logic, unless the
+                  description explicitly asks for that.
+                - Only make changes this description actually calls for. Do not refactor,
+                  rename, or "improve" anything it does not mention.
+                - If part of the description is too vague to act on safely, leave those
+                  files alone rather than guessing — an incomplete, honest result is better
+                  than an invented one.
+                - Do not add commentary files, README changes, or a summary document. The
+                  only output that matters is the edited source tree itself.
+
+                The requested UI change, in the person's own words:
+                %s
+                """
+                .formatted(PLACEHOLDER.matcher(description).replaceAll("\n"));
     }
 
     // -------------------------------------------------------------------

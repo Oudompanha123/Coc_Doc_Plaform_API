@@ -100,7 +100,13 @@ class AxRenewalRebuildReplayTest {
 
         when(implementations.findActive(projectId)).thenReturn(Optional.empty());
         // Round-trips whatever startImplementation inserts, the same shape
-        // every real repository call would return.
+        // every real repository call would return. Two different overloads,
+        // mocked separately, each actually reached by a different path:
+        // replayAppliedRun still calls the 5-arg overload directly (it only
+        // ever reproduces a plan-kind run), while beginGeneration now always
+        // calls the 7-arg overload (ADR-062 Phase 2), even for a fresh
+        // plan-kind run -- a mock does not run either method's real body, so
+        // both must be stubbed for whichever test reaches them.
         when(implementations.insert(any(), any(), any(), any(), any())).thenAnswer(inv -> new AxRenewalImplementationRun(
                 UUID.randomUUID(),
                 projectId,
@@ -113,8 +119,23 @@ class AxRenewalRebuildReplayTest {
                 null,
                 null,
                 inv.getArgument(4)));
+        when(implementations.insert(any(), any(), any(), any(), any(), any(), any()))
+                .thenAnswer(inv -> new AxRenewalImplementationRun(
+                        UUID.randomUUID(),
+                        projectId,
+                        inv.getArgument(3),
+                        inv.getArgument(2),
+                        null,
+                        Instant.EPOCH,
+                        actor.id(),
+                        null,
+                        null,
+                        null,
+                        inv.getArgument(4),
+                        inv.getArgument(5),
+                        inv.getArgument(6)));
         // The Phase-1 placeholder's own 3-arg overload -- a different
-        // overload Mockito matches separately from the 5-arg one above.
+        // overload Mockito matches separately from the two above.
         when(implementations.insert(any(), any(), any())).thenAnswer(inv -> new AxRenewalImplementationRun(
                 UUID.randomUUID(),
                 projectId,
@@ -144,7 +165,8 @@ class AxRenewalRebuildReplayTest {
                 new AxRenewalProperties(null, null),
                 generator,
                 mock(AxRenewalImplementationRunner.class),
-                mock(AxRenewalLocalRunner.class));
+                mock(AxRenewalLocalRunner.class),
+                mock(AxRenewalTestRunner.class));
     }
 
     private void filesystemDestination() {
@@ -197,7 +219,7 @@ class AxRenewalRebuildReplayTest {
         assertThat(result.confirmedPlanHash()).isEqualTo(PLAN_HASH);
 
         // The model is never asked -- this is the whole point of replaying.
-        verify(generator, never()).generate(any(), any(), any(), any());
+        verify(generator, never()).generate(any(), any(), any(), any(), any());
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<AxRenewalImplementationRepository.GeneratedChangeInput>> changesCaptor =

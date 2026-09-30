@@ -45,6 +45,35 @@ public class AxRenewalLocalRunner {
     /** Matches a dev server's own "ready" announcement (Next.js, Vite, CRA all print exactly this shape) — the URL shown is read off this, never assumed from a hardcoded port. */
     private static final Pattern READY_URL = Pattern.compile("https?://(?:localhost|127\\.0\\.0\\.1):\\d+");
 
+    /**
+     * A dev server rendering an unhandled error for one request (a Next.js
+     * page throwing, e.g.) does not exit the process — it catches the error,
+     * answers 500, and keeps serving everything else. That leaves {@link
+     * Status#state} at {@link Status#STATE_RUNNING} (still up) or {@link
+     * Status#STATE_STOPPED} (a person pressed Stop after seeing it) — never
+     * {@link Status#STATE_FAILED}, which this class only ever sets on a real
+     * nonzero process exit. {@link #hasRuntimeErrorEvidence} is the real
+     * signal the AI Error Assistant (ADR-062) actually needs: a JS error
+     * headline ({@code TypeError:}/{@code ReferenceError:}/…) or the dev
+     * server's own request-log line reporting a 5xx — two disclosed facts
+     * read off real output, not a guess, mirrored exactly by {@code
+     * runLocallyGuidance.ts}'s own {@code hasRuntimeErrorEvidence} on the
+     * frontend.
+     */
+    private static final Pattern JS_ERROR_HEADLINE = Pattern.compile("\\b\\w*Error:\\s");
+
+    private static final Pattern SERVER_ERROR_RESPONSE =
+            Pattern.compile("\\b(?:GET|POST|PUT|PATCH|DELETE)\\s\\S+\\s5\\d\\d\\b");
+
+    public static boolean hasRuntimeErrorEvidence(List<String> log) {
+        for (String line : log) {
+            if (JS_ERROR_HEADLINE.matcher(line).find() || SERVER_ERROR_RESPONSE.matcher(line).find()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private final Map<UUID, Running> byProject = new ConcurrentHashMap<>();
 
     /** One project's live process state, read by {@link #status} and written only by that process's own reader thread (and {@link #stop}). */

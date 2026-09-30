@@ -80,7 +80,8 @@ class AxRenewalCommentDeleteTest {
                 new AxRenewalProperties(null, null),
                 mock(AxRenewalCodeGenerator.class),
                 mock(AxRenewalImplementationRunner.class),
-                mock(AxRenewalLocalRunner.class));
+                mock(AxRenewalLocalRunner.class),
+                mock(AxRenewalTestRunner.class));
     }
 
     private void commentExistsBy(UUID authorId) {
