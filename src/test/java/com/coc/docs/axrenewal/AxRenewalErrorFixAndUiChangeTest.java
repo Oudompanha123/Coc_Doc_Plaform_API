@@ -64,7 +64,8 @@ class AxRenewalErrorFixAndUiChangeTest {
                 null,
                 null,
                 Instant.EPOCH,
-                Instant.EPOCH)));
+                Instant.EPOCH,
+                0)));
         when(implementations.findActive(projectId)).thenReturn(Optional.empty());
 
         service = new AxRenewalService(
@@ -76,6 +77,8 @@ class AxRenewalErrorFixAndUiChangeTest {
                 mock(AxRenewalConfirmationRepository.class),
                 implementations,
                 mock(AxRenewalCommentRepository.class),
+                TestMembers.everyone(),
+                mock(com.coc.docs.account.AccountRepository.class),
                 mock(AuditRepository.class),
                 new ObjectMapper(),
                 mock(LocalClaudeAnalyzer.class),

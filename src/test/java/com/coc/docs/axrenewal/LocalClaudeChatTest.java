@@ -41,7 +41,8 @@ class LocalClaudeChatTest {
                 null,
                 null,
                 Instant.EPOCH,
-                Instant.EPOCH);
+                Instant.EPOCH,
+                0);
     }
 
     @Nested

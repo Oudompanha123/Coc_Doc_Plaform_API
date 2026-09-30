@@ -62,7 +62,8 @@ class AxRenewalCommentDeleteTest {
                 null,
                 null,
                 Instant.EPOCH,
-                Instant.EPOCH)));
+                Instant.EPOCH,
+                0)));
 
         service = new AxRenewalService(
                 projects,
@@ -73,6 +74,8 @@ class AxRenewalCommentDeleteTest {
                 mock(AxRenewalConfirmationRepository.class),
                 mock(AxRenewalImplementationRepository.class),
                 comments,
+                TestMembers.everyone(),
+                mock(com.coc.docs.account.AccountRepository.class),
                 audit,
                 new ObjectMapper(),
                 mock(LocalClaudeAnalyzer.class),

@@ -30,6 +30,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
@@ -1128,7 +1129,7 @@ class SecurityRulesTest {
 
         @Test
         void the_read_side_admits_a_plain_user() throws Exception {
-            org.mockito.Mockito.when(axRenewalService.list()).thenReturn(List.of());
+            org.mockito.Mockito.when(axRenewalService.list(org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
 
             mvc.perform(get("/api/v1/ax-renewal/projects").with(as(AppRole.USER)))
                     .andExpect(status().isOk());
@@ -1242,6 +1243,7 @@ class SecurityRulesTest {
                             org.mockito.ArgumentMatchers.any(),
                             org.mockito.ArgumentMatchers.any(),
                             org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
                             org.mockito.ArgumentMatchers.any());
 
             // 404 from the stub, not 403 — the route was reached.
@@ -1286,12 +1288,14 @@ class SecurityRulesTest {
                     .confirmSection(
                             org.mockito.ArgumentMatchers.any(),
                             org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyInt(),
                             org.mockito.ArgumentMatchers.any());
 
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/plan/stack_move/confirm")
                             .with(SecurityMockMvcRequestPostProcessors.authentication(
                                     com.coc.docs.auth.TestCallers.authentication(AppRole.SUPER_ADMIN)))
-                            .contentType(MediaType.APPLICATION_JSON))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"revision\":0}"))
                     .andExpect(status().isNotFound());
         }
 
@@ -1302,14 +1306,205 @@ class SecurityRulesTest {
                     .confirmSection(
                             org.mockito.ArgumentMatchers.any(),
                             org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyInt(),
                             org.mockito.ArgumentMatchers.any());
 
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/plan/stack_move/confirm")
                             .with(SecurityMockMvcRequestPostProcessors.authentication(
                                     com.coc.docs.auth.TestCallers.authentication(
                                             java.util.Set.of(AppRole.DEVELOPER))))
-                            .contentType(MediaType.APPLICATION_JSON))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"revision\":0}"))
                     .andExpect(status().isNotFound());
+        }
+
+        // --- Project members (ADR-069) ------------------------------------
+        // The Admin floor only. Whether the caller is on *this* project is
+        // row data — AxRenewalMembershipTest covers that half.
+
+        @ParameterizedTest
+        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER", "REVIEWER", "LEAD"})
+        void managing_members_refuses_every_role_below_admin(AppRole role) throws Exception {
+            UUID projectId = UUID.randomUUID();
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + projectId + "/members")
+                            .with(as(role))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"email\":\"someone@example.com\"}"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(delete("/api/v1/ax-renewal/projects/" + projectId + "/members/" + UUID.randomUUID())
+                            .with(as(role)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void adding_a_member_admits_an_admin() throws Exception {
+            org.mockito.Mockito.doThrow(ApiException.notFound("project"))
+                    .when(axRenewalService)
+                    .addMember(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any());
+
+            // 404 from the stub, not 403 — the route was reached.
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/members")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"email\":\"someone@example.com\"}"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void removing_a_member_admits_an_admin() throws Exception {
+            org.mockito.Mockito.doThrow(ApiException.notFound("member"))
+                    .when(axRenewalService)
+                    .removeMember(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any());
+
+            mvc.perform(delete("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/members/" + UUID.randomUUID())
+                            .with(as(AppRole.ADMIN)))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void adding_a_member_without_an_email_is_refused_before_it_reaches_the_service() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/members")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"email\":\"  \"}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        // --- Reviewer and Lead (ADR-068) ----------------------------------
+        // Admitted to the workspace to read and comment, and nothing else.
+        // No SecurityConfig rule changed for this: the read side and the
+        // comment routes already floor at USER by rank, which both roles
+        // out-rank, and every other AX Renewal route already floors at ADMIN
+        // or at Super Admin / exactly Developer. These cases pin that down so
+        // a later edit to either floor has to break a test to widen them.
+
+        @ParameterizedTest
+        @EnumSource(value = AppRole.class, names = {"REVIEWER", "LEAD"})
+        void reviewer_and_lead_may_read_the_workspace(AppRole role) throws Exception {
+            org.mockito.Mockito.when(axRenewalService.list(org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/ax-renewal/projects").with(as(role))).andExpect(status().isOk());
+        }
+
+        @ParameterizedTest
+        @EnumSource(value = AppRole.class, names = {"REVIEWER", "LEAD"})
+        void reviewer_and_lead_may_comment(AppRole role) throws Exception {
+            org.mockito.Mockito.doThrow(ApiException.notFound("project"))
+                    .when(axRenewalService)
+                    .addComment(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any());
+
+            // 404 from the stub, not 403 — the route was reached.
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/comments")
+                            .with(as(role))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"body\":\"looks right to me\"}"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @ParameterizedTest
+        @EnumSource(value = AppRole.class, names = {"REVIEWER", "LEAD"})
+        void reviewer_and_lead_may_not_draft_the_plan(AppRole role) throws Exception {
+            // The admin floor: create, analyse, chat, edit. Rank does not
+            // reach it — both roles sit strictly below ADMIN.
+            UUID projectId = UUID.randomUUID();
+            mvc.perform(post("/api/v1/ax-renewal/projects")
+                            .with(as(role))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"x\"}"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + projectId + "/analysis/run").with(as(role)))
+                    .andExpect(status().isForbidden());
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + projectId + "/assistant/chat")
+                            .with(as(role))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"message\":\"what runs this?\"}"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(put("/api/v1/ax-renewal/projects/" + projectId + "/plan/pages")
+                            .with(as(role))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"pages\":[],\"revision\":0}"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(put("/api/v1/ax-renewal/projects/" + projectId + "/destination")
+                            .with(as(role))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"kind\":\"git_repo\",\"target\":\"x\",\"revision\":0}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @ParameterizedTest
+        @EnumSource(value = AppRole.class, names = {"REVIEWER", "LEAD"})
+        void reviewer_and_lead_may_not_sign_off_or_build(AppRole role) throws Exception {
+            // Super Admin or exactly Developer (exactAuthority()) — both
+            // roles out-rank Developer, which is precisely why this floor is
+            // not rank-based. Lead is deliberately not given confirm
+            // (ADR-068 §4.3, a PM decision still open).
+            UUID projectId = UUID.randomUUID();
+            UUID runId = UUID.randomUUID();
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + projectId + "/plan/pages/confirm")
+                            .with(as(role))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"revision\":0}"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + projectId + "/plan/pages/reopen").with(as(role)))
+                    .andExpect(status().isForbidden());
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + projectId + "/implementation/start").with(as(role)))
+                    .andExpect(status().isForbidden());
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + projectId + "/implementation/" + runId + "/approve")
+                            .with(as(role)))
+                    .andExpect(status().isForbidden());
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + projectId + "/implementation/" + runId + "/revert")
+                            .with(as(role)))
+                    .andExpect(status().isForbidden());
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + projectId + "/run-locally/start").with(as(role)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void a_plan_edit_without_a_revision_is_refused_before_it_reaches_the_service() throws Exception {
+            // Not an authorisation rule, but this is the one MockMvc slice
+            // that has the AX Renewal controller wired: a client that omits
+            // the revision is asking to overwrite whatever a teammate saved
+            // meanwhile, so it is a 400 — never an implied "latest" (ADR-067,
+            // the same stance SaveDraftRequest.versionNo takes).
+            mvc.perform(put("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/plan/pages")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"pages\":[]}"))
+                    .andExpect(status().isBadRequest());
+
+            org.mockito.Mockito.verify(axRenewalService, org.mockito.Mockito.never())
+                    .updatePages(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyInt(),
+                            org.mockito.ArgumentMatchers.any());
+        }
+
+        @Test
+        void confirming_without_a_revision_is_refused_before_it_reaches_the_service() throws Exception {
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/plan/pages/confirm")
+                            .with(SecurityMockMvcRequestPostProcessors.authentication(
+                                    com.coc.docs.auth.TestCallers.authentication(
+                                            java.util.Set.of(AppRole.DEVELOPER))))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isBadRequest());
+
+            org.mockito.Mockito.verify(axRenewalService, org.mockito.Mockito.never())
+                    .confirmSection(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyInt(),
+                            org.mockito.ArgumentMatchers.any());
         }
 
         @Test
@@ -1343,7 +1538,7 @@ class SecurityRulesTest {
 
         @Test
         void a_local_run_s_status_is_a_plain_read_admitted_at_the_user_floor() throws Exception {
-            org.mockito.Mockito.when(axRenewalService.runLocallyStatus(org.mockito.ArgumentMatchers.any()))
+            org.mockito.Mockito.when(axRenewalService.runLocallyStatus(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
                     .thenReturn(new com.coc.docs.axrenewal.AxRenewalLocalRunner.Status(
                             com.coc.docs.axrenewal.AxRenewalLocalRunner.Status.STATE_STOPPED, List.of(), null, null));
 
@@ -1367,7 +1562,7 @@ class SecurityRulesTest {
         void explaining_a_local_run_failure_admits_an_admin() throws Exception {
             org.mockito.Mockito.doThrow(ApiException.notFound("project"))
                     .when(axRenewalService)
-                    .explainRunLocallyFailure(org.mockito.ArgumentMatchers.any());
+                    .explainRunLocallyFailure(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
 
             // 404 from the stub, not 403 — the route was reached.
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/run-locally/explain")

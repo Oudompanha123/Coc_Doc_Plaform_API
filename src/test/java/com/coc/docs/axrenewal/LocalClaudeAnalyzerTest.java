@@ -47,7 +47,8 @@ class LocalClaudeAnalyzerTest {
                 null,
                 UUID.randomUUID(),
                 Instant.now(),
-                Instant.now());
+                Instant.now(),
+                0);
     }
 
     @Test

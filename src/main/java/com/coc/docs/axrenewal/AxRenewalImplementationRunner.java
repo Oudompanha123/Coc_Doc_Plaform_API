@@ -44,6 +44,14 @@ public class AxRenewalImplementationRunner {
     private final AxRenewalImplementationRepository implementations;
 
     /** The one live CLI process a {@code generating} run has, if any — registered the instant it starts, removed once {@link AxRenewalCodeGenerator#generate} returns either way. */
+    /**
+     * Every staging directory's name starts with this, directly under the
+     * system temp directory — which is also what lets a sweep (ADR-072) check
+     * that a path read back from the database really is one of these before
+     * deleting it.
+     */
+    static final String STAGING_PREFIX = "ax-renewal-generate-";
+
     private final Map<UUID, Process> runningProcesses = new ConcurrentHashMap<>();
     /** Runs {@link #cancel} was asked to stop — read once by {@link #runGeneration}'s own failure branch to report "cancelled", not a generic failure, then cleared. */
     private final Set<UUID> cancelledRuns = ConcurrentHashMap.newKeySet();
@@ -73,7 +81,7 @@ public class AxRenewalImplementationRunner {
     public void runGeneration(UUID runId, String runKind, String instruction, String sourcePath) {
         Path staging;
         try {
-            staging = Files.createTempDirectory("ax-renewal-generate-");
+            staging = Files.createTempDirectory(STAGING_PREFIX);
         } catch (IOException e) {
             implementations.markFailed(runId, "could not create a staging directory: " + e.getMessage());
             return;

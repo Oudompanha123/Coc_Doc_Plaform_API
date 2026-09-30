@@ -15,6 +15,7 @@ import java.util.Map;
  * @param confirmations one entry per confirmed section; a section absent from
  *     this map is unconfirmed.
  * @param latestImplementationRun null until an implementation has been started at least once.
+ * @param members who may change this project (ADR-069), earliest first.
  */
 public record AxRenewalProjectDetail(
         AxRenewalProject project,
@@ -27,4 +28,5 @@ public record AxRenewalProjectDetail(
         AxRenewalDestination destination,
         Map<AxRenewalSection, AxRenewalConfirmation> confirmations,
         AxRenewalImplementationRun latestImplementationRun,
-        List<AxRenewalComment> comments) {}
+        List<AxRenewalComment> comments,
+        List<AxRenewalMember> members) {}

@@ -61,7 +61,8 @@ class AxRenewalRunAnalysisSourcePathTest {
                 null,
                 null,
                 Instant.EPOCH,
-                Instant.EPOCH)));
+                Instant.EPOCH,
+                0)));
         when(localClaude.analyse(any(), any())).thenReturn(Optional.empty());
         when(analyses.find(projectId)).thenReturn(Optional.of(mock(AxRenewalAnalysis.class)));
 
@@ -74,6 +75,8 @@ class AxRenewalRunAnalysisSourcePathTest {
                 mock(AxRenewalConfirmationRepository.class),
                 mock(AxRenewalImplementationRepository.class),
                 mock(AxRenewalCommentRepository.class),
+                TestMembers.everyone(),
+                mock(com.coc.docs.account.AccountRepository.class),
                 mock(AuditRepository.class),
                 new ObjectMapper(),
                 localClaude,

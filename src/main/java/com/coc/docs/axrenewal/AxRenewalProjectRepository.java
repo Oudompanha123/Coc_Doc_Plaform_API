@@ -18,7 +18,7 @@ public class AxRenewalProjectRepository {
     private static final String COLUMNS =
             "id, name, description, status, manifest_filename, manifest_content, "
                     + "manifest_attached_at, manifest_attached_by, attach_stats::text as attach_stats, "
-                    + "created_by, created_at, updated_at";
+                    + "created_by, created_at, updated_at, revision";
 
     private final JdbcClient jdbc;
     private final Jsonb jsonb;
@@ -43,12 +43,28 @@ public class AxRenewalProjectRepository {
                 attachStats == null ? null : jsonb.read(attachStats),
                 rs.getObject("created_by", UUID.class),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-                rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+                rs.getObject("updated_at", OffsetDateTime.class).toInstant(),
+                rs.getInt("revision"));
     }
 
-    /** Every project, newest first. There is no per-account scoping yet — everyone at the `user` floor may read every project (ADR-037). */
+    /** Every project, newest first — only ever served to a super admin (ADR-070); everyone else gets {@link #listForMember}. */
     public List<AxRenewalProject> list() {
         return jdbc.sql("select " + COLUMNS + " from ax_renewal_project order by created_at desc")
+                .query(this::map)
+                .list();
+    }
+
+    /**
+     * The projects {@code accountId} is a member of, newest first (ADR-070).
+     * Scoped in the query itself, not filtered afterwards, so a project the
+     * caller is not on never leaves the database for this request.
+     */
+    public List<AxRenewalProject> listForMember(UUID accountId) {
+        return jdbc.sql("select " + COLUMNS + " from ax_renewal_project p"
+                        + " where exists (select 1 from ax_renewal_project_member m"
+                        + " where m.project_id = p.id and m.account_id = ?)"
+                        + " order by created_at desc")
+                .param(accountId)
                 .query(this::map)
                 .list();
     }
@@ -81,6 +97,37 @@ public class AxRenewalProjectRepository {
                         """)
                 .params(filename, content, stats == null ? null : jsonb.write(stats), attachedBy, id)
                 .update();
+    }
+
+    /**
+     * The project's current plan revision, with its row locked for the rest
+     * of the caller's transaction (ADR-067). Empty when the project does not
+     * exist.
+     *
+     * <p>{@code for update}, not a plain read: a confirmation checked against
+     * an unlocked read could interleave with a concurrent edit — read the old
+     * revision, then insert its confirmation after the edit had already
+     * cleared that section's — and a sign-off on content nobody had seen
+     * would survive. Holding the row serialises the two instead.
+     */
+    public Optional<Integer> lockRevision(UUID id) {
+        return jdbc.sql("select revision from ax_renewal_project where id = ? for update")
+                .param(id)
+                .query(Integer.class)
+                .optional();
+    }
+
+    /** Bumps the plan revision by one and returns the new value (ADR-067). Call after {@link #lockRevision}. */
+    public int incrementRevision(UUID id) {
+        return jdbc.sql("""
+                        update ax_renewal_project
+                        set revision = revision + 1, updated_at = now()
+                        where id = ?
+                        returning revision
+                        """)
+                .param(id)
+                .query(Integer.class)
+                .single();
     }
 
     public void updateStatus(UUID id, String status) {

@@ -17,11 +17,15 @@ import com.coc.docs.auth.TestCallers;
 import com.coc.docs.web.ApiException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 
 /**
@@ -62,7 +66,8 @@ class AxRenewalDeleteProjectTest {
                 null,
                 null,
                 Instant.EPOCH,
-                Instant.EPOCH)));
+                Instant.EPOCH,
+                0)));
         when(implementations.findActive(projectId)).thenReturn(Optional.empty());
         when(localRunner.isRunning(projectId)).thenReturn(false);
 
@@ -75,6 +80,8 @@ class AxRenewalDeleteProjectTest {
                 mock(AxRenewalConfirmationRepository.class),
                 implementations,
                 mock(AxRenewalCommentRepository.class),
+                TestMembers.everyone(),
+                mock(com.coc.docs.account.AccountRepository.class),
                 audit,
                 new ObjectMapper(),
                 mock(LocalClaudeAnalyzer.class),
@@ -102,6 +109,51 @@ class AxRenewalDeleteProjectTest {
                         eq(projectId),
                         detail.capture());
         assertThat(detail.getValue().path("name").asText()).isEqualTo("Legacy Portal");
+    }
+
+    // --- Permanent beyond the database (ADR-072) ---------------------------
+    // No transaction is active in this unit test, so the after-commit cleanup
+    // runs at once; AxRenewalProjectHardDeleteIntegrationTest covers the rows.
+
+    @Test
+    void drops_what_the_local_runner_still_holds_for_the_project() {
+        service.delete(projectId, actor);
+
+        verify(localRunner).forget(projectId);
+    }
+
+    @Test
+    void removes_a_staging_copy_a_crash_left_behind() throws Exception {
+        Path staging = Files.createTempDirectory(AxRenewalImplementationRunner.STAGING_PREFIX);
+        Files.writeString(staging.resolve("Generated.java"), "class Generated {}");
+        when(implementations.findStagingPaths(projectId)).thenReturn(List.of(staging.toString()));
+
+        service.delete(projectId, actor);
+
+        assertThat(staging).doesNotExist();
+    }
+
+    @Test
+    void never_deletes_a_path_that_is_not_one_of_its_own_staging_copies(@TempDir Path elsewhere) throws Exception {
+        // The path is read back from the database. One that has been changed
+        // there — to a real project folder, say — must not be deleted.
+        Path notStaging = Files.createDirectory(elsewhere.resolve("renewed-app"));
+        Files.writeString(notStaging.resolve("keep.txt"), "the team's own code");
+        when(implementations.findStagingPaths(projectId)).thenReturn(List.of(notStaging.toString()));
+
+        service.delete(projectId, actor);
+
+        assertThat(notStaging.resolve("keep.txt")).exists();
+    }
+
+    @Test
+    void cleans_up_nothing_when_the_delete_is_refused() {
+        when(implementations.findActive(projectId)).thenReturn(Optional.of(mock(AxRenewalImplementationRun.class)));
+
+        assertThatThrownBy(() -> service.delete(projectId, actor)).isInstanceOf(ApiException.class);
+
+        verify(localRunner, never()).forget(any());
+        verify(implementations, never()).findStagingPaths(any());
     }
 
     @Test
