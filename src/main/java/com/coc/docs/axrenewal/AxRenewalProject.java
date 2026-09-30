@@ -4,7 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Instant;
 import java.util.UUID;
 
-/** A row of {@code ax_renewal_project} — one legacy-renewal planning workspace (ADR-037). */
+/**
+ * A row of {@code ax_renewal_project} — one legacy-renewal planning workspace (ADR-037).
+ *
+ * <p>{@code revision} is the optimistic lock over the whole plan (ADR-061): a
+ * plan edit sends back the value it loaded, and a stale one is refused.
+ */
 public record AxRenewalProject(
         UUID id,
         String name,
@@ -17,7 +22,8 @@ public record AxRenewalProject(
         JsonNode attachStats,
         UUID createdBy,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        int revision) {
 
     public static final String STATUS_DRAFT = "draft";
     public static final String STATUS_ANALYZED = "analyzed";

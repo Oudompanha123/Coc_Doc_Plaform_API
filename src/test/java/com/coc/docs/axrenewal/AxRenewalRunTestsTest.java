@@ -56,7 +56,8 @@ class AxRenewalRunTestsTest {
                 null,
                 null,
                 Instant.EPOCH,
-                Instant.EPOCH)));
+                Instant.EPOCH,
+                0)));
 
         service = new AxRenewalService(
                 projects,
@@ -67,6 +68,8 @@ class AxRenewalRunTestsTest {
                 mock(AxRenewalConfirmationRepository.class),
                 implementations,
                 mock(AxRenewalCommentRepository.class),
+                TestMembers.everyone(),
+                mock(com.coc.docs.account.AccountRepository.class),
                 mock(AuditRepository.class),
                 new ObjectMapper(),
                 mock(LocalClaudeAnalyzer.class),

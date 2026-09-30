@@ -353,6 +353,8 @@ public class NotificationFeedService {
             case AuditAction.AX_RENEWAL_IMPLEMENTATION_REPLAY -> "Reused a previous rebuild's exact result";
             case AuditAction.AX_RENEWAL_COMMENT_ADD -> "Commented on a renewal project";
             case AuditAction.AX_RENEWAL_COMMENT_DELETE -> "Removed a comment from a renewal project";
+            case AuditAction.AX_RENEWAL_MEMBER_ADD -> "Added a member to a renewal project";
+            case AuditAction.AX_RENEWAL_MEMBER_REMOVE -> "Removed a member from a renewal project";
             case AuditAction.AX_RENEWAL_RUN_LOCALLY_START -> "Started a local run of a renewed project";
             case AuditAction.AX_RENEWAL_RUN_LOCALLY_STOP -> "Stopped a local run of a renewed project";
             case AuditAction.ACCOUNT_CAPABILITY_GRANT -> "Granted a capability";

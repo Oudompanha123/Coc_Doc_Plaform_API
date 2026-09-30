@@ -167,6 +167,24 @@ public class AxRenewalImplementationRepository {
                 .update();
     }
 
+    /**
+     * Every staging directory any of this project's runs still points at
+     * (ADR-066). Normally none: a staging copy is removed when its run fails,
+     * is cancelled, approved or rejected, and a project cannot be deleted
+     * while a run is still awaiting review. This is the sweep for the case
+     * where the backend stopped between creating one and cleaning it up, so
+     * deleting the project does not leave its generated code behind on disk.
+     */
+    public List<String> findStagingPaths(UUID projectId) {
+        return jdbc.sql("""
+                        select staging_path from ax_renewal_implementation_run
+                        where project_id = ? and staging_path is not null
+                        """)
+                .param(projectId)
+                .query(String.class)
+                .list();
+    }
+
     /** Clears the staging path once its directory has actually been deleted — never left pointing at nothing. */
     public void clearStaging(UUID id) {
         jdbc.sql("update ax_renewal_implementation_run set staging_path = null where id = ?")

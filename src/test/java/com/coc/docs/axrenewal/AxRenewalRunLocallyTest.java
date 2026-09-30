@@ -66,7 +66,8 @@ class AxRenewalRunLocallyTest {
                 null,
                 null,
                 Instant.EPOCH,
-                Instant.EPOCH)));
+                Instant.EPOCH,
+                0)));
 
         service = new AxRenewalService(
                 projects,
@@ -77,6 +78,8 @@ class AxRenewalRunLocallyTest {
                 mock(AxRenewalConfirmationRepository.class),
                 implementations,
                 mock(AxRenewalCommentRepository.class),
+                TestMembers.everyone(),
+                mock(com.coc.docs.account.AccountRepository.class),
                 mock(AuditRepository.class),
                 new ObjectMapper(),
                 mock(LocalClaudeAnalyzer.class),
@@ -219,7 +222,7 @@ class AxRenewalRunLocallyTest {
         when(localRunner.status(projectId))
                 .thenReturn(new AxRenewalLocalRunner.Status(AxRenewalLocalRunner.Status.STATE_RUNNING, List.of(), "http://localhost:3000", Instant.EPOCH));
 
-        assertThatThrownBy(() -> service.explainRunLocallyFailure(projectId))
+        assertThatThrownBy(() -> service.explainRunLocallyFailure(projectId, actor))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("no failed Run Locally attempt");
     }
@@ -244,7 +247,7 @@ class AxRenewalRunLocallyTest {
         LocalClaudeChat.Reply expected = new LocalClaudeChat.Reply("profile is undefined on that page", true);
         when(localChat.reply(any(), anyList(), anyString(), eq(destinationRoot.toString()))).thenReturn(expected);
 
-        assertThat(service.explainRunLocallyFailure(projectId)).isEqualTo(expected);
+        assertThat(service.explainRunLocallyFailure(projectId, actor)).isEqualTo(expected);
     }
 
     @Test
@@ -257,7 +260,7 @@ class AxRenewalRunLocallyTest {
         LocalClaudeChat.Reply expected = new LocalClaudeChat.Reply("profile is undefined on that page", true);
         when(localChat.reply(any(), anyList(), anyString(), eq(destinationRoot.toString()))).thenReturn(expected);
 
-        assertThat(service.explainRunLocallyFailure(projectId)).isEqualTo(expected);
+        assertThat(service.explainRunLocallyFailure(projectId, actor)).isEqualTo(expected);
     }
 
     @Test
@@ -265,7 +268,7 @@ class AxRenewalRunLocallyTest {
         when(localRunner.status(projectId))
                 .thenReturn(new AxRenewalLocalRunner.Status(AxRenewalLocalRunner.Status.STATE_RUNNING, List.of("ready on http://localhost:3000"), "http://localhost:3000", Instant.EPOCH));
 
-        assertThatThrownBy(() -> service.explainRunLocallyFailure(projectId))
+        assertThatThrownBy(() -> service.explainRunLocallyFailure(projectId, actor))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("no failed Run Locally attempt");
     }
@@ -276,7 +279,7 @@ class AxRenewalRunLocallyTest {
                 .thenReturn(new AxRenewalLocalRunner.Status(AxRenewalLocalRunner.Status.STATE_FAILED, List.of("npm error"), null, Instant.EPOCH));
         when(implementations.findLatest(projectId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.explainRunLocallyFailure(projectId))
+        assertThatThrownBy(() -> service.explainRunLocallyFailure(projectId, actor))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("no implementation has been applied");
     }
@@ -291,7 +294,7 @@ class AxRenewalRunLocallyTest {
         LocalClaudeChat.Reply expected = new LocalClaudeChat.Reply("looks like a port conflict", true);
         when(localChat.reply(any(), anyList(), anyString(), eq(destinationRoot.toString()))).thenReturn(expected);
 
-        LocalClaudeChat.Reply reply = service.explainRunLocallyFailure(projectId);
+        LocalClaudeChat.Reply reply = service.explainRunLocallyFailure(projectId, actor);
 
         assertThat(reply).isEqualTo(expected);
         verify(localChat)

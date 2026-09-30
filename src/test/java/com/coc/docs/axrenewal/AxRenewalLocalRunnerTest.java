@@ -143,6 +143,41 @@ class AxRenewalLocalRunnerTest {
         waitUntil(() -> runner.status(projectId).state().equals(AxRenewalLocalRunner.Status.STATE_FAILED));
     }
 
+    // --- forget (ADR-066): a deleted project leaves nothing in memory -------
+
+    @Test
+    void forget_drops_a_finished_run_s_state_and_captured_log(@TempDir Path cwd) throws IOException {
+        UUID projectId = UUID.randomUUID();
+        List<String> failing = windows()
+                ? List.of("cmd.exe", "/c", "echo secret-looking output && exit 1")
+                : List.of("sh", "-c", "echo secret-looking output; exit 1");
+        runner.start(projectId, failing, cwd);
+        waitUntil(() -> runner.status(projectId).state().equals(AxRenewalLocalRunner.Status.STATE_FAILED));
+
+        runner.forget(projectId);
+
+        // Indistinguishable from a project that never ran at all.
+        AxRenewalLocalRunner.Status status = runner.status(projectId);
+        assertThat(status.state()).isEqualTo(AxRenewalLocalRunner.Status.STATE_STOPPED);
+        assertThat(status.log()).isEmpty();
+    }
+
+    @Test
+    void forget_never_drops_a_live_process(@TempDir Path cwd) throws IOException {
+        // Forgetting a live one would orphan a process nobody could stop.
+        UUID projectId = UUID.randomUUID();
+        runner.start(projectId, echoThenIdle("http://localhost:4127"), cwd);
+        try {
+            runner.forget(projectId);
+
+            assertThat(runner.isRunning(projectId)).isTrue();
+        } finally {
+            runner.stop(projectId);
+            waitUntil(() -> !runner.isRunning(projectId));
+            waitUntilDeletable(cwd);
+        }
+    }
+
     // -----------------------------------------------------------------------
     // hasRuntimeErrorEvidence (ADR-060) -- a dev server rendering an
     // unhandled error for one request never exits the process, so `failed`

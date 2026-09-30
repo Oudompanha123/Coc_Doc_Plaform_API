@@ -1277,26 +1277,60 @@ public final class ApiDtos {
 
     public record AxRenewalStackLayerRequest(@NotBlank String layerKey, String oldTarget, String newTarget) {}
 
-    public record UpdateStackMoveRequest(@NotNull List<AxRenewalStackLayerRequest> layers) {}
+    /*
+     * Every AX Renewal plan edit carries the project revision it was made
+     * against (ADR-061), required with no default for the same reason
+     * SaveDraftRequest.versionNo is: a client that omitted it would be asking
+     * to overwrite whatever a teammate saved meanwhile, so a missing value is
+     * a 400, not an implied "latest".
+     */
 
-    public record UpdateArchitectureRequest(String summary, JsonNode diagram) {}
+    public record UpdateStackMoveRequest(
+            @NotNull List<AxRenewalStackLayerRequest> layers, @NotNull Integer revision) {}
+
+    public record UpdateArchitectureRequest(String summary, JsonNode diagram, @NotNull Integer revision) {}
 
     public record AxRenewalPageMappingRequest(String oldPath, String newPath, String notes) {}
 
-    public record UpdatePagesRequest(@NotNull List<AxRenewalPageMappingRequest> pages) {}
+    public record UpdatePagesRequest(
+            @NotNull List<AxRenewalPageMappingRequest> pages, @NotNull Integer revision) {}
 
     public record AxRenewalDbChangeRequest(
             @NotBlank String changeType, @NotBlank String tableName, JsonNode detail, String rationale) {}
 
-    public record UpdateDatabasePlanRequest(@NotNull List<AxRenewalDbChangeRequest> changes) {}
+    public record UpdateDatabasePlanRequest(
+            @NotNull List<AxRenewalDbChangeRequest> changes, @NotNull Integer revision) {}
 
     public record ConnectDatabaseRequest(
-            String engine, String host, Integer port, String databaseName, String schemaName) {}
+            String engine,
+            String host,
+            Integer port,
+            String databaseName,
+            String schemaName,
+            @NotNull Integer revision) {}
 
     public record SetDestinationRequest(
-            @NotBlank String kind, @NotBlank String target, String branch, String notes) {}
+            @NotBlank String kind,
+            @NotBlank String target,
+            String branch,
+            String notes,
+            @NotNull Integer revision) {}
+
+    /** Confirming checks the revision too, without bumping it — see {@code AxRenewalService#confirmSection}. */
+    public record ConfirmAxRenewalSectionRequest(@NotNull Integer revision) {}
 
     public record AddAxRenewalCommentRequest(@NotBlank String body) {}
+
+    /** By email: nobody below super admin can list accounts to pick from (NFR-SEC-PII, ADR-063). */
+    public record AddAxRenewalMemberRequest(@NotBlank String email) {}
+
+    /** Display name only, never the email — the same as a comment's author (ADR-045, ADR-063). */
+    public record AxRenewalMemberResponse(UUID accountId, String displayName, Instant addedAt) {
+
+        public static AxRenewalMemberResponse of(com.coc.docs.axrenewal.AxRenewalMember member) {
+            return new AxRenewalMemberResponse(member.accountId(), member.displayName(), member.addedAt());
+        }
+    }
 
     public record AxRenewalProjectResponse(
             UUID id,
@@ -1307,9 +1341,12 @@ public final class ApiDtos {
             Instant manifestAttachedAt,
             JsonNode attachStats,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            int revision,
+            boolean member) {
 
-        public static AxRenewalProjectResponse of(AxRenewalProject project) {
+        /** @param member whether the caller is a member of this project (ADR-063) — computed per request, never stored. */
+        public static AxRenewalProjectResponse of(AxRenewalProject project, boolean member) {
             return new AxRenewalProjectResponse(
                     project.id(),
                     project.name(),
@@ -1319,7 +1356,9 @@ public final class ApiDtos {
                     project.manifestAttachedAt(),
                     project.attachStats(),
                     project.createdAt(),
-                    project.updatedAt());
+                    project.updatedAt(),
+                    project.revision(),
+                    member);
         }
     }
 
@@ -1509,16 +1548,19 @@ public final class ApiDtos {
             AxRenewalDestinationResponse destination,
             Map<String, AxRenewalConfirmationResponse> confirmations,
             AxRenewalImplementationRunResponse latestImplementationRun,
-            List<AxRenewalCommentResponse> comments) {
+            List<AxRenewalCommentResponse> comments,
+            List<AxRenewalMemberResponse> members) {
 
-        public static AxRenewalProjectDetailResponse of(AxRenewalProjectDetail detail) {
+        /** @param callerId whose membership {@code project.member} reports (ADR-063). */
+        public static AxRenewalProjectDetailResponse of(AxRenewalProjectDetail detail, UUID callerId) {
+            boolean callerIsMember = detail.members().stream().anyMatch(m -> m.accountId().equals(callerId));
             Map<String, AxRenewalConfirmationResponse> confirmations = new java.util.LinkedHashMap<>();
             detail.confirmations()
                     .forEach((section, confirmation) ->
                             confirmations.put(section.wire(), AxRenewalConfirmationResponse.of(confirmation)));
 
             return new AxRenewalProjectDetailResponse(
-                    AxRenewalProjectResponse.of(detail.project()),
+                    AxRenewalProjectResponse.of(detail.project(), callerIsMember),
                     detail.analysis() == null ? null : AxRenewalAnalysisResponse.of(detail.analysis()),
                     detail.stackLayers().stream().map(AxRenewalStackLayerResponse::of).toList(),
                     detail.architecture() == null ? null : AxRenewalArchitectureResponse.of(detail.architecture()),
@@ -1530,7 +1572,8 @@ public final class ApiDtos {
                     detail.latestImplementationRun() == null
                             ? null
                             : AxRenewalImplementationRunResponse.of(detail.latestImplementationRun()),
-                    detail.comments().stream().map(AxRenewalCommentResponse::of).toList());
+                    detail.comments().stream().map(AxRenewalCommentResponse::of).toList(),
+                    detail.members().stream().map(AxRenewalMemberResponse::of).toList());
         }
     }
 }

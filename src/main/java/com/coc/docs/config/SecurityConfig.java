@@ -390,6 +390,16 @@ public class SecurityConfig {
                         // authorisation decision, so it does not live here.
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/ax-renewal/projects/*")
                         .hasRole(AppRole.ADMIN.name())
+                        // Project members (ADR-063): who is on the team is a
+                        // project-lifecycle decision, the same floor as
+                        // creating the project. Whether this caller is on
+                        // *this* project is row data, so AxRenewalService
+                        // checks that, not this matcher. Listing members is a
+                        // plain read — it comes with the project detail GET.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/members")
+                        .hasRole(AppRole.ADMIN.name())
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/ax-renewal/projects/*/members/*")
+                        .hasRole(AppRole.ADMIN.name())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/manifest")
                         .hasRole(AppRole.ADMIN.name())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/analysis/run")

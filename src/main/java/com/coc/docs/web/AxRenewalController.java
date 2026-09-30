@@ -51,9 +51,17 @@ public class AxRenewalController {
         return new ApiDtos.AxRenewalEngineResponse(status.connected(), status.readsSource());
     }
 
+    /**
+     * The projects the caller may see (ADR-064) — only those they are a member
+     * of, or every project for a super admin — each flagged with whether the
+     * caller is a member, which only ever differs for a super admin.
+     */
     @GetMapping("/projects")
-    List<ApiDtos.AxRenewalProjectResponse> list() {
-        return projects.list().stream().map(ApiDtos.AxRenewalProjectResponse::of).toList();
+    List<ApiDtos.AxRenewalProjectResponse> list(@AuthenticationPrincipal CurrentUser actor) {
+        var mine = projects.memberProjectIds(actor);
+        return projects.list(actor).stream()
+                .map(p -> ApiDtos.AxRenewalProjectResponse.of(p, mine.contains(p.id())))
+                .toList();
     }
 
     @PostMapping("/projects")
@@ -62,12 +70,36 @@ public class AxRenewalController {
             @AuthenticationPrincipal CurrentUser actor) {
         var created = projects.create(request.name(), request.description(), actor);
         return ResponseEntity.created(URI.create("/api/v1/ax-renewal/projects/" + created.id()))
-                .body(ApiDtos.AxRenewalProjectResponse.of(created));
+                .body(ApiDtos.AxRenewalProjectResponse.of(created, true));
     }
 
     @GetMapping("/projects/{projectId}")
-    ApiDtos.AxRenewalProjectDetailResponse detail(@PathVariable UUID projectId) {
-        return ApiDtos.AxRenewalProjectDetailResponse.of(projects.detail(projectId));
+    ApiDtos.AxRenewalProjectDetailResponse detail(
+            @PathVariable UUID projectId, @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalProjectDetailResponse.of(projects.detail(projectId, actor), actor.id());
+    }
+
+    /**
+     * Adds a member by email (ADR-063) and returns the project's members
+     * after the change. Admin floor in {@code SecurityConfig}; that the caller
+     * is on this project themselves is {@code AxRenewalService}'s check,
+     * since it is row data.
+     */
+    @PostMapping("/projects/{projectId}/members")
+    List<ApiDtos.AxRenewalMemberResponse> addMember(
+            @PathVariable UUID projectId,
+            @Valid @RequestBody ApiDtos.AddAxRenewalMemberRequest request,
+            @AuthenticationPrincipal CurrentUser actor) {
+        return projects.addMember(projectId, request.email(), actor).stream()
+                .map(ApiDtos.AxRenewalMemberResponse::of)
+                .toList();
+    }
+
+    @DeleteMapping("/projects/{projectId}/members/{accountId}")
+    ResponseEntity<Void> removeMember(
+            @PathVariable UUID projectId, @PathVariable UUID accountId, @AuthenticationPrincipal CurrentUser actor) {
+        projects.removeMember(projectId, accountId, actor);
+        return ResponseEntity.noContent().build();
     }
 
     /** Deletes a project outright (ADR-051). 204, since there is nothing left to return. */
@@ -82,8 +114,9 @@ public class AxRenewalController {
             @PathVariable UUID projectId,
             @Valid @RequestBody ApiDtos.AttachManifestRequest request,
             @AuthenticationPrincipal CurrentUser actor) {
-        return ApiDtos.AxRenewalProjectResponse.of(
-                projects.attachManifest(projectId, request.filename(), request.content(), request.stats(), actor));
+        var attached =
+                projects.attachManifest(projectId, request.filename(), request.content(), request.stats(), actor);
+        return ApiDtos.AxRenewalProjectResponse.of(attached, projects.isMember(projectId, actor));
     }
 
     /**
@@ -114,7 +147,7 @@ public class AxRenewalController {
         List<AxRenewalPlanRepository.StackLayerInput> layers = request.layers().stream()
                 .map(l -> new AxRenewalPlanRepository.StackLayerInput(l.layerKey(), l.oldTarget(), l.newTarget()))
                 .toList();
-        return projects.updateStackMove(projectId, layers, actor).stream()
+        return projects.updateStackMove(projectId, layers, request.revision(), actor).stream()
                 .map(ApiDtos.AxRenewalStackLayerResponse::of)
                 .toList();
     }
@@ -122,10 +155,10 @@ public class AxRenewalController {
     @PutMapping("/projects/{projectId}/plan/architecture")
     ApiDtos.AxRenewalArchitectureResponse updateArchitecture(
             @PathVariable UUID projectId,
-            @RequestBody ApiDtos.UpdateArchitectureRequest request,
+            @Valid @RequestBody ApiDtos.UpdateArchitectureRequest request,
             @AuthenticationPrincipal CurrentUser actor) {
-        return ApiDtos.AxRenewalArchitectureResponse.of(
-                projects.updateArchitecture(projectId, request.summary(), request.diagram(), actor));
+        return ApiDtos.AxRenewalArchitectureResponse.of(projects.updateArchitecture(
+                projectId, request.summary(), request.diagram(), request.revision(), actor));
     }
 
     @PutMapping("/projects/{projectId}/plan/pages")
@@ -136,7 +169,7 @@ public class AxRenewalController {
         List<AxRenewalPlanRepository.PageMappingInput> mappings = request.pages().stream()
                 .map(p -> new AxRenewalPlanRepository.PageMappingInput(p.oldPath(), p.newPath(), p.notes()))
                 .toList();
-        return projects.updatePages(projectId, mappings, actor).stream()
+        return projects.updatePages(projectId, mappings, request.revision(), actor).stream()
                 .map(ApiDtos.AxRenewalPageMappingResponse::of)
                 .toList();
     }
@@ -150,7 +183,7 @@ public class AxRenewalController {
                 .map(c -> new AxRenewalPlanRepository.DbChangeInput(
                         c.changeType(), c.tableName(), c.detail(), c.rationale()))
                 .toList();
-        return projects.updateDatabasePlan(projectId, changes, actor).stream()
+        return projects.updateDatabasePlan(projectId, changes, request.revision(), actor).stream()
                 .map(ApiDtos.AxRenewalDbChangeResponse::of)
                 .toList();
     }
@@ -158,7 +191,7 @@ public class AxRenewalController {
     @PutMapping("/projects/{projectId}/database/connect")
     ApiDtos.AxRenewalDbConnectionResponse connectDatabase(
             @PathVariable UUID projectId,
-            @RequestBody ApiDtos.ConnectDatabaseRequest request,
+            @Valid @RequestBody ApiDtos.ConnectDatabaseRequest request,
             @AuthenticationPrincipal CurrentUser actor) {
         return ApiDtos.AxRenewalDbConnectionResponse.of(projects.connectDatabase(
                 projectId,
@@ -167,6 +200,7 @@ public class AxRenewalController {
                 request.port(),
                 request.databaseName(),
                 request.schemaName(),
+                request.revision(),
                 actor));
     }
 
@@ -176,16 +210,24 @@ public class AxRenewalController {
             @Valid @RequestBody ApiDtos.SetDestinationRequest request,
             @AuthenticationPrincipal CurrentUser actor) {
         return ApiDtos.AxRenewalDestinationResponse.of(projects.setDestination(
-                projectId, request.kind(), request.target(), request.branch(), request.notes(), actor));
+                projectId,
+                request.kind(),
+                request.target(),
+                request.branch(),
+                request.notes(),
+                request.revision(),
+                actor));
     }
 
     @PostMapping("/projects/{projectId}/plan/{section}/confirm")
     ApiDtos.AxRenewalConfirmationResponse confirm(
             @PathVariable UUID projectId,
             @PathVariable String section,
+            @Valid @RequestBody ApiDtos.ConfirmAxRenewalSectionRequest request,
             @AuthenticationPrincipal CurrentUser actor) {
         AxRenewalSection parsed = parseSection(section);
-        return ApiDtos.AxRenewalConfirmationResponse.of(projects.confirmSection(projectId, parsed, actor));
+        return ApiDtos.AxRenewalConfirmationResponse.of(
+                projects.confirmSection(projectId, parsed, request.revision(), actor));
     }
 
     @PostMapping("/projects/{projectId}/plan/{section}/reopen")
@@ -216,8 +258,8 @@ public class AxRenewalController {
     /** The files a Generate run actually found different, once it reaches {@code awaiting_review} (ADR-044). */
     @GetMapping("/projects/{projectId}/implementation/{runId}/changes")
     List<ApiDtos.AxRenewalGeneratedChangeResponse> generatedChanges(
-            @PathVariable UUID projectId, @PathVariable UUID runId) {
-        return projects.findGeneratedChanges(projectId, runId).stream()
+            @PathVariable UUID projectId, @PathVariable UUID runId, @AuthenticationPrincipal CurrentUser actor) {
+        return projects.findGeneratedChanges(projectId, runId, actor).stream()
                 .map(ApiDtos.AxRenewalGeneratedChangeResponse::of)
                 .toList();
     }
@@ -290,19 +332,22 @@ public class AxRenewalController {
     }
 
     @GetMapping("/projects/{projectId}/run-locally/status")
-    ApiDtos.AxRenewalRunLocallyStatusResponse runLocallyStatus(@PathVariable UUID projectId) {
-        return ApiDtos.AxRenewalRunLocallyStatusResponse.of(projects.runLocallyStatus(projectId));
+    ApiDtos.AxRenewalRunLocallyStatusResponse runLocallyStatus(
+            @PathVariable UUID projectId, @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalRunLocallyStatusResponse.of(projects.runLocallyStatus(projectId, actor));
     }
 
     /**
      * AI Error Assistant, phase 1 (ADR-060) — read-only, same reasoning as
-     * {@code chat} above: nothing is written, so no {@code actor} is taken
-     * and {@code SecurityConfig} sits this at the same read floor as chat,
-     * not the write floor Run Locally start/stop and Approve sit at.
+     * {@code chat} above: nothing is written, and {@code SecurityConfig} sits
+     * this at the same read floor as chat, not the write floor Run Locally
+     * start/stop and Approve sit at. {@code actor} is taken only so the
+     * caller's membership can be checked (ADR-064).
      */
     @PostMapping("/projects/{projectId}/run-locally/explain")
-    ApiDtos.AxRenewalChatResponse explainRunLocallyFailure(@PathVariable UUID projectId) {
-        LocalClaudeChat.Reply reply = projects.explainRunLocallyFailure(projectId);
+    ApiDtos.AxRenewalChatResponse explainRunLocallyFailure(
+            @PathVariable UUID projectId, @AuthenticationPrincipal CurrentUser actor) {
+        LocalClaudeChat.Reply reply = projects.explainRunLocallyFailure(projectId, actor);
         return new ApiDtos.AxRenewalChatResponse(reply.text(), reply.readSource());
     }
 
@@ -346,13 +391,16 @@ public class AxRenewalController {
      */
     @PostMapping("/projects/{projectId}/assistant/chat")
     ApiDtos.AxRenewalChatResponse chat(
-            @PathVariable UUID projectId, @Valid @RequestBody ApiDtos.AxRenewalChatRequest request) {
+            @PathVariable UUID projectId,
+            @Valid @RequestBody ApiDtos.AxRenewalChatRequest request,
+            @AuthenticationPrincipal CurrentUser actor) {
         List<LocalClaudeChat.Turn> history = request.history() == null
                 ? List.of()
                 : request.history().stream()
                         .map(turn -> new LocalClaudeChat.Turn(turn.role(), turn.text()))
                         .toList();
-        LocalClaudeChat.Reply reply = projects.chat(projectId, history, request.message(), request.sourcePath());
+        LocalClaudeChat.Reply reply =
+                projects.chat(projectId, history, request.message(), request.sourcePath(), actor);
         return new ApiDtos.AxRenewalChatResponse(reply.text(), reply.readSource());
     }
 

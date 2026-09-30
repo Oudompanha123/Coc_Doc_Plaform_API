@@ -184,6 +184,11 @@ public final class AuditAction {
      */
     public static final String AX_RENEWAL_COMMENT_DELETE = "ax_renewal.comment_delete";
 
+    /** A member added to / removed from one AX Renewal project (ADR-063). {@code detail.accountId} names who. */
+    public static final String AX_RENEWAL_MEMBER_ADD = "ax_renewal.member_add";
+
+    public static final String AX_RENEWAL_MEMBER_REMOVE = "ax_renewal.member_remove";
+
     /** Starting/stopping the Run Locally dev server (ADR-048) — the process itself is never persisted, so this entry is the only durable record that it ran at all. */
     public static final String AX_RENEWAL_RUN_LOCALLY_START = "ax_renewal.run_locally_start";
 

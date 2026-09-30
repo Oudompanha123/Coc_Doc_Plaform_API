@@ -1,5 +1,8 @@
 package com.coc.docs.axrenewal;
 
+import com.coc.docs.account.Account;
+import com.coc.docs.account.AccountRepository;
+import com.coc.docs.account.AccountStatus;
 import com.coc.docs.account.AppRole;
 import com.coc.docs.audit.AuditAction;
 import com.coc.docs.audit.AuditRepository;
@@ -19,6 +22,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
@@ -39,7 +43,14 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * set" precondition, because it depends on row data, not on who is calling —
  * that is a business rule, reported as a 409, not an authorisation decision.
  *
- * <p>// req: ADR-037
+ * <p>The other exception is row data that decides <em>who</em>, which no
+ * matcher can see: a comment's author (ADR-045) and a project's members
+ * (ADR-063, ADR-064). {@code SecurityConfig} still decides what a role may
+ * do; {@link #requireMember} decides which projects a caller may see at all.
+ * Every public method that takes a {@code projectId} goes through it — reads
+ * included (ADR-064) — except {@link #create}, where there is no project yet.
+ *
+ * <p>// req: ADR-037, ADR-063, ADR-064
  */
 @Service
 public class AxRenewalService {
@@ -52,6 +63,8 @@ public class AxRenewalService {
     private final AxRenewalConfirmationRepository confirmations;
     private final AxRenewalImplementationRepository implementations;
     private final AxRenewalCommentRepository comments;
+    private final AxRenewalMemberRepository members;
+    private final AccountRepository accounts;
     private final AuditRepository audit;
     private final ObjectMapper json;
     private final LocalClaudeAnalyzer localClaude;
@@ -71,6 +84,8 @@ public class AxRenewalService {
             AxRenewalConfirmationRepository confirmations,
             AxRenewalImplementationRepository implementations,
             AxRenewalCommentRepository comments,
+            AxRenewalMemberRepository members,
+            AccountRepository accounts,
             AuditRepository audit,
             ObjectMapper json,
             LocalClaudeAnalyzer localClaude,
@@ -88,6 +103,8 @@ public class AxRenewalService {
         this.confirmations = confirmations;
         this.implementations = implementations;
         this.comments = comments;
+        this.members = members;
+        this.accounts = accounts;
         this.audit = audit;
         this.json = json;
         this.localClaude = localClaude;
@@ -103,8 +120,22 @@ public class AxRenewalService {
     // Projects
     // -----------------------------------------------------------------------
 
-    public List<AxRenewalProject> list() {
-        return projects.list();
+    /**
+     * The projects {@code actor} may see (ADR-064): the ones they are a member
+     * of, or every project for a super admin. Scoped in the query, so a
+     * project the caller is not on is never loaded for them at all.
+     */
+    public List<AxRenewalProject> list(CurrentUser actor) {
+        return actor.role() == AppRole.SUPER_ADMIN ? projects.list() : projects.listForMember(actor.id());
+    }
+
+    /** The projects {@code actor} is a member of (ADR-063) — the picker's "Mine" filter. */
+    public Set<UUID> memberProjectIds(CurrentUser actor) {
+        return members.projectIdsFor(actor.id());
+    }
+
+    public boolean isMember(UUID projectId, CurrentUser actor) {
+        return members.isMember(projectId, actor.id());
     }
 
     @Transactional
@@ -113,6 +144,9 @@ public class AxRenewalService {
             throw ApiException.badRequest("a project needs a name");
         }
         AxRenewalProject created = projects.insert(name.trim(), description, actor.id());
+        // The creator is the first member (ADR-063) — otherwise nobody could
+        // change the project they just made, bar a super admin.
+        members.add(created.id(), actor.id(), actor.id());
         audit.append(
                 actor.id(),
                 actor.email(),
@@ -124,8 +158,8 @@ public class AxRenewalService {
     }
 
     /** Everything one project's screen renders, assembled in one call. */
-    public AxRenewalProjectDetail detail(UUID projectId) {
-        AxRenewalProject project = requireProject(projectId);
+    public AxRenewalProjectDetail detail(UUID projectId, CurrentUser actor) {
+        AxRenewalProject project = requireMember(projectId, actor);
         return new AxRenewalProjectDetail(
                 project,
                 analyses.find(projectId).orElse(null),
@@ -137,11 +171,60 @@ public class AxRenewalService {
                 destinations.find(projectId).orElse(null),
                 confirmations.findAllForProject(projectId),
                 implementations.findLatest(projectId).orElse(null),
-                comments.listForProject(projectId));
+                comments.listForProject(projectId),
+                members.listForProject(projectId));
     }
 
     private AxRenewalProject requireProject(UUID projectId) {
         return projects.findById(projectId).orElseThrow(() -> ApiException.notFound("project"));
+    }
+
+    /**
+     * The project, if {@code actor} may access it at all (ADR-064): a member
+     * of it, or a super admin, who may access any project — the same override
+     * a super admin already has over someone else's comment (ADR-045).
+     *
+     * <p>Every method that reads or changes one project starts here. What the
+     * caller may then <em>do</em> is still their role's question, answered by
+     * {@code SecurityConfig} before this method is ever reached.
+     *
+     * <p><b>A non-member gets exactly the 404 a missing project gets</b> —
+     * same status, same message — not a 403. A 403 would confirm that a
+     * project with that id exists; a project someone was not invited to
+     * should be as invisible to them as one that was never created.
+     */
+    private AxRenewalProject requireMember(UUID projectId, CurrentUser actor) {
+        AxRenewalProject project = requireProject(projectId);
+        if (actor.role() != AppRole.SUPER_ADMIN && !members.isMember(projectId, actor.id())) {
+            throw ApiException.notFound("project");
+        }
+        return project;
+    }
+
+    /**
+     * Refuses a write made against a plan the caller is no longer looking at
+     * (ADR-061) — the same guarantee FR-CONT-013 gives a page draft. Locks the
+     * project row for the rest of the transaction, so a concurrent edit and
+     * this caller's write are serialised rather than interleaved.
+     *
+     * <p>A 409, not a warning: the person who loaded revision 3 and pressed
+     * save after a teammate's save made it 4 would otherwise erase that
+     * teammate's work without either of them knowing.
+     */
+    private void requireCurrentRevision(UUID projectId, int expectedRevision) {
+        int current = projects.lockRevision(projectId).orElseThrow(() -> ApiException.notFound("project"));
+        if (current != expectedRevision) {
+            throw ApiException.conflict(
+                    "this project's plan was changed by someone else since you opened it (you have revision "
+                            + expectedRevision + ", the current plan is revision " + current
+                            + "). Reload to see their changes before saving.");
+        }
+    }
+
+    /** {@link #requireCurrentRevision}, then bumps the revision — every plan edit's first step (ADR-061). */
+    private void advanceRevision(UUID projectId, int expectedRevision) {
+        requireCurrentRevision(projectId, expectedRevision);
+        projects.incrementRevision(projectId);
     }
 
     /**
@@ -193,11 +276,22 @@ public class AxRenewalService {
      * <p>Audited before the row is gone, the same order {@code
      * AccountService#delete} uses — {@code target_id} in the entry keeps
      * pointing at a project that no longer exists, which is why {@code
-     * detail} also carries its name.
+     * detail} also carries its name. That audit entry is the one record that
+     * deliberately survives: {@code audit_log} is append-only and retained
+     * for at least a year (ADR-006), and it holds the fact of the deletion,
+     * not the project.
+     *
+     * <p>Permanent beyond the database too (ADR-066): once the delete has
+     * committed, whatever this backend still holds for the project outside
+     * it is dropped — a finished Run Locally's captured log in memory, and
+     * any staging copy of generated code a crash left on disk. Never the
+     * output destination: that is where Approve wrote the renewed code for
+     * the team, outside this application, and deleting a planning workspace
+     * is not a request to delete their repository.
      */
     @Transactional
     public void delete(UUID projectId, CurrentUser actor) {
-        AxRenewalProject project = requireProject(projectId);
+        AxRenewalProject project = requireMember(projectId, actor);
         if (implementations.findActive(projectId).isPresent()) {
             throw ApiException.conflict("cancel or resolve the active implementation run before deleting this project");
         }
@@ -213,7 +307,53 @@ public class AxRenewalService {
                 projectId,
                 json.createObjectNode().put("name", project.name()));
 
+        // Read before the rows cascade away — afterwards there is nothing left
+        // to ask where the staging copies were.
+        List<String> stagingPaths = implementations.findStagingPaths(projectId);
         projects.delete(projectId);
+
+        // After commit, not now: if the delete rolls back, the project still
+        // exists and its log and staging copies still belong to it.
+        afterCommit(() -> {
+            localRunner.forget(projectId);
+            stagingPaths.forEach(AxRenewalService::deleteStagingCopy);
+        });
+    }
+
+    /** Runs {@code action} once the current transaction commits — or at once, when there is none to wait for. */
+    private static void afterCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                action.run();
+            }
+        });
+    }
+
+    /**
+     * Deletes one staging copy — only if the path really is one: a directory
+     * directly under the system temp directory whose name carries the
+     * generator's own prefix. The path comes back from the database, and a
+     * value that had been changed there must not be able to point this
+     * recursive delete at anything else on the machine.
+     */
+    private static void deleteStagingCopy(String stagingPath) {
+        Path path;
+        try {
+            path = Path.of(stagingPath).toAbsolutePath().normalize();
+        } catch (InvalidPathException e) {
+            return;
+        }
+        Path tempRoot = Path.of(System.getProperty("java.io.tmpdir")).toAbsolutePath().normalize();
+        boolean isStagingCopy = tempRoot.equals(path.getParent())
+                && path.getFileName().toString().startsWith(AxRenewalImplementationRunner.STAGING_PREFIX);
+        if (isStagingCopy && Files.isDirectory(path)) {
+            AxRenewalImplementationRunner.deleteQuietly(path);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -243,7 +383,7 @@ public class AxRenewalService {
     @Transactional
     public AxRenewalProject attachManifest(
             UUID projectId, String filename, String content, JsonNode stats, CurrentUser actor) {
-        requireProject(projectId);
+        requireMember(projectId, actor);
         if (stats != null && stats.toString().length() > MAX_ATTACH_STATS_LENGTH) {
             throw ApiException.badRequest("attach stats payload is too large");
         }
@@ -304,7 +444,7 @@ public class AxRenewalService {
      */
     @Transactional
     public AxRenewalAnalysis runAnalysis(UUID projectId, boolean useModel, String sourcePath, CurrentUser actor) {
-        AxRenewalProject project = requireProject(projectId);
+        AxRenewalProject project = requireMember(projectId, actor);
         String resolvedSourcePath = useModel ? requireReadableDirectoryOrNull(sourcePath) : null;
 
         // A local Claude Code installation, where one is configured and
@@ -451,8 +591,9 @@ public class AxRenewalService {
      *     the same way {@link #runAnalysis}'s override is, before {@link
      *     LocalClaudeChat} ever sees it.
      */
-    public LocalClaudeChat.Reply chat(UUID projectId, List<LocalClaudeChat.Turn> history, String message, String sourcePath) {
-        AxRenewalProject project = requireProject(projectId);
+    public LocalClaudeChat.Reply chat(
+            UUID projectId, List<LocalClaudeChat.Turn> history, String message, String sourcePath, CurrentUser actor) {
+        AxRenewalProject project = requireMember(projectId, actor);
         if (message == null || message.isBlank()) {
             throw ApiException.badRequest("say something to the assistant");
         }
@@ -465,8 +606,12 @@ public class AxRenewalService {
 
     @Transactional
     public List<AxRenewalStackLayer> updateStackMove(
-            UUID projectId, List<AxRenewalPlanRepository.StackLayerInput> layers, CurrentUser actor) {
-        requireProject(projectId);
+            UUID projectId,
+            List<AxRenewalPlanRepository.StackLayerInput> layers,
+            int expectedRevision,
+            CurrentUser actor) {
+        requireMember(projectId, actor);
+        advanceRevision(projectId, expectedRevision);
         plan.replaceStackLayers(projectId, layers, actor.id());
         boolean cleared = confirmations.clear(projectId, AxRenewalSection.STACK_MOVE) > 0;
 
@@ -487,8 +632,9 @@ public class AxRenewalService {
 
     @Transactional
     public AxRenewalArchitecturePlan updateArchitecture(
-            UUID projectId, String summary, JsonNode diagram, CurrentUser actor) {
-        requireProject(projectId);
+            UUID projectId, String summary, JsonNode diagram, int expectedRevision, CurrentUser actor) {
+        requireMember(projectId, actor);
+        advanceRevision(projectId, expectedRevision);
         plan.saveArchitecture(projectId, summary, diagram, actor.id());
         boolean cleared = confirmations.clear(projectId, AxRenewalSection.ARCHITECTURE) > 0;
 
@@ -509,8 +655,12 @@ public class AxRenewalService {
 
     @Transactional
     public List<AxRenewalPageMapping> updatePages(
-            UUID projectId, List<AxRenewalPlanRepository.PageMappingInput> mappings, CurrentUser actor) {
-        requireProject(projectId);
+            UUID projectId,
+            List<AxRenewalPlanRepository.PageMappingInput> mappings,
+            int expectedRevision,
+            CurrentUser actor) {
+        requireMember(projectId, actor);
+        advanceRevision(projectId, expectedRevision);
         plan.replacePageMappings(projectId, mappings, actor.id());
         boolean cleared = confirmations.clear(projectId, AxRenewalSection.PAGES) > 0;
 
@@ -531,8 +681,12 @@ public class AxRenewalService {
 
     @Transactional
     public List<AxRenewalDbChange> updateDatabasePlan(
-            UUID projectId, List<AxRenewalPlanRepository.DbChangeInput> changes, CurrentUser actor) {
-        requireProject(projectId);
+            UUID projectId,
+            List<AxRenewalPlanRepository.DbChangeInput> changes,
+            int expectedRevision,
+            CurrentUser actor) {
+        requireMember(projectId, actor);
+        advanceRevision(projectId, expectedRevision);
         plan.replaceDbChanges(projectId, changes, actor.id());
         boolean cleared = confirmations.clear(projectId, AxRenewalSection.DATABASE) > 0;
 
@@ -561,8 +715,10 @@ public class AxRenewalService {
             Integer port,
             String databaseName,
             String schemaName,
+            int expectedRevision,
             CurrentUser actor) {
-        requireProject(projectId);
+        requireMember(projectId, actor);
+        advanceRevision(projectId, expectedRevision);
         dbConnections.save(projectId, engine, host, port, databaseName, schemaName, null, actor.id());
         boolean cleared = confirmations.clear(projectId, AxRenewalSection.DATABASE) > 0;
 
@@ -586,8 +742,15 @@ public class AxRenewalService {
 
     @Transactional
     public AxRenewalDestination setDestination(
-            UUID projectId, String kind, String target, String branch, String notes, CurrentUser actor) {
-        requireProject(projectId);
+            UUID projectId,
+            String kind,
+            String target,
+            String branch,
+            String notes,
+            int expectedRevision,
+            CurrentUser actor) {
+        requireMember(projectId, actor);
+        advanceRevision(projectId, expectedRevision);
         if (target == null || target.isBlank()) {
             throw ApiException.badRequest("a destination needs a target");
         }
@@ -613,10 +776,17 @@ public class AxRenewalService {
      * account holding the {@code developer} role (ADR-039) — enforced in
      * {@code SecurityConfig}, not here; this method only records
      * <em>which</em> of the two applied, for the trail.
+     *
+     * <p>Checks the plan revision but does not bump it (ADR-061): a sign-off
+     * on a plan a teammate has changed since it was loaded is refused, but a
+     * confirmation itself changes no plan content, so it does not make
+     * anybody else's open copy stale.
      */
     @Transactional
-    public AxRenewalConfirmation confirmSection(UUID projectId, AxRenewalSection section, CurrentUser actor) {
-        requireProject(projectId);
+    public AxRenewalConfirmation confirmSection(
+            UUID projectId, AxRenewalSection section, int expectedRevision, CurrentUser actor) {
+        requireMember(projectId, actor);
+        requireCurrentRevision(projectId, expectedRevision);
         String via = actor.role() == AppRole.SUPER_ADMIN
                 ? AxRenewalConfirmation.VIA_SUPER_ADMIN
                 : AxRenewalConfirmation.VIA_DEVELOPER_ROLE;
@@ -637,7 +807,7 @@ public class AxRenewalService {
     /** Reopens (un-confirms) a section — same authority as confirming it. */
     @Transactional
     public void reopenSection(UUID projectId, AxRenewalSection section, CurrentUser actor) {
-        requireProject(projectId);
+        requireMember(projectId, actor);
         boolean cleared = confirmations.clear(projectId, section) > 0;
         if (cleared) {
             audit.append(
@@ -688,7 +858,7 @@ public class AxRenewalService {
      */
     @Transactional
     public AxRenewalImplementationRun startImplementation(UUID projectId, String sourcePath, CurrentUser actor) {
-        AxRenewalProject project = requireProject(projectId);
+        AxRenewalProject project = requireMember(projectId, actor);
 
         List<AxRenewalSection> missing = Arrays.stream(AxRenewalSection.values())
                 .filter(section -> confirmations.find(projectId, section).isEmpty())
@@ -776,7 +946,7 @@ public class AxRenewalService {
      */
     @Transactional
     public AxRenewalImplementationRun startErrorFixImplementation(UUID projectId, CurrentUser actor) {
-        AxRenewalProject project = requireProject(projectId);
+        AxRenewalProject project = requireMember(projectId, actor);
         AxRenewalLocalRunner.Status status = localRunner.status(projectId);
         if (!hasActionableRunLocallyFailure(status)) {
             throw ApiException.conflict("there is no failed Run Locally attempt to fix right now");
@@ -811,7 +981,7 @@ public class AxRenewalService {
      */
     @Transactional
     public AxRenewalImplementationRun startUiChangeImplementation(UUID projectId, String description, CurrentUser actor) {
-        AxRenewalProject project = requireProject(projectId);
+        AxRenewalProject project = requireMember(projectId, actor);
         if (description == null || description.isBlank()) {
             throw ApiException.badRequest("describe the UI change you want");
         }
@@ -1080,7 +1250,7 @@ public class AxRenewalService {
      */
     @Transactional
     public AxRenewalImplementationRun approveImplementation(UUID projectId, UUID runId, CurrentUser actor) {
-        AxRenewalProject project = requireProject(projectId);
+        AxRenewalProject project = requireMember(projectId, actor);
         AxRenewalImplementationRun run = requireOwnRun(projectId, runId);
         if (!AxRenewalImplementationRun.STATUS_AWAITING_REVIEW.equals(run.status())) {
             throw ApiException.conflict("this run is not awaiting review");
@@ -1152,7 +1322,7 @@ public class AxRenewalService {
     /** Rejects a Generate run — the staged copy is deleted and the destination is never touched (ADR-044). */
     @Transactional
     public AxRenewalImplementationRun rejectImplementation(UUID projectId, UUID runId, CurrentUser actor) {
-        AxRenewalProject project = requireProject(projectId);
+        AxRenewalProject project = requireMember(projectId, actor);
         AxRenewalImplementationRun run = requireOwnRun(projectId, runId);
         if (!AxRenewalImplementationRun.STATUS_AWAITING_REVIEW.equals(run.status())) {
             throw ApiException.conflict("this run is not awaiting review");
@@ -1189,7 +1359,7 @@ public class AxRenewalService {
      */
     @Transactional
     public AxRenewalImplementationRun cancelImplementation(UUID projectId, UUID runId, CurrentUser actor) {
-        AxRenewalProject project = requireProject(projectId);
+        AxRenewalProject project = requireMember(projectId, actor);
         AxRenewalImplementationRun run = requireOwnRun(projectId, runId);
         if (!AxRenewalImplementationRun.STATUS_GENERATING.equals(run.status())) {
             throw ApiException.conflict("this run is not currently generating");
@@ -1210,7 +1380,8 @@ public class AxRenewalService {
     }
 
     /** The files a Generate run actually found different, for the review screen. */
-    public List<AxRenewalGeneratedChange> findGeneratedChanges(UUID projectId, UUID runId) {
+    public List<AxRenewalGeneratedChange> findGeneratedChanges(UUID projectId, UUID runId, CurrentUser actor) {
+        requireMember(projectId, actor);
         requireOwnRun(projectId, runId);
         return implementations.findGeneratedChanges(runId);
     }
@@ -1228,7 +1399,7 @@ public class AxRenewalService {
      */
     @Transactional
     public AxRenewalTestRunner.Result runTests(UUID projectId, UUID runId, CurrentUser actor) {
-        AxRenewalProject project = requireProject(projectId);
+        AxRenewalProject project = requireMember(projectId, actor);
         AxRenewalImplementationRun run = requireOwnRun(projectId, runId);
         if (!AxRenewalImplementationRun.STATUS_AWAITING_REVIEW.equals(run.status())) {
             throw ApiException.conflict("this run is not awaiting review");
@@ -1269,7 +1440,7 @@ public class AxRenewalService {
      */
     @Transactional
     public AxRenewalImplementationRun revertImplementation(UUID projectId, UUID runId, CurrentUser actor) {
-        AxRenewalProject project = requireProject(projectId);
+        AxRenewalProject project = requireMember(projectId, actor);
         AxRenewalImplementationRun run = requireOwnRun(projectId, runId);
         if (!AxRenewalImplementationRun.STATUS_APPLIED.equals(run.status())) {
             throw ApiException.conflict("this run is not applied, so there is nothing to revert");
@@ -1348,7 +1519,7 @@ public class AxRenewalService {
      */
     @Transactional
     public AxRenewalLocalRunner.Status startRunLocally(UUID projectId, CurrentUser actor) {
-        AxRenewalProject project = requireProject(projectId);
+        AxRenewalProject project = requireMember(projectId, actor);
         AxRenewalDestination destination = requireAppliedDestination(projectId);
         Path destinationRoot = Path.of(destination.target()).toAbsolutePath().normalize();
         String devScript = requireDevScript(destinationRoot);
@@ -1374,7 +1545,7 @@ public class AxRenewalService {
 
     @Transactional
     public AxRenewalLocalRunner.Status stopRunLocally(UUID projectId, CurrentUser actor) {
-        AxRenewalProject project = requireProject(projectId);
+        AxRenewalProject project = requireMember(projectId, actor);
         localRunner.stop(projectId);
 
         audit.append(
@@ -1389,8 +1560,8 @@ public class AxRenewalService {
     }
 
     /** A plain read — never audited, matching every other status poll in this feature. */
-    public AxRenewalLocalRunner.Status runLocallyStatus(UUID projectId) {
-        requireProject(projectId);
+    public AxRenewalLocalRunner.Status runLocallyStatus(UUID projectId, CurrentUser actor) {
+        requireMember(projectId, actor);
         return localRunner.status(projectId);
     }
 
@@ -1412,8 +1583,8 @@ public class AxRenewalService {
      * @throws ApiException 409 when there is no failed Run Locally attempt to
      *     explain right now, or when no local model is configured to ask.
      */
-    public LocalClaudeChat.Reply explainRunLocallyFailure(UUID projectId) {
-        AxRenewalProject project = requireProject(projectId);
+    public LocalClaudeChat.Reply explainRunLocallyFailure(UUID projectId, CurrentUser actor) {
+        AxRenewalProject project = requireMember(projectId, actor);
         AxRenewalLocalRunner.Status status = localRunner.status(projectId);
         if (!hasActionableRunLocallyFailure(status)) {
             throw ApiException.conflict("there is no failed Run Locally attempt to explain right now");
@@ -1489,12 +1660,100 @@ public class AxRenewalService {
     }
 
     // -----------------------------------------------------------------------
+    // Members (ADR-063)
+    // -----------------------------------------------------------------------
+
+    /**
+     * The roles that can open the AX Renewal workspace at all (ADR-062) —
+     * adding anyone else would make a member who could never reach the
+     * project they were added to.
+     */
+    private static final Set<AppRole> WORKSPACE_ROLES =
+            Set.of(AppRole.DEVELOPER, AppRole.REVIEWER, AppRole.LEAD, AppRole.ADMIN, AppRole.SUPER_ADMIN);
+
+    /**
+     * Adds a member by email. The route floors at Admin ({@code SecurityConfig});
+     * this adds that the caller must be on the project themselves (or a super
+     * admin), so an Admin cannot put themselves or anybody else onto another
+     * team's project from outside it.
+     *
+     * <p>By email, because nobody below super admin can list accounts
+     * (NFR-SEC-PII) — the person adding a teammate already knows their
+     * address. Adding someone already on the project is not an error.
+     *
+     * @return the project's members after the change
+     */
+    @Transactional
+    public List<AxRenewalMember> addMember(UUID projectId, String email, CurrentUser actor) {
+        requireMember(projectId, actor);
+        if (email == null || email.isBlank()) {
+            throw ApiException.badRequest("an email address is needed to add a member");
+        }
+        Account account = accounts.findByEmail(email.trim())
+                .orElseThrow(() -> ApiException.notFound("an account with that email address"));
+        if (account.status() != AccountStatus.ACTIVE) {
+            throw ApiException.badRequest("that account is not active yet, so it cannot be added to a project");
+        }
+        if (account.roles().stream().noneMatch(WORKSPACE_ROLES::contains)) {
+            throw ApiException.badRequest(
+                    "that account cannot open AX Renewal. Give it the Developer, Reviewer, Lead or Admin role"
+                            + " in Users & Roles first.");
+        }
+
+        if (members.add(projectId, account.id(), actor.id())) {
+            audit.append(
+                    actor.id(),
+                    actor.email(),
+                    AuditAction.AX_RENEWAL_MEMBER_ADD,
+                    AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                    projectId,
+                    json.createObjectNode()
+                            .put("accountId", account.id().toString())
+                            .put("displayName", account.displayName()));
+        }
+        return members.listForProject(projectId);
+    }
+
+    /**
+     * Removes a member — anyone, including the caller themselves — except the
+     * project's creator (ADR-064) and the last one: a project nobody is on
+     * could only ever be reached again by a super admin. The project row is locked first so two removals at once
+     * cannot both see "one other member left" and leave none.
+     */
+    @Transactional
+    public void removeMember(UUID projectId, UUID accountId, CurrentUser actor) {
+        AxRenewalProject project = requireMember(projectId, actor);
+        projects.lockRevision(projectId).orElseThrow(() -> ApiException.notFound("project"));
+        if (!members.isMember(projectId, accountId)) {
+            throw ApiException.notFound("member");
+        }
+        // The creator always keeps access (ADR-064): "the creator and the
+        // people they invited" is the rule, so the creator is not one of the
+        // removable ones.
+        if (accountId.equals(project.createdBy())) {
+            throw ApiException.conflict("a project's creator cannot be removed from it.");
+        }
+        if (members.count(projectId) <= 1) {
+            throw ApiException.conflict(
+                    "a project needs at least one member. Add someone else before removing its last member.");
+        }
+        members.remove(projectId, accountId);
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_MEMBER_REMOVE,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode().put("accountId", accountId.toString()));
+    }
+
+    // -----------------------------------------------------------------------
     // Comments
     // -----------------------------------------------------------------------
 
     @Transactional
     public AxRenewalComment addComment(UUID projectId, String body, CurrentUser actor) {
-        requireProject(projectId);
+        requireMember(projectId, actor);
         if (body == null || body.isBlank()) {
             throw ApiException.badRequest("a comment needs a body");
         }
@@ -1531,7 +1790,7 @@ public class AxRenewalService {
      */
     @Transactional
     public void deleteComment(UUID projectId, UUID commentId, CurrentUser actor) {
-        requireProject(projectId);
+        requireMember(projectId, actor);
         AxRenewalComment comment = comments
                 .findLive(projectId, commentId)
                 .orElseThrow(() -> ApiException.notFound("comment"));

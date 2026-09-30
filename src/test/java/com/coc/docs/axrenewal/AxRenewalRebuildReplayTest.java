@@ -81,7 +81,8 @@ class AxRenewalRebuildReplayTest {
                 null,
                 null,
                 Instant.EPOCH,
-                Instant.EPOCH)));
+                Instant.EPOCH,
+                0)));
 
         // Every section confirmed, and the plan has exactly one real decided
         // layer -- "confirmed" is not the same as "describes a concrete
@@ -158,6 +159,8 @@ class AxRenewalRebuildReplayTest {
                 confirmations,
                 implementations,
                 mock(AxRenewalCommentRepository.class),
+                TestMembers.everyone(),
+                mock(com.coc.docs.account.AccountRepository.class),
                 audit,
                 new ObjectMapper(),
                 mock(LocalClaudeAnalyzer.class),

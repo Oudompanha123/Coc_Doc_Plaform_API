@@ -214,6 +214,21 @@ public class AxRenewalLocalRunner {
         running.process.destroy();
     }
 
+    /**
+     * Drops everything held in memory for a project whose process has already
+     * ended — its last state and its captured log lines — for a project that
+     * no longer exists (ADR-066). Without this, a stopped or failed run's
+     * output outlived the project it belonged to until the next restart.
+     *
+     * <p>Deliberately leaves a still-live process alone: deleting a project
+     * is refused while one runs, so reaching here with one alive would be a
+     * bug elsewhere, and forgetting it would orphan a process nobody could
+     * stop any more.
+     */
+    public void forget(UUID projectId) {
+        byProject.computeIfPresent(projectId, (id, running) -> running.process.isAlive() ? running : null);
+    }
+
     /** A backend restart during development is frequent and expected; without this, its own child dev servers would keep running, orphaned, on ports nobody remembers starting. */
     @PreDestroy
     void stopEverything() {
