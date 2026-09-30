@@ -32,7 +32,8 @@ public class NavService {
      *  left to fail silently later. */
     private static final Set<String> RESERVED_PRODUCT_KEYS = Set.of(
             "login", "register", "overview", "settings", "users-roles", "content", "welcome", "claude-usage",
-            "forgot-password", "reset-password", "create-password", "docs", "auth", "api", "idea", "workflow");
+            "forgot-password", "reset-password", "create-password", "docs", "auth", "api", "idea", "workflow",
+            "ax-renewal", "attendance", "home", "meeting", "my-claude-usage");
 
     private final NavRepository repository;
     private final DocsContentRepository contentRepository;

@@ -33,6 +33,15 @@ import java.util.UUID;
  *     edited and reconfirmed since"; a Replay run (see {@link
  *     #REPORT_MODE_REPLAY}) carries the same hash as the applied run it
  *     reproduces, since nothing about the plan changed to produce it.
+ * @param runKind {@link #RUN_KIND_PLAN} (a confirmed Plan carried out — every
+ *     run before ADR-062), {@link #RUN_KIND_ERROR_FIX} (an approved fix for
+ *     a real Run Locally failure) or {@link #RUN_KIND_UI_CHANGE} (a
+ *     natural-language UI change against the renewed project's own UI,
+ *     never this admin app's) — ADR-062 Phase 2.
+ * @param instruction the raw input this run was generated from, for
+ *     error_fix/ui_change only — the real captured failure log, or the
+ *     person's own free-text description. Null for plan, which rebuilds its
+ *     own prompt from the confirmed Plan tables instead of storing one.
  */
 public record AxRenewalImplementationRun(
         UUID id,
@@ -45,7 +54,44 @@ public record AxRenewalImplementationRun(
         Instant completedAt,
         String stagingPath,
         String failureReason,
-        String confirmedPlanHash) {
+        String confirmedPlanHash,
+        String runKind,
+        String instruction) {
+
+    /**
+     * The shape every run had before ADR-062 Phase 2 — {@link #RUN_KIND_PLAN}
+     * with no stored instruction, since a plan run rebuilds its own prompt
+     * from the confirmed Plan tables instead. Kept so every existing call
+     * site that builds a plan-kind run (production and test alike) does not
+     * have to learn about the two new trailing fields.
+     */
+    public AxRenewalImplementationRun(
+            UUID id,
+            UUID projectId,
+            String status,
+            JsonNode beforeReport,
+            JsonNode afterReport,
+            Instant startedAt,
+            UUID startedBy,
+            Instant completedAt,
+            String stagingPath,
+            String failureReason,
+            String confirmedPlanHash) {
+        this(
+                id,
+                projectId,
+                status,
+                beforeReport,
+                afterReport,
+                startedAt,
+                startedBy,
+                completedAt,
+                stagingPath,
+                failureReason,
+                confirmedPlanHash,
+                RUN_KIND_PLAN,
+                null);
+    }
 
     /** {@code beforeReport.mode} for a run that reused a prior applied run's exact generated changes rather than asking the model again (ADR-056). */
     public static final String REPORT_MODE_REPLAY = "replay";
@@ -59,4 +105,10 @@ public record AxRenewalImplementationRun(
     public static final String STATUS_APPLIED = "applied";
     public static final String STATUS_REJECTED = "rejected";
     public static final String STATUS_CANCELLED = "cancelled";
+    /** A specific applied run undone on purpose (ADR-062 §revert) — distinct from every other terminal status, the same reasoning {@link #STATUS_CANCELLED}/{@link #STATUS_REJECTED} already establish. */
+    public static final String STATUS_REVERTED = "reverted";
+
+    public static final String RUN_KIND_PLAN = "plan";
+    public static final String RUN_KIND_ERROR_FIX = "error_fix";
+    public static final String RUN_KIND_UI_CHANGE = "ui_change";
 }

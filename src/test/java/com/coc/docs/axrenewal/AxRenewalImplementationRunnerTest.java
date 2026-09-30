@@ -75,9 +75,9 @@ class AxRenewalImplementationRunnerTest {
         UUID runId = UUID.randomUUID();
 
         CountDownLatch processRegistered = new CountDownLatch(1);
-        when(generator.generate(any(), any(), any(), any())).thenAnswer(invocation -> {
+        when(generator.generate(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
             @SuppressWarnings("unchecked")
-            Consumer<Process> onStarted = invocation.getArgument(2);
+            Consumer<Process> onStarted = invocation.getArgument(3);
             Process process = spawnIdleProcess();
             onStarted.accept(process);
             processRegistered.countDown();
@@ -89,7 +89,8 @@ class AxRenewalImplementationRunnerTest {
         // whichever thread invokes it -- run it on its own thread so the
         // test's own thread is free to call cancel() concurrently, the way
         // an HTTP request actually would while generation is in flight.
-        Thread generation = new Thread(() -> runner.runGeneration(runId, "a confirmed plan", "/tmp/legacy-source"));
+        Thread generation = new Thread(() -> runner.runGeneration(
+                runId, AxRenewalImplementationRun.RUN_KIND_PLAN, "a confirmed plan", "/tmp/legacy-source"));
         generation.start();
         assertThat(processRegistered.await(5, TimeUnit.SECONDS)).isTrue();
 
@@ -108,9 +109,9 @@ class AxRenewalImplementationRunnerTest {
         AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations);
         UUID runId = UUID.randomUUID();
 
-        when(generator.generate(any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(generator.generate(any(), any(), any(), any(), any())).thenReturn(Optional.empty());
 
-        runner.runGeneration(runId, "a confirmed plan", "/tmp/legacy-source");
+        runner.runGeneration(runId, AxRenewalImplementationRun.RUN_KIND_PLAN, "a confirmed plan", "/tmp/legacy-source");
 
         verify(implementations).markFailed(eq(runId), any());
         verify(implementations, never()).markCancelled(any());
@@ -125,9 +126,9 @@ class AxRenewalImplementationRunnerTest {
         UUID runId = UUID.randomUUID();
 
         CountDownLatch processRegistered = new CountDownLatch(1);
-        when(generator.generate(any(), any(), any(), any())).thenAnswer(invocation -> {
+        when(generator.generate(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
             @SuppressWarnings("unchecked")
-            Consumer<Process> onStarted = invocation.getArgument(2);
+            Consumer<Process> onStarted = invocation.getArgument(3);
             Process process = spawnIdleProcess();
             onStarted.accept(process);
             processRegistered.countDown();
@@ -135,7 +136,8 @@ class AxRenewalImplementationRunnerTest {
             return Optional.empty();
         });
 
-        Thread generation = new Thread(() -> runner.runGeneration(runId, "a confirmed plan", "/tmp/legacy-source"));
+        Thread generation = new Thread(() -> runner.runGeneration(
+                runId, AxRenewalImplementationRun.RUN_KIND_PLAN, "a confirmed plan", "/tmp/legacy-source"));
         generation.start();
         assertThat(processRegistered.await(5, TimeUnit.SECONDS)).isTrue();
         assertThat(runner.cancel(runId)).isTrue();

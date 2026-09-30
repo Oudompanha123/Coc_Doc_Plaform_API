@@ -70,7 +70,8 @@ class AxRenewalCancelImplementationTest {
                 new AxRenewalProperties(null, null),
                 mock(AxRenewalCodeGenerator.class),
                 runner,
-                mock(AxRenewalLocalRunner.class));
+                mock(AxRenewalLocalRunner.class),
+                mock(AxRenewalTestRunner.class));
     }
 
     private AxRenewalImplementationRun runAt(String status) {

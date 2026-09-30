@@ -192,6 +192,23 @@ public final class AuditAction {
 
     public static final String AX_RENEWAL_RUN_LOCALLY_STOP = "ax_renewal.run_locally_stop";
 
+    /**
+     * Tests actually run against a disposable copy of one run's staged
+     * changes (ADR-062 Phase 2) — {@code detail} carries {@code executed},
+     * {@code exitCode} and {@code note}, the same real-or-honestly-refused
+     * shape {@link AxRenewalTestRunner.Result} itself has, since the full
+     * output belongs on the review screen, not in this log.
+     */
+    public static final String AX_RENEWAL_IMPLEMENTATION_RUN_TESTS = "ax_renewal.implementation_run_tests";
+
+    /**
+     * One specific applied run undone on purpose (ADR-062 §revert) — kept
+     * distinct from every other implementation action, the same reason
+     * {@link #AX_RENEWAL_IMPLEMENTATION_REPLAY} has its own entry rather than
+     * reusing {@link #AX_RENEWAL_IMPLEMENTATION_START}.
+     */
+    public static final String AX_RENEWAL_IMPLEMENTATION_REVERT = "ax_renewal.implementation_revert";
+
     /** Target types, for the {@code target_type} column. */
     public static final String TARGET_PAGE = "page";
 
