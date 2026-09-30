@@ -16,6 +16,9 @@ import java.util.Map;
  * on the API?", a size comparison for spotting who is doing the heavy lifting,
  * never actual spend. The dashboard says so wherever a figure appears.
  *
+ * <p>Only input and output are priced (ADR-064). The cache rates below are
+ * kept for reference but no longer feed {@link #costFor}.
+ *
  * <p>Prices are USD per million tokens. Cache reads have their own per-model
  * rate — 0.10x input on most models, but 0.05x on Opus 5.5 and 0.025x on
  * Fable/Mythos 5.1, so it is a column of the table rather than a multiplier
@@ -30,7 +33,7 @@ import java.util.Map;
  * API change — {@code ClaudeUsageService.recordUsage} already prices at ingest
  * time server-side for exactly this reason.
  *
- * <p>// req: ADR-036, ADR-058
+ * <p>// req: ADR-036, ADR-058, ADR-064
  */
 public final class ClaudeUsagePricing {
 
@@ -40,8 +43,6 @@ public final class ClaudeUsagePricing {
 
     /** Cache read on every model not listed with its own rate. */
     private static final BigDecimal DEFAULT_CACHE_READ_MULTIPLIER = new BigDecimal("0.10");
-    private static final BigDecimal CACHE_WRITE_5M_MULTIPLIER = new BigDecimal("1.25");
-    private static final BigDecimal CACHE_WRITE_1H_MULTIPLIER = new BigDecimal("2");
     private static final BigDecimal ONE_MILLION = new BigDecimal(1_000_000);
 
     /** Enough decimal places that summing several models a day loses nothing worth keeping before the final round to the storage column's scale (4). */
@@ -111,35 +112,29 @@ public final class ClaudeUsagePricing {
     }
 
     /**
-     * Cost in USD for one model's token counts, at that model's own real rate.
-     * Not rounded to the storage column's scale — {@link ClaudeUsageService}
-     * sums this across every model in a day before rounding once, so summing
-     * several models never compounds rounding error.
+     * Reference API Cost in USD for one model's token counts, at that model's
+     * own real rate. Not rounded to the storage column's scale —
+     * {@link ClaudeUsageService} sums this across every model in a day before
+     * rounding once, so summing several models never compounds rounding error.
      *
-     * <p>Every cache write priced as 5-minute — what a reporter that predates
-     * the 1-hour split (ADR-058) is taken to mean.
+     * <p>Input and output only (ADR-064, revising ADR-058's cache pricing):
+     * {@code cacheRead} and {@code cacheCreation} are still accepted, stored and
+     * shown as their own columns, but contribute nothing to the figure.
      */
     public static BigDecimal costFor(String model, long input, long output, long cacheRead, long cacheCreation) {
         return costFor(model, input, output, cacheRead, cacheCreation, 0);
     }
 
     /**
-     * As above, with {@code cacheCreation1h} of the {@code cacheCreation}
-     * tokens written at the 1-hour TTL and the rest at 5-minute. Clamped to
-     * {@code cacheCreation}, so a malformed split can never price more
-     * writes than were made.
+     * As above; {@code cacheCreation1h} is accepted for the same reason and
+     * likewise does not affect the cost.
      */
     public static BigDecimal costFor(
             String model, long input, long output, long cacheRead, long cacheCreation, long cacheCreation1h) {
         ModelPrice p = priceFor(model);
-        long oneHour = Math.max(0, Math.min(cacheCreation1h, cacheCreation));
-        long fiveMinute = cacheCreation - oneHour;
         BigDecimal usd = BigDecimal.valueOf(input)
                 .multiply(p.input())
-                .add(BigDecimal.valueOf(output).multiply(p.output()))
-                .add(BigDecimal.valueOf(cacheRead).multiply(p.cacheRead()))
-                .add(BigDecimal.valueOf(fiveMinute).multiply(p.input()).multiply(CACHE_WRITE_5M_MULTIPLIER))
-                .add(BigDecimal.valueOf(oneHour).multiply(p.input()).multiply(CACHE_WRITE_1H_MULTIPLIER));
+                .add(BigDecimal.valueOf(output).multiply(p.output()));
         return usd.divide(ONE_MILLION, INTERMEDIATE_SCALE, RoundingMode.HALF_UP);
     }
 }

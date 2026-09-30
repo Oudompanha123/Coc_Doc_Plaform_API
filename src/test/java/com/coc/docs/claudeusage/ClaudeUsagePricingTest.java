@@ -17,11 +17,33 @@ class ClaudeUsagePricingTest {
     }
 
     @Test
-    @DisplayName("cache read is 0.10x the model's own input rate, a 5-minute cache write is 1.25x")
-    void pricesCacheAtAMultipleOfInput() {
-        // Opus 5 input is $5/M: cache read = $0.50/M, cache write = $6.25/M.
-        BigDecimal cost = ClaudeUsagePricing.costFor("claude-opus-5", 0, 0, 1_000_000, 1_000_000);
-        assertThat(cost).isEqualByComparingTo("6.75");
+    @DisplayName("cache read does not affect the Reference API Cost (ADR-064)")
+    void cacheReadIsNotPriced() {
+        BigDecimal without = ClaudeUsagePricing.costFor("claude-opus-5-5", 1_000, 2_000, 0, 0, 0);
+        BigDecimal with = ClaudeUsagePricing.costFor("claude-opus-5-5", 1_000, 2_000, 50_000_000, 0, 0);
+        assertThat(with).isEqualByComparingTo(without);
+        assertThat(ClaudeUsagePricing.costFor("claude-opus-5", 0, 0, 1_000_000, 0)).isEqualByComparingTo("0");
+    }
+
+    @Test
+    @DisplayName("cache write, 5-minute or 1-hour, does not affect the Reference API Cost (ADR-064)")
+    void cacheWriteIsNotPriced() {
+        BigDecimal without = ClaudeUsagePricing.costFor("claude-opus-5-5", 1_000, 2_000, 0, 0, 0);
+        assertThat(ClaudeUsagePricing.costFor("claude-opus-5-5", 1_000, 2_000, 0, 5_000_000, 0))
+                .isEqualByComparingTo(without);
+        assertThat(ClaudeUsagePricing.costFor("claude-opus-5-5", 1_000, 2_000, 0, 5_000_000, 5_000_000))
+                .isEqualByComparingTo(without);
+    }
+
+    @Test
+    @DisplayName("input and output each move the Reference API Cost")
+    void inputAndOutputArePriced() {
+        BigDecimal base = ClaudeUsagePricing.costFor("claude-opus-5-5", 1_000, 1_000, 0, 0, 0);
+        // Opus 5.5: $4/M input, $20/M output.
+        assertThat(ClaudeUsagePricing.costFor("claude-opus-5-5", 1_001_000, 1_000, 0, 0, 0).subtract(base))
+                .isEqualByComparingTo("4");
+        assertThat(ClaudeUsagePricing.costFor("claude-opus-5-5", 1_000, 1_001_000, 0, 0, 0).subtract(base))
+                .isEqualByComparingTo("20");
     }
 
     @Test
@@ -73,26 +95,15 @@ class ClaudeUsagePricingTest {
     }
 
     @Test
-    @DisplayName("a 1-hour cache write is 2x input, a 5-minute one 1.25x")
-    void oneHourCacheWriteIsTwiceInput() {
-        // Opus 5.5 input $4/M: 1M at 1h = $8, 1M at 5m = $5.
-        assertThat(ClaudeUsagePricing.costFor("claude-opus-5-5", 0, 0, 0, 2_000_000, 1_000_000))
-                .isEqualByComparingTo("13");
-        // A split larger than the writes themselves is clamped, never priced above them.
-        assertThat(ClaudeUsagePricing.costFor("claude-opus-5-5", 0, 0, 0, 1_000_000, 5_000_000))
-                .isEqualByComparingTo("8");
-    }
+    @DisplayName("Input 246 / Output 124.9K / Cache Read 21.6M / Cache Write 243.4K is $4.70")
+    void matchesTheDashboardExample() {
+        // The dashboard totals, split across the two models they were run on.
+        // Fable 5.1 ($10/$50): 100 in, 73,400 out = $3.671
+        // Opus 5.5  ($4/$20):  146 in, 51,500 out = $1.030584
+        // The cache columns (21.6M read, 243.4K written) add nothing.
+        BigDecimal fable = ClaudeUsagePricing.costFor("claude-fable-5-1", 100, 73_400, 12_000_000, 143_400, 143_400);
+        BigDecimal opus = ClaudeUsagePricing.costFor("claude-opus-5-5", 146, 51_500, 9_600_000, 100_000, 100_000);
 
-    @Test
-    @DisplayName("reproduces Claude Code's usage page: Opus 5.5 $2.73, Haiku 4.5 $0.0020, total $2.74")
-    void matchesClaudeCodeUsagePage() {
-        // The figures Claude Code's own usage page showed (rounded there to 1.4k / 38.3k / 5.5m / 107.9k),
-        // with Claude Code's cache writes at the 1-hour TTL.
-        BigDecimal opus = ClaudeUsagePricing.costFor("claude-opus-5-5", 1_400, 38_300, 5_500_000, 107_900, 107_900);
-        BigDecimal haiku = ClaudeUsagePricing.costFor("claude-haiku-4-5-20251001", 1_900, 16, 0, 0, 0);
-
-        assertThat(opus.setScale(2, java.math.RoundingMode.HALF_UP)).isEqualByComparingTo("2.73");
-        assertThat(haiku.setScale(4, java.math.RoundingMode.HALF_UP)).isEqualByComparingTo("0.0020");
-        assertThat(opus.add(haiku).setScale(2, java.math.RoundingMode.HALF_UP)).isEqualByComparingTo("2.74");
+        assertThat(fable.add(opus).setScale(2, java.math.RoundingMode.HALF_UP)).isEqualByComparingTo("4.70");
     }
 }

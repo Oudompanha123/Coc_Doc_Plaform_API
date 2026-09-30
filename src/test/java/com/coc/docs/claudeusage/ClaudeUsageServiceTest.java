@@ -790,7 +790,7 @@ class ClaudeUsageServiceTest {
         }
 
         @Test
-        @DisplayName("keeps each model's four categories separate and prices 1-hour cache writes at 2x")
+        @DisplayName("keeps each model's four categories separate and prices input and output only")
         void persistsPerModelRows() {
             ClaudeUsageMember active = member("a@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
             when(members.findByEmail("a@cocdocs.example")).thenReturn(Optional.of(active));
@@ -814,13 +814,13 @@ class ClaudeUsageServiceTest {
             assertThat(opus.cacheReadTokens()).isEqualTo(5_500_000);
             assertThat(opus.cacheCreationTokens()).isEqualTo(107_900);
             assertThat(opus.cacheCreation1hTokens()).isEqualTo(107_900);
-            assertThat(opus.costUsd()).isEqualByComparingTo("2.7348");
+            assertThat(opus.costUsd()).isEqualByComparingTo("0.7716");
             assertThat(rows.get(1).costUsd()).isEqualByComparingTo("0.00198");
 
             // The day's own cost is the same pricing, summed then rounded once.
             ArgumentCaptor<BigDecimal> cost = ArgumentCaptor.forClass(BigDecimal.class);
             verify(daily).upsert(any(), eq(date), anyLong(), anyLong(), anyLong(), anyLong(), cost.capture(), any());
-            assertThat(cost.getValue()).isEqualByComparingTo("2.7368");
+            assertThat(cost.getValue()).isEqualByComparingTo("0.7736");
         }
 
         @Test
