@@ -66,7 +66,7 @@ class HrmsNotificationServiceTest {
 
     /**
      * Unstubbed by default, so no account has a credential and no personal
-     * inbox is ever opened (ADR-075). That is the right default for every test
+     * inbox is ever opened (ADR-077). That is the right default for every test
      * here except the ones that opt in: polling somebody's mailbox should take
      * a deliberate act to arrange, in tests as in production.
      */
@@ -564,7 +564,7 @@ class HrmsNotificationServiceTest {
     }
 
     /**
-     * Reading an account's own inbox (ADR-075).
+     * Reading an account's own inbox (ADR-077).
      *
      * <p>The thing under test is not "does IMAP work" — it is <em>whose</em>
      * mailbox gets opened, and when one gets opened at all. Logging into a
@@ -660,7 +660,7 @@ class HrmsNotificationServiceTest {
     }
 
     /**
-     * Who may read what (ADR-075 §2).
+     * Who may read what (ADR-077 §2).
      *
      * <p>These assert that the viewer reaches the query. The refusal itself is
      * enforced in SQL, so {@link HrmsNotificationIntegrationTest} is where it

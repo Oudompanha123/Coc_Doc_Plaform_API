@@ -50,7 +50,7 @@ public class HrmsNotificationRepository {
      * What one viewer may see: the shared mailbox's rows, plus their own.
      *
      * <p>Repeated as a fragment rather than left to callers, because this
-     * predicate <em>is</em> the access rule from ADR-075 §2 and a query that
+     * predicate <em>is</em> the access rule from ADR-077 §2 and a query that
      * forgets it shows somebody another person's mail. One place to read, one
      * place to get wrong.
      *
@@ -94,7 +94,7 @@ public class HrmsNotificationRepository {
     private static final String OWNER_OF_SQL = "select owner_account_id from hrms_notification where id = ?";
 
     /**
-     * One mailbox's copy of a message (ADR-075).
+     * One mailbox's copy of a message (ADR-077).
      *
      * <p>Message-ID alone stopped identifying a row at V61: one email to five
      * people is one Message-ID in five mailboxes, so a lookup without the
@@ -134,7 +134,7 @@ public class HrmsNotificationRepository {
      * from now" rather than "look back forever".
      */
     /**
-     * Per mailbox, not global (ADR-075).
+     * Per mailbox, not global (ADR-077).
      *
      * <p>A global maximum would let a busy inbox set the start of a quiet
      * one's next poll: account B, polled after account A received something
@@ -168,7 +168,7 @@ public class HrmsNotificationRepository {
 
     /**
      * Records an arrival as belonging to {@code owner}'s mailbox, or to the
-     * shared one when {@code owner} is null (ADR-075).
+     * shared one when {@code owner} is null (ADR-077).
      *
      * <p>Dedupe is per owner. One HRMS email sent to several people is one
      * Message-ID in several mailboxes, so a globally unique key would let the
@@ -214,7 +214,7 @@ public class HrmsNotificationRepository {
 
     /**
      * The newest arrivals this viewer is allowed: the shared mailbox's, plus
-     * their own (ADR-075).
+     * their own (ADR-077).
      *
      * <p>A null viewer sees only the shared mailbox — correct for anything
      * running without a caller, such as the digest job, which must not acquire
@@ -241,7 +241,7 @@ public class HrmsNotificationRepository {
     }
 
     /**
-     * One arrival, if this viewer is allowed it (ADR-075).
+     * One arrival, if this viewer is allowed it (ADR-077).
      *
      * <p>Empty covers both "no such row" and "someone else's mailbox"
      * deliberately — see {@code BY_ID_SQL}.
@@ -276,7 +276,7 @@ public class HrmsNotificationRepository {
         return byReportDate(date, null);
     }
 
-    /** The same, limited to what this viewer may see (ADR-075). */
+    /** The same, limited to what this viewer may see (ADR-077). */
     public List<HrmsNotification> byReportDate(LocalDate date, java.util.UUID viewer) {
         return jdbc.sql(BY_REPORT_DATE_SQL)
                 .param(date)

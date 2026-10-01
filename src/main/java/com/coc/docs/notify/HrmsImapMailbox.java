@@ -83,13 +83,13 @@ public class HrmsImapMailbox implements HrmsMailbox {
     }
 
     /**
-     * Reads one person's own inbox (ADR-075).
+     * Reads one person's own inbox (ADR-077).
      *
      * <p>Only {@code login} differs from the configured poll — host, port,
      * folder and the watched sender are shared, and the search is still
      * restricted to {@code app.hrms.sender}. That restriction is a line of
      * code and not a permission: the credential can read the whole mailbox.
-     * ADR-075 §4.2 records that rather than leaving it to be noticed.
+     * ADR-077 §4.2 records that rather than leaving it to be noticed.
      */
     @Override
     public List<Arrival> arrivalsSince(Instant since, Login login) {
@@ -169,7 +169,7 @@ public class HrmsImapMailbox implements HrmsMailbox {
         return htmlBodyOf(messageId, configuredLogin());
     }
 
-    /** The same, from the owner's mailbox — the only place their copy exists (ADR-075). */
+    /** The same, from the owner's mailbox — the only place their copy exists (ADR-077). */
     @Override
     public Optional<String> htmlBodyOf(String messageId, Login login) {
         if (!usable(login) || messageId == null || messageId.isBlank()) {

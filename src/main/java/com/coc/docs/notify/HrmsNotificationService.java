@@ -79,7 +79,7 @@ public class HrmsNotificationService {
     /** Mails each person their own row when a report arrives. */
     private final AttendanceMailService attendanceMail;
 
-    /** Whose inboxes may be read, and with what (ADR-075). */
+    /** Whose inboxes may be read, and with what (ADR-077). */
     private final AccountMailCredentialRepository credentials;
 
     public HrmsNotificationService(
@@ -125,12 +125,12 @@ public class HrmsNotificationService {
     }
 
     /**
-     * Reads the inbox of every account that has stored a credential (ADR-075).
+     * Reads the inbox of every account that has stored a credential (ADR-077).
      *
      * <p><b>This logs into other people's mail.</b> An App Password grants the
      * whole mailbox, not the HRMS corner of it; the IMAP search is restricted
      * to {@code app.hrms.sender} but that restriction is code, not permission.
-     * ADR-075 §4.2 states the cost and §4.3 names the cheaper alternative that
+     * ADR-077 §4.2 states the cost and §4.3 names the cheaper alternative that
      * should be tried first. Nothing here is implicit: an account with no
      * stored credential is never connected to.
      *
@@ -189,7 +189,7 @@ public class HrmsNotificationService {
         return searchFrom(null);
     }
 
-    /** The same, for one mailbox — each keeps its own water mark (ADR-075). */
+    /** The same, for one mailbox — each keeps its own water mark (ADR-077). */
     Instant searchFrom(java.util.UUID owner) {
         Instant now = Instant.now();
         return repository
@@ -290,7 +290,7 @@ public class HrmsNotificationService {
 
     /**
      * The most recent arrivals this viewer may see: the shared mailbox's, plus
-     * the ones read from their own inbox (ADR-075).
+     * the ones read from their own inbox (ADR-077).
      *
      * <p>This is what puts a person's own report behind the bell. Without the
      * viewer the feed shows the shared mailbox only, which is what every
@@ -327,7 +327,7 @@ public class HrmsNotificationService {
     }
 
     /**
-     * The same, limited to what {@code viewer} is allowed to open (ADR-075).
+     * The same, limited to what {@code viewer} is allowed to open (ADR-077).
      *
      * <p>A report taken from an account's own inbox is readable by that
      * account alone — role is not consulted, and a {@code super_admin} asking
@@ -462,7 +462,7 @@ public class HrmsNotificationService {
      * <p>// req: FR-OPS-001, NFR-SEC-PII, ADR-042
      */
     public Optional<ScopedReport> reportFor(long id, CurrentUser caller) {
-        // Viewer first (ADR-075): a report from somebody's own inbox is not
+        // Viewer first (ADR-077): a report from somebody's own inbox is not
         // openable by anyone else, and that is settled before role is looked
         // at. An admin's elevated view below applies to the shared mailbox's
         // reports, which is all it ever applied to.

@@ -42,7 +42,7 @@ public interface HrmsMailbox {
     record Arrival(String messageId, String subject, Instant sentAt) {}
 
     /**
-     * Credentials for one mailbox that is not the configured one (ADR-075).
+     * Credentials for one mailbox that is not the configured one (ADR-077).
      *
      * <p>Only the identity varies. Host, port, folder and the sender being
      * watched stay as configured, because everybody here is on the same relay
@@ -75,7 +75,7 @@ public interface HrmsMailbox {
 
     /**
      * The same, read from {@code login}'s own mailbox instead of the
-     * configured one (ADR-075).
+     * configured one (ADR-077).
      *
      * <p>Abstract rather than a {@code default} delegating to
      * {@link #arrivalsSince(Instant)} on purpose. A default would make
@@ -113,7 +113,7 @@ public interface HrmsMailbox {
     Optional<String> htmlBodyOf(String messageId);
 
     /**
-     * The same, fetched from {@code login}'s own mailbox (ADR-075).
+     * The same, fetched from {@code login}'s own mailbox (ADR-077).
      *
      * <p>A report recorded against an owner can only be re-read from that
      * owner's mailbox — the shared inbox never held it. Abstract for the same

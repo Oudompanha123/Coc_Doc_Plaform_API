@@ -192,7 +192,7 @@ public class NotificationFeedService {
      */
     private Stream<FeedItem> hrmsItemsFor(CurrentUser caller, int limit) {
         // The caller was already a parameter and already unused -- it is used
-        // now (ADR-075). A report read from somebody's own inbox reaches only
+        // now (ADR-077). A report read from somebody's own inbox reaches only
         // their bell; the shared mailbox's reach everyone's, as before. Passing
         // null for an absent session is deliberate: no session, no personal
         // mailbox, rather than falling back to some default account's.

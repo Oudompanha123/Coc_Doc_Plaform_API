@@ -1,4 +1,4 @@
--- Whose inbox an HRMS report came out of (ADR-075).
+-- Whose inbox an HRMS report came out of (ADR-077).
 --
 -- WHY THIS EXISTS
 --
@@ -40,7 +40,7 @@
 -- mailbox. They are that person's mail, not the organisation's records, and
 -- audit_log already holds whatever this system did with them.
 --
---   // req: FR-OPS-001, NFR-SEC-PII, NFR-OPS-AUDIT, ADR-075
+--   // req: FR-OPS-001, NFR-SEC-PII, NFR-OPS-AUDIT, ADR-077
 
 alter table hrms_notification
     add column if not exists owner_account_id uuid
@@ -60,7 +60,7 @@ create index if not exists hrms_notification_owner_received_idx
     on hrms_notification (owner_account_id, received_at desc);
 
 comment on column hrms_notification.owner_account_id is
-  'The account whose own inbox this was read from (ADR-075). Null means the '
+  'The account whose own inbox this was read from (ADR-077). Null means the '
   'shared app.hrms.* mailbox, which is every row written before V61. A row '
   'with an owner is readable ONLY by that owner -- super_admin included -- '
   'because it was taken from that person''s private mail.';

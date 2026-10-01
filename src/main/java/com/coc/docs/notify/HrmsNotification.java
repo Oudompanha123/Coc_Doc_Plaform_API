@@ -28,7 +28,7 @@ public record HrmsNotification(
     /**
      * An arrival that has not been written yet.
      *
-     * <p>Carries no owner (ADR-075): which mailbox a row came from is passed
+     * <p>Carries no owner (ADR-077): which mailbox a row came from is passed
      * to {@link HrmsNotificationRepository#record} separately and enforced in
      * SQL on every read. Keeping it off this record means no query can return
      * a row to the wrong person by forgetting to check a field — the
