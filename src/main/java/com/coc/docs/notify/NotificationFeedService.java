@@ -191,7 +191,13 @@ public class NotificationFeedService {
      * Nobody in this system did it.
      */
     private Stream<FeedItem> hrmsItemsFor(CurrentUser caller, int limit) {
-        return hrms.recent(limit).stream().map(NotificationFeedService::toItem);
+        // The caller was already a parameter and already unused -- it is used
+        // now (ADR-075). A report read from somebody's own inbox reaches only
+        // their bell; the shared mailbox's reach everyone's, as before. Passing
+        // null for an absent session is deliberate: no session, no personal
+        // mailbox, rather than falling back to some default account's.
+        return hrms.recent(limit, caller == null ? null : caller.id()).stream()
+                .map(NotificationFeedService::toItem);
     }
 
     /**

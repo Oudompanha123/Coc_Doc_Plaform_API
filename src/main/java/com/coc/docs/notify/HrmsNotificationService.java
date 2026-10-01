@@ -79,13 +79,18 @@ public class HrmsNotificationService {
     /** Mails each person their own row when a report arrives. */
     private final AttendanceMailService attendanceMail;
 
+    /** Whose inboxes may be read, and with what (ADR-075). */
+    private final AccountMailCredentialRepository credentials;
+
     public HrmsNotificationService(
             HrmsMailbox mailbox,
             HrmsNotificationRepository repository,
             HrmsMailProperties properties,
             AccountRepository accounts,
             HrmsReportContentRepository contents,
-            AttendanceMailService attendanceMail) {
+            AttendanceMailService attendanceMail,
+            AccountMailCredentialRepository credentials) {
+        this.credentials = credentials;
         this.mailbox = mailbox;
         this.repository = repository;
         this.properties = properties;
@@ -108,13 +113,59 @@ public class HrmsNotificationService {
         List<HrmsMailbox.Arrival> arrivals = mailbox.arrivalsSince(searchFrom());
         int recorded = 0;
         for (HrmsMailbox.Arrival arrival : arrivals) {
-            if (record(arrival)) {
+            if (record(arrival, null, null)) {
                 recorded++;
             }
         }
 
         if (recorded > 0) {
             log.info("HRMS: recorded {} new report notification(s) of {} message(s) seen", recorded, arrivals.size());
+        }
+        return recorded + pollPersonalInboxes();
+    }
+
+    /**
+     * Reads the inbox of every account that has stored a credential (ADR-075).
+     *
+     * <p><b>This logs into other people's mail.</b> An App Password grants the
+     * whole mailbox, not the HRMS corner of it; the IMAP search is restricted
+     * to {@code app.hrms.sender} but that restriction is code, not permission.
+     * ADR-075 §4.2 states the cost and §4.3 names the cheaper alternative that
+     * should be tried first. Nothing here is implicit: an account with no
+     * stored credential is never connected to.
+     *
+     * <p>One account's failure never stops the others. A revoked password, a
+     * Google block or a changed address are per-person conditions, and a loop
+     * that unwound on the first would mean one stale credential silently
+     * stopping everybody else's reports.
+     */
+    private int pollPersonalInboxes() {
+        int recorded = 0;
+        int polled = 0;
+        for (AccountRepository.MailTarget target : accounts.activeMailTargets()) {
+            Optional<AccountMailCredentialRepository.Credential> stored = credentials.findFor(target.accountId());
+            if (stored.isEmpty()) {
+                continue;
+            }
+            HrmsMailbox.Login login =
+                    new HrmsMailbox.Login(stored.get().username(), stored.get().appPassword());
+            try {
+                polled++;
+                for (HrmsMailbox.Arrival arrival : mailbox.arrivalsSince(searchFrom(target.accountId()), login)) {
+                    if (record(arrival, target.accountId(), login)) {
+                        recorded++;
+                    }
+                }
+            } catch (RuntimeException e) {
+                // The mailbox already swallows IMAP failures; this catches what
+                // is past it -- a parse or a database fault on one account's
+                // report. Never with the credential in the message.
+                log.warn("HRMS: polling one account's inbox failed ({})", e.getMessage());
+            }
+        }
+
+        if (polled > 0) {
+            log.info("HRMS: polled {} personal inbox(es), {} new report(s)", polled, recorded);
         }
         return recorded;
     }
@@ -135,24 +186,36 @@ public class HrmsNotificationService {
      * makes a repeat harmless.
      */
     Instant searchFrom() {
+        return searchFrom(null);
+    }
+
+    /** The same, for one mailbox — each keeps its own water mark (ADR-075). */
+    Instant searchFrom(java.util.UUID owner) {
         Instant now = Instant.now();
         return repository
-                .latestReceivedAt()
+                .latestReceivedAt(owner)
                 .map(latest -> latest.minus(properties.lookback()))
                 .orElseGet(() -> now.minus(properties.lookback()));
     }
 
-    /** Records one arrival; false if it had already been recorded. */
-    private boolean record(HrmsMailbox.Arrival arrival) {
+    /**
+     * Records one arrival; false if it had already been recorded.
+     *
+     * @param owner whose mailbox it came from, or null for the shared one
+     * @param login the credential to re-read the body with, or null to use the
+     *     configured mailbox. Must match {@code owner}: a body fetched with
+     *     the wrong login is either missing or somebody else's.
+     */
+    private boolean record(HrmsMailbox.Arrival arrival, java.util.UUID owner, HrmsMailbox.Login login) {
         HrmsNotification notification = HrmsNotification.unsaved(
                 arrival.messageId(),
                 arrival.subject(),
                 parseReportDate(arrival.subject()).orElse(null),
                 arrival.sentAt());
-        if (!repository.record(notification)) {
+        if (!repository.record(notification, owner)) {
             return false;
         }
-        storeBody(arrival.messageId(), arrival.subject());
+        storeBody(arrival.messageId(), arrival.subject(), owner, login);
         return true;
     }
 
@@ -171,12 +234,23 @@ public class HrmsNotificationService {
      * mailbox hiccuped mid-parse would be a worse outcome than storing nothing,
      * and this is the one place that trade-off is decided.
      */
-    private void storeBody(String messageId, String subject) {
+    /**
+     * One message's body, from whichever mailbox holds it.
+     *
+     * <p>A null login means the configured mailbox. An owned report exists
+     * only in its owner's inbox, so reading it with the shared credential
+     * would find nothing — and reading it with the <em>wrong</em> person's
+     * credential is the mistake this single choke point exists to prevent.
+     */
+    private Optional<String> bodyOf(String messageId, HrmsMailbox.Login login) {
+        return login == null ? mailbox.htmlBodyOf(messageId) : mailbox.htmlBodyOf(messageId, login);
+    }
+
+    private void storeBody(String messageId, String subject, java.util.UUID owner, HrmsMailbox.Login login) {
         try {
             repository
-                    .findByMessageId(messageId)
-                    .ifPresent(saved -> mailbox
-                            .htmlBodyOf(messageId)
+                    .findByMessageId(messageId, owner)
+                    .ifPresent(saved -> bodyOf(messageId, login)
                             .map(html -> HrmsReportParser.parse(subject, saved.reportDate(), html))
                             .ifPresent(content -> {
                                 contents.save(saved.id(), content);
@@ -209,9 +283,21 @@ public class HrmsNotificationService {
         }
     }
 
-    /** The most recent recorded arrivals, newest first. */
+    /** The most recent recorded arrivals from the shared mailbox, newest first. */
     public List<HrmsNotification> recent(int limit) {
-        return limit <= 0 ? List.of() : repository.recent(limit);
+        return recent(limit, null);
+    }
+
+    /**
+     * The most recent arrivals this viewer may see: the shared mailbox's, plus
+     * the ones read from their own inbox (ADR-075).
+     *
+     * <p>This is what puts a person's own report behind the bell. Without the
+     * viewer the feed shows the shared mailbox only, which is what every
+     * caller without a session gets.
+     */
+    public List<HrmsNotification> recent(int limit, java.util.UUID viewer) {
+        return limit <= 0 ? List.of() : repository.recent(limit, viewer);
     }
 
     /**
@@ -237,7 +323,23 @@ public class HrmsNotificationService {
      *     caller which ids exist.
      */
     public Optional<HrmsMailContent> report(long id) {
-        Optional<HrmsNotification> found = repository.findById(id);
+        return report(id, null);
+    }
+
+    /**
+     * The same, limited to what {@code viewer} is allowed to open (ADR-075).
+     *
+     * <p>A report taken from an account's own inbox is readable by that
+     * account alone — role is not consulted, and a {@code super_admin} asking
+     * for somebody else's gets the same empty Optional as a stranger. The
+     * filter is in the SQL, so "not yours" and "no such id" are indistinguishable
+     * from outside.
+     *
+     * <p>A null viewer sees only the shared mailbox, which is correct for the
+     * callers that have no session.
+     */
+    public Optional<HrmsMailContent> report(long id, java.util.UUID viewer) {
+        Optional<HrmsNotification> found = repository.findById(id, viewer);
         if (found.isEmpty()) {
             return Optional.empty();
         }
@@ -360,7 +462,11 @@ public class HrmsNotificationService {
      * <p>// req: FR-OPS-001, NFR-SEC-PII, ADR-042
      */
     public Optional<ScopedReport> reportFor(long id, CurrentUser caller) {
-        Optional<HrmsMailContent> full = report(id);
+        // Viewer first (ADR-075): a report from somebody's own inbox is not
+        // openable by anyone else, and that is settled before role is looked
+        // at. An admin's elevated view below applies to the shared mailbox's
+        // reports, which is all it ever applied to.
+        Optional<HrmsMailContent> full = report(id, caller == null ? null : caller.id());
         if (caller != null && caller.isAtLeast(AppRole.ADMIN)) {
             return full.map(content -> new ScopedReport(content, false, true));
         }

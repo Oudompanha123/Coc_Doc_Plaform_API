@@ -1,6 +1,7 @@
 package com.coc.docs.notify;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -206,7 +207,7 @@ class NotificationFeedServiceTest {
                             i -> entryAt(i + 1L, AuditAction.PAGE_PUBLISH, "a@example.com", now.plusSeconds(i)))
                     .toList();
             when(audit.recent(anyInt())).thenReturn(flood);
-            when(hrms.recent(anyInt()))
+            when(hrms.recent(anyInt(), any()))
                     .thenReturn(List.of(report(7, "Attendance on 08-Sep-2026", now.minus(java.time.Duration.ofDays(14)))));
 
             List<NotificationFeedService.FeedItem> feed = service.feedFor(caller, 50);
@@ -221,7 +222,7 @@ class NotificationFeedServiceTest {
         @DisplayName("appear in an admin's feed")
         void adminSeesThem() {
             CurrentUser caller = TestCallers.user(AppRole.ADMIN);
-            when(hrms.recent(anyInt())).thenReturn(List.of(report(7, "Attendance on 08-Sep-2026", Instant.now())));
+            when(hrms.recent(anyInt(), any())).thenReturn(List.of(report(7, "Attendance on 08-Sep-2026", Instant.now())));
 
             assertThat(service.feedFor(caller, 20))
                     .extracting(NotificationFeedService.FeedItem::summary)
@@ -244,7 +245,7 @@ class NotificationFeedServiceTest {
         @DisplayName("appear for every signed-in role, including a plain user")
         void everyRoleSeesThem() {
             CurrentUser caller = TestCallers.user(AppRole.USER);
-            when(hrms.recent(anyInt()))
+            when(hrms.recent(anyInt(), any()))
                     .thenReturn(List.of(report(7, "Attendance on 08-Sep-2026", Instant.now())));
 
             assertThat(service.feedFor(caller, 20))
@@ -274,7 +275,7 @@ class NotificationFeedServiceTest {
                             UUID.randomUUID(),
                             null,
                             now)));
-            when(hrms.recent(anyInt()))
+            when(hrms.recent(anyInt(), any()))
                     .thenReturn(List.of(report(7, "Attendance on 01-Sep-2026", now.minusSeconds(86_400))));
 
             assertThat(service.feedFor(caller, 20))
@@ -292,7 +293,7 @@ class NotificationFeedServiceTest {
             CurrentUser caller = TestCallers.user(AppRole.SUPER_ADMIN);
             when(audit.recent(anyInt()))
                     .thenReturn(List.of(entry(7, AuditAction.ACCOUNT_APPROVE, "a@example.com")));
-            when(hrms.recent(anyInt())).thenReturn(List.of(report(7, "Attendance on 08-Sep-2026", Instant.now())));
+            when(hrms.recent(anyInt(), any())).thenReturn(List.of(report(7, "Attendance on 08-Sep-2026", Instant.now())));
 
             assertThat(service.feedFor(caller, 20))
                     .extracting(NotificationFeedService.FeedItem::id)
@@ -303,7 +304,7 @@ class NotificationFeedServiceTest {
         @DisplayName("are attributed to no one, because no one here did it")
         void haveNoActor() {
             CurrentUser caller = TestCallers.user(AppRole.SUPER_ADMIN);
-            when(hrms.recent(anyInt())).thenReturn(List.of(report(7, "Attendance on 08-Sep-2026", Instant.now())));
+            when(hrms.recent(anyInt(), any())).thenReturn(List.of(report(7, "Attendance on 08-Sep-2026", Instant.now())));
 
             assertThat(service.feedFor(caller, 20))
                     .extracting(NotificationFeedService.FeedItem::actorEmail)
@@ -384,7 +385,7 @@ class NotificationFeedServiceTest {
         @DisplayName("an HRMS report arrival carries no target at all")
         void hrmsItemHasNoTarget() {
             CurrentUser caller = TestCallers.user(AppRole.ADMIN);
-            when(hrms.recent(anyInt()))
+            when(hrms.recent(anyInt(), any()))
                     .thenReturn(List.of(new HrmsNotification(
                             7, "<7@hrms>", "Attendance on 08-Sep-2026", null, Instant.now())));
 
@@ -439,7 +440,7 @@ class NotificationFeedServiceTest {
         @DisplayName("is null for an HRMS report arrival, which has no actor to have one")
         void nullForHrms() {
             CurrentUser caller = TestCallers.user(AppRole.ADMIN);
-            when(hrms.recent(anyInt()))
+            when(hrms.recent(anyInt(), any()))
                     .thenReturn(List.of(new HrmsNotification(
                             7, "<7@hrms>", "Attendance on 08-Sep-2026", null, Instant.now())));
 

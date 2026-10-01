@@ -41,24 +41,75 @@ public class HrmsNotificationRepository {
      */
     private static final String INSERT_SQL =
             """
-            insert into hrms_notification (message_id, subject, report_date, received_at)
-            values (?, ?, ?, ?)
-            on conflict (message_id) do nothing
+            insert into hrms_notification (owner_account_id, message_id, subject, report_date, received_at)
+            values (?, ?, ?, ?, ?)
+            on conflict (owner_account_id, message_id) do nothing
             """;
+
+    /**
+     * What one viewer may see: the shared mailbox's rows, plus their own.
+     *
+     * <p>Repeated as a fragment rather than left to callers, because this
+     * predicate <em>is</em> the access rule from ADR-075 §2 and a query that
+     * forgets it shows somebody another person's mail. One place to read, one
+     * place to get wrong.
+     *
+     * <p>{@code owner_account_id is null} is the shared mailbox (V61); role
+     * scoping on those rows happens above this layer.
+     */
+    private static final String VISIBLE_TO = "(owner_account_id is null or owner_account_id = ?)";
 
     private static final String RECENT_SQL =
             """
             select id, message_id, subject, report_date, received_at
             from hrms_notification
+            where """
+                    + VISIBLE_TO
+                    + """
+
             order by received_at desc, id desc
             limit ?
             """;
 
+    /**
+     * One row, but only if this viewer is allowed it.
+     *
+     * <p>The ownership predicate is here rather than in a Java check after the
+     * fetch, so "not yours" and "not there" are the same empty Optional. A
+     * caller cannot accidentally act on a row it was not allowed to see,
+     * and the 404 that results tells an attacker nothing about what exists.
+     */
     private static final String BY_ID_SQL =
             """
             select id, message_id, subject, report_date, received_at
             from hrms_notification
             where id = ?
+              and """
+                    + VISIBLE_TO
+                    + """
+
+            """;
+
+    /** Which mailbox a row came from — null for the shared one. Needed to re-read its body. */
+    private static final String OWNER_OF_SQL = "select owner_account_id from hrms_notification where id = ?";
+
+    /**
+     * One mailbox's copy of a message (ADR-075).
+     *
+     * <p>Message-ID alone stopped identifying a row at V61: one email to five
+     * people is one Message-ID in five mailboxes, so a lookup without the
+     * owner returns an arbitrary one of them. Attaching a parsed body to that
+     * row would file somebody's report under a colleague's name.
+     *
+     * <p>{@code is not distinct from} so the shared mailbox's null owner
+     * matches itself.
+     */
+    private static final String BY_OWNER_MESSAGE_SQL =
+            """
+            select id, message_id, subject, report_date, received_at
+            from hrms_notification
+            where message_id = ?
+              and owner_account_id is not distinct from ?
             """;
 
     /** Every arrival parsed as this calendar date's report — normally one per department, on the day HRMS sends more than one. */
@@ -67,6 +118,10 @@ public class HrmsNotificationRepository {
             select id, message_id, subject, report_date, received_at
             from hrms_notification
             where report_date = ?
+              and """
+                    + VISIBLE_TO
+                    + """
+
             order by received_at desc, id desc
             """;
 
@@ -78,7 +133,21 @@ public class HrmsNotificationRepository {
      * caught. Empty on an empty table, which the caller reads as "look back
      * from now" rather than "look back forever".
      */
-    private static final String LATEST_SQL = "select max(received_at) from hrms_notification";
+    /**
+     * Per mailbox, not global (ADR-075).
+     *
+     * <p>A global maximum would let a busy inbox set the start of a quiet
+     * one's next poll: account B, polled after account A received something
+     * newer, would look back from A's timestamp and never see its own older
+     * unread report. Each mailbox keeps its own water mark.
+     *
+     * <p>{@code is not distinct from} rather than {@code =} so that the shared
+     * mailbox's null owner matches itself; {@code = null} is null, which
+     * matches nothing and would silently reset the shared poll to "look back
+     * from now" on every run.
+     */
+    private static final String LATEST_SQL =
+            "select max(received_at) from hrms_notification where owner_account_id is not distinct from ?";
 
     private static final String DELETE_SQL = "delete from hrms_notification where received_at < ?";
 
@@ -94,8 +163,22 @@ public class HrmsNotificationRepository {
      *     happened, which is what keeps a poll over old mail silent.
      */
     public boolean record(HrmsNotification notification) {
+        return record(notification, null);
+    }
+
+    /**
+     * Records an arrival as belonging to {@code owner}'s mailbox, or to the
+     * shared one when {@code owner} is null (ADR-075).
+     *
+     * <p>Dedupe is per owner. One HRMS email sent to several people is one
+     * Message-ID in several mailboxes, so a globally unique key would let the
+     * first inbox polled claim it and silently discard everybody else's copy —
+     * see {@code V61__hrms_notification_owner.sql}.
+     */
+    public boolean record(HrmsNotification notification, java.util.UUID owner) {
         int written = jdbc.sql(INSERT_SQL)
                 .params(
+                        owner,
                         notification.messageId(),
                         notification.subject(),
                         notification.reportDate(),
@@ -126,7 +209,23 @@ public class HrmsNotificationRepository {
 
     /** The most recent arrivals, newest first. */
     public List<HrmsNotification> recent(int limit) {
-        return jdbc.sql(RECENT_SQL).param(limit).query(HrmsNotificationRepository::map).list();
+        return recent(limit, null);
+    }
+
+    /**
+     * The newest arrivals this viewer is allowed: the shared mailbox's, plus
+     * their own (ADR-075).
+     *
+     * <p>A null viewer sees only the shared mailbox — correct for anything
+     * running without a caller, such as the digest job, which must not acquire
+     * one person's private mail by being unauthenticated.
+     */
+    public List<HrmsNotification> recent(int limit, java.util.UUID viewer) {
+        return jdbc.sql(RECENT_SQL)
+                .param(viewer)
+                .param(limit)
+                .query(HrmsNotificationRepository::map)
+                .list();
     }
 
     /**
@@ -138,17 +237,63 @@ public class HrmsNotificationRepository {
      * caller reports as "no longer available" rather than as an error.
      */
     public Optional<HrmsNotification> findById(long id) {
-        return jdbc.sql(BY_ID_SQL).param(id).query(HrmsNotificationRepository::map).optional();
+        return findById(id, null);
+    }
+
+    /**
+     * One arrival, if this viewer is allowed it (ADR-075).
+     *
+     * <p>Empty covers both "no such row" and "someone else's mailbox"
+     * deliberately — see {@code BY_ID_SQL}.
+     */
+    public Optional<HrmsNotification> findById(long id, java.util.UUID viewer) {
+        return jdbc.sql(BY_ID_SQL)
+                .param(id)
+                .param(viewer)
+                .query(HrmsNotificationRepository::map)
+                .optional();
+    }
+
+    /** One mailbox's copy of a message — see {@code BY_OWNER_MESSAGE_SQL}. */
+    public Optional<HrmsNotification> findByMessageId(String messageId, java.util.UUID owner) {
+        return jdbc.sql(BY_OWNER_MESSAGE_SQL)
+                .param(messageId)
+                .param(owner)
+                .query(HrmsNotificationRepository::map)
+                .optional();
+    }
+
+    /** Whose mailbox a row came from — empty for the shared one, or no such row. */
+    public Optional<java.util.UUID> ownerOf(long id) {
+        return jdbc.sql(OWNER_OF_SQL)
+                .param(id)
+                .query(java.util.UUID.class)
+                .optional();
     }
 
     /** Every arrival recorded for one calendar date, newest first. */
     public List<HrmsNotification> byReportDate(LocalDate date) {
-        return jdbc.sql(BY_REPORT_DATE_SQL).param(date).query(HrmsNotificationRepository::map).list();
+        return byReportDate(date, null);
+    }
+
+    /** The same, limited to what this viewer may see (ADR-075). */
+    public List<HrmsNotification> byReportDate(LocalDate date, java.util.UUID viewer) {
+        return jdbc.sql(BY_REPORT_DATE_SQL)
+                .param(date)
+                .param(viewer)
+                .query(HrmsNotificationRepository::map)
+                .list();
     }
 
     /** When the newest recorded arrival was sent, if there is one. */
     public Optional<Instant> latestReceivedAt() {
+        return latestReceivedAt(null);
+    }
+
+    /** The newest arrival in one mailbox — where that mailbox's next poll starts. */
+    public Optional<Instant> latestReceivedAt(java.util.UUID owner) {
         return jdbc.sql(LATEST_SQL)
+                .param(owner)
                 .query(OffsetDateTime.class)
                 .optional()
                 .map(OffsetDateTime::toInstant);

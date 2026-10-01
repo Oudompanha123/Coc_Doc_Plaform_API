@@ -2,12 +2,16 @@ package com.coc.docs.notify;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.coc.docs.account.AccountRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -60,8 +64,17 @@ class HrmsNotificationServiceTest {
     /** Only the poll path uses it; the read tests leave it unstubbed. */
     private final AttendanceMailService attendanceMail = mock(AttendanceMailService.class);
 
+    /**
+     * Unstubbed by default, so no account has a credential and no personal
+     * inbox is ever opened (ADR-075). That is the right default for every test
+     * here except the ones that opt in: polling somebody's mailbox should take
+     * a deliberate act to arrange, in tests as in production.
+     */
+    private final AccountMailCredentialRepository mailCredentials = mock(AccountMailCredentialRepository.class);
+
     private HrmsNotificationService serviceWith(HrmsMailProperties props) {
-        return new HrmsNotificationService(mailbox, repository, props, accounts, contents, attendanceMail);
+        return new HrmsNotificationService(
+                mailbox, repository, props, accounts, contents, attendanceMail, mailCredentials);
     }
 
     private static HrmsMailbox.Arrival arrival(String id, String subject) {
@@ -158,12 +171,12 @@ class HrmsNotificationServiceTest {
         @DisplayName("records an arrival it has not seen")
         void recordsNewArrival() {
             when(mailbox.arrivalsSince(any())).thenReturn(List.of(arrival("<a@hrms>", "Attendance on 08-Sep-2026")));
-            when(repository.record(any())).thenReturn(true);
+            when(repository.record(any(), any())).thenReturn(true);
 
             assertThat(serviceWith(configured()).poll()).isEqualTo(1);
 
             ArgumentCaptor<HrmsNotification> written = ArgumentCaptor.forClass(HrmsNotification.class);
-            verify(repository).record(written.capture());
+            verify(repository).record(written.capture(), isNull());
             assertThat(written.getValue().messageId()).isEqualTo("<a@hrms>");
             assertThat(written.getValue().subject()).isEqualTo("Attendance on 08-Sep-2026");
             assertThat(written.getValue().reportDate()).isEqualTo(LocalDate.of(2026, 9, 8));
@@ -178,7 +191,7 @@ class HrmsNotificationServiceTest {
         @DisplayName("does not count an arrival the database already had")
         void duplicateIsNotNews() {
             when(mailbox.arrivalsSince(any())).thenReturn(List.of(arrival("<a@hrms>", "Attendance on 08-Sep-2026")));
-            when(repository.record(any())).thenReturn(false);
+            when(repository.record(any(), any())).thenReturn(false);
 
             assertThat(serviceWith(configured()).poll()).isZero();
         }
@@ -187,12 +200,12 @@ class HrmsNotificationServiceTest {
         @DisplayName("stores a null report date rather than dropping an unparseable subject")
         void unparseableSubjectStillRecorded() {
             when(mailbox.arrivalsSince(any())).thenReturn(List.of(arrival("<b@hrms>", "Attendance summary")));
-            when(repository.record(any())).thenReturn(true);
+            when(repository.record(any(), any())).thenReturn(true);
 
             assertThat(serviceWith(configured()).poll()).isEqualTo(1);
 
             ArgumentCaptor<HrmsNotification> written = ArgumentCaptor.forClass(HrmsNotification.class);
-            verify(repository).record(written.capture());
+            verify(repository).record(written.capture(), isNull());
             assertThat(written.getValue().reportDate()).isNull();
             assertThat(written.getValue().summary()).isEqualTo("Attendance summary");
         }
@@ -206,7 +219,7 @@ class HrmsNotificationServiceTest {
         @DisplayName("anchors to the newest arrival already recorded, not to now")
         void anchorsToLatest() {
             Instant latest = Instant.parse("2026-09-08T05:02:00Z");
-            when(repository.latestReceivedAt()).thenReturn(Optional.of(latest));
+            when(repository.latestReceivedAt(null)).thenReturn(Optional.of(latest));
 
             assertThat(serviceWith(configured()).searchFrom()).isEqualTo(latest.minus(Duration.ofDays(7)));
         }
@@ -220,7 +233,7 @@ class HrmsNotificationServiceTest {
         @DisplayName("reaches back past an outage longer than the window")
         void reachesBackPastAnOutage() {
             Instant longAgo = Instant.parse("2026-08-01T05:02:00Z");
-            when(repository.latestReceivedAt()).thenReturn(Optional.of(longAgo));
+            when(repository.latestReceivedAt(null)).thenReturn(Optional.of(longAgo));
 
             assertThat(serviceWith(configured()).searchFrom()).isBefore(Instant.parse("2026-08-01T00:00:00Z"));
         }
@@ -228,7 +241,7 @@ class HrmsNotificationServiceTest {
         @Test
         @DisplayName("falls back to the window before now on an empty table")
         void emptyTableLooksBackFromNow() {
-            when(repository.latestReceivedAt()).thenReturn(Optional.empty());
+            when(repository.latestReceivedAt(null)).thenReturn(Optional.empty());
 
             Instant before = Instant.now().minus(Duration.ofDays(7));
             Instant from = serviceWith(configured()).searchFrom();
@@ -286,7 +299,12 @@ class HrmsNotificationServiceTest {
         }
 
         private HrmsNotificationService armed() {
-            when(repository.findById(9L))
+            // any() for the viewer: these assert which ROWS a role sees inside
+            // a report it is already allowed to open. Whether it is allowed to
+            // open it at all is owner scoping, which OwnerScoping covers and
+            // the database enforces -- pinning a viewer here would couple this
+            // nest to a UUID TestCallers makes up per call.
+            when(repository.findById(eq(9L), any()))
                     .thenReturn(Optional.of(new HrmsNotification(
                             9L, "msg-9", "Attendance on 08-Sep-2026",
                             LocalDate.of(2026, 9, 8), Instant.parse("2026-09-08T05:02:00Z"))));
@@ -389,8 +407,8 @@ class HrmsNotificationServiceTest {
         @DisplayName("a newly recorded report has its body fetched and stored, once")
         void storesBodyOnFirstRecord() {
             when(mailbox.arrivalsSince(any())).thenReturn(List.of(arrival("msg-9", "Attendance on 25-Aug-2026")));
-            when(repository.record(any())).thenReturn(true);
-            when(repository.findByMessageId("msg-9")).thenReturn(Optional.of(saved()));
+            when(repository.record(any(), any())).thenReturn(true);
+            when(repository.findByMessageId("msg-9", null)).thenReturn(Optional.of(saved()));
             when(mailbox.htmlBodyOf("msg-9")).thenReturn(Optional.of(HTML));
 
             assertThat(serviceWith(configured()).poll()).isEqualTo(1);
@@ -405,7 +423,7 @@ class HrmsNotificationServiceTest {
         @DisplayName("an already-recorded report is not re-fetched -- the mailbox is opened once per report, not per poll")
         void doesNotRestoreAnAlreadyRecordedReport() {
             when(mailbox.arrivalsSince(any())).thenReturn(List.of(arrival("msg-9", "Attendance on 25-Aug-2026")));
-            when(repository.record(any())).thenReturn(false);
+            when(repository.record(any(), any())).thenReturn(false);
 
             assertThat(serviceWith(configured()).poll()).isZero();
 
@@ -417,7 +435,7 @@ class HrmsNotificationServiceTest {
         @DisplayName("a report is read from the table, without touching the mailbox")
         void readsFromTheTable() {
             HrmsMailContent fromDb = HrmsReportParser.parse("Attendance on 25-Aug-2026", LocalDate.of(2026, 8, 25), HTML);
-            when(repository.findById(9L)).thenReturn(Optional.of(saved()));
+            when(repository.findById(9L, null)).thenReturn(Optional.of(saved()));
             when(contents.findByNotificationId(org.mockito.ArgumentMatchers.eq(9L), any(), any()))
                     .thenReturn(Optional.of(fromDb));
 
@@ -431,7 +449,7 @@ class HrmsNotificationServiceTest {
         @DisplayName("a stored report still reads with the mailbox unconfigured -- which it could not before V49")
         void storedReportReadsWithoutTheMailbox() {
             HrmsMailContent fromDb = HrmsReportParser.parse("Attendance on 25-Aug-2026", LocalDate.of(2026, 8, 25), HTML);
-            when(repository.findById(9L)).thenReturn(Optional.of(saved()));
+            when(repository.findById(9L, null)).thenReturn(Optional.of(saved()));
             when(contents.findByNotificationId(org.mockito.ArgumentMatchers.eq(9L), any(), any()))
                     .thenReturn(Optional.of(fromDb));
 
@@ -441,7 +459,7 @@ class HrmsNotificationServiceTest {
         @Test
         @DisplayName("a report recorded before V49 falls back to the mailbox rather than becoming unreadable")
         void fallsBackForPreV49Reports() {
-            when(repository.findById(9L)).thenReturn(Optional.of(saved()));
+            when(repository.findById(9L, null)).thenReturn(Optional.of(saved()));
             when(contents.findByNotificationId(org.mockito.ArgumentMatchers.eq(9L), any(), any()))
                     .thenReturn(Optional.empty());
             when(mailbox.htmlBodyOf("msg-9")).thenReturn(Optional.of(HTML));
@@ -455,7 +473,7 @@ class HrmsNotificationServiceTest {
         @Test
         @DisplayName("that fallback stores what it parsed, so the next read needs no mailbox")
         void fallbackBackfillsTheStore() {
-            when(repository.findById(9L)).thenReturn(Optional.of(saved()));
+            when(repository.findById(9L, null)).thenReturn(Optional.of(saved()));
             when(contents.findByNotificationId(org.mockito.ArgumentMatchers.eq(9L), any(), any()))
                     .thenReturn(Optional.empty());
             when(mailbox.htmlBodyOf("msg-9")).thenReturn(Optional.of(HTML));
@@ -471,7 +489,7 @@ class HrmsNotificationServiceTest {
         @Test
         @DisplayName("a store that fails does not fail the read -- the caller asked for a report, not a write")
         void aFailedBackfillStillServesTheReport() {
-            when(repository.findById(9L)).thenReturn(Optional.of(saved()));
+            when(repository.findById(9L, null)).thenReturn(Optional.of(saved()));
             when(contents.findByNotificationId(org.mockito.ArgumentMatchers.eq(9L), any(), any()))
                     .thenReturn(Optional.empty());
             when(mailbox.htmlBodyOf("msg-9")).thenReturn(Optional.of(HTML));
@@ -542,6 +560,153 @@ class HrmsNotificationServiceTest {
             when(repository.byReportDate(DAY)).thenReturn(List.of());
 
             assertThat(serviceWith(configured()).reportsForDate(DAY)).isEmpty();
+        }
+    }
+
+    /**
+     * Reading an account's own inbox (ADR-075).
+     *
+     * <p>The thing under test is not "does IMAP work" — it is <em>whose</em>
+     * mailbox gets opened, and when one gets opened at all. Logging into a
+     * colleague's mail is the failure these guard against, so most of them
+     * assert something does <b>not</b> happen.
+     */
+    @Nested
+    @DisplayName("personal inboxes")
+    class PersonalInboxes {
+
+        private static final java.util.UUID ANA = java.util.UUID.randomUUID();
+        private static final java.util.UUID BOREY = java.util.UUID.randomUUID();
+
+        private AccountRepository.MailTarget target(java.util.UUID id, String email) {
+            return new AccountRepository.MailTarget(id, email, null);
+        }
+
+        /**
+         * The default, and the one that must never regress: a platform full of
+         * accounts, none of which has handed over a password, opens nobody's
+         * mailbox.
+         */
+        @Test
+        @DisplayName("opens no personal mailbox when nobody stored a credential")
+        void noCredentialNoLogin() {
+            when(mailbox.arrivalsSince(any())).thenReturn(List.of());
+            when(accounts.activeMailTargets())
+                    .thenReturn(List.of(target(ANA, "ana@example.com"), target(BOREY, "borey@example.com")));
+            when(mailCredentials.findFor(any())).thenReturn(Optional.empty());
+
+            serviceWith(configured()).poll();
+
+            verify(mailbox, never()).arrivalsSince(any(), any());
+        }
+
+        @Test
+        @DisplayName("reads an account's own inbox with that account's own credential")
+        void pollsWithOwnCredential() {
+            when(mailbox.arrivalsSince(any())).thenReturn(List.of());
+            when(accounts.activeMailTargets()).thenReturn(List.of(target(ANA, "ana@example.com")));
+            when(mailCredentials.findFor(ANA))
+                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential("ana@gmail.com", "pw")));
+            when(mailbox.arrivalsSince(any(), any()))
+                    .thenReturn(List.of(arrival("<own@hrms>", "Attendance on 08-Sep-2026")));
+            when(repository.record(any(), any())).thenReturn(true);
+
+            assertThat(serviceWith(configured()).poll()).isEqualTo(1);
+
+            ArgumentCaptor<HrmsMailbox.Login> used = ArgumentCaptor.forClass(HrmsMailbox.Login.class);
+            verify(mailbox).arrivalsSince(any(), used.capture());
+            assertThat(used.getValue().username()).isEqualTo("ana@gmail.com");
+
+            // The row is filed under its owner. A null here would put somebody's
+            // private mail in the shared feed, where everyone can see it.
+            verify(repository).record(any(), eq(ANA));
+        }
+
+        /**
+         * A revoked App Password is an ordinary event, not an outage. If one
+         * account's failure could stop the loop, the person whose credential
+         * expired would silently take everybody else's reports down with them.
+         */
+        @Test
+        @DisplayName("one account's failure does not stop the next account")
+        void oneFailureDoesNotStopTheRest() {
+            when(mailbox.arrivalsSince(any())).thenReturn(List.of());
+            when(accounts.activeMailTargets())
+                    .thenReturn(List.of(target(ANA, "ana@example.com"), target(BOREY, "borey@example.com")));
+            when(mailCredentials.findFor(ANA))
+                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential("ana@gmail.com", "pw")));
+            when(mailCredentials.findFor(BOREY))
+                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential("borey@gmail.com", "pw")));
+
+            when(mailbox.arrivalsSince(any(), argThat(l -> l != null && l.username().startsWith("ana"))))
+                    .thenThrow(new IllegalStateException("boom"));
+            when(mailbox.arrivalsSince(any(), argThat(l -> l != null && l.username().startsWith("borey"))))
+                    .thenReturn(List.of(arrival("<b@hrms>", "Attendance on 08-Sep-2026")));
+            when(repository.record(any(), any())).thenReturn(true);
+
+            assertThat(serviceWith(configured()).poll()).isEqualTo(1);
+            verify(repository).record(any(), eq(BOREY));
+        }
+
+        /** Each mailbox keeps its own water mark — see {@code LATEST_SQL}. */
+        @Test
+        @DisplayName("starts each account's search from that account's own newest arrival")
+        void searchWindowIsPerMailbox() {
+            when(repository.latestReceivedAt(ANA)).thenReturn(Optional.of(Instant.parse("2026-09-08T00:00:00Z")));
+
+            assertThat(serviceWith(configured()).searchFrom(ANA))
+                    .isEqualTo(Instant.parse("2026-09-08T00:00:00Z").minus(Duration.ofDays(7)));
+        }
+    }
+
+    /**
+     * Who may read what (ADR-075 §2).
+     *
+     * <p>These assert that the viewer reaches the query. The refusal itself is
+     * enforced in SQL, so {@link HrmsNotificationIntegrationTest} is where it
+     * is proved against a real database — but a service that forgets to pass
+     * the viewer would make that predicate moot, and that is what these catch.
+     */
+    @Nested
+    @DisplayName("owner scoping")
+    class OwnerScoping {
+
+        private static final java.util.UUID VIEWER = java.util.UUID.randomUUID();
+
+        @Test
+        @DisplayName("the feed asks only for rows this viewer may see")
+        void recentPassesViewer() {
+            when(repository.recent(5, VIEWER)).thenReturn(List.of());
+
+            serviceWith(configured()).recent(5, VIEWER);
+
+            verify(repository).recent(5, VIEWER);
+        }
+
+        /**
+         * The no-session case. Null must mean "the shared mailbox only", never
+         * "some default account's mailbox" — an unauthenticated caller
+         * acquiring a person's private reports is the worst version of getting
+         * this wrong.
+         */
+        @Test
+        @DisplayName("no session sees the shared mailbox only")
+        void noSessionIsSharedOnly() {
+            when(repository.recent(5, null)).thenReturn(List.of());
+
+            serviceWith(configured()).recent(5);
+
+            verify(repository).recent(5, null);
+        }
+
+        @Test
+        @DisplayName("opening one report asks for it as this viewer")
+        void reportPassesViewer() {
+            when(repository.findById(42L, VIEWER)).thenReturn(Optional.empty());
+
+            assertThat(serviceWith(configured()).report(42L, VIEWER)).isEmpty();
+
+            verify(repository).findById(42L, VIEWER);
         }
     }
 }
