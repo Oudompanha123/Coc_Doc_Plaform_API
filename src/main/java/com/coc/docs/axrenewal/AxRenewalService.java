@@ -1432,6 +1432,22 @@ public class AxRenewalService {
     }
 
     /** The files a Generate run actually found different, for the review screen. */
+    /** The most runs one history request returns (ADR-078) — enough to look back over, small enough to read in one go. */
+    static final int RUN_HISTORY_LIMIT = 50;
+
+    /**
+     * The project's implementation runs, newest first (ADR-078) — plan builds,
+     * error fixes and UI changes, whatever became of them. Read-only: it acts
+     * on nothing, and revert stays the latest applied run only.
+     *
+     * <p>Readable by anyone who may open the project ({@link #requireMember}),
+     * the same audience as the project's current run.
+     */
+    public List<AxRenewalRunSummary> listRuns(UUID projectId, CurrentUser actor) {
+        requireMember(projectId, actor);
+        return implementations.listSummaries(projectId, RUN_HISTORY_LIMIT);
+    }
+
     public List<AxRenewalGeneratedChange> findGeneratedChanges(UUID projectId, UUID runId, CurrentUser actor) {
         requireMember(projectId, actor);
         requireOwnRun(projectId, runId);

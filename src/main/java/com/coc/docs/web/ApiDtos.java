@@ -1682,6 +1682,34 @@ public final class ApiDtos {
         }
     }
 
+    /** One past run in the Build → Implementation history (ADR-078). {@code startedByName} is a display name, never an email. */
+    public record AxRenewalRunSummaryResponse(
+            UUID id,
+            String runKind,
+            String status,
+            Instant startedAt,
+            UUID startedBy,
+            String startedByName,
+            Instant completedAt,
+            String failureReason,
+            String instruction,
+            int changedFiles) {
+
+        public static AxRenewalRunSummaryResponse of(com.coc.docs.axrenewal.AxRenewalRunSummary run) {
+            return new AxRenewalRunSummaryResponse(
+                    run.id(),
+                    run.runKind(),
+                    run.status(),
+                    run.startedAt(),
+                    run.startedBy(),
+                    run.startedByName(),
+                    run.completedAt(),
+                    run.failureReason(),
+                    run.instruction(),
+                    run.changedFiles());
+        }
+    }
+
     public record AxRenewalImplementationRunResponse(
             UUID id,
             String status,

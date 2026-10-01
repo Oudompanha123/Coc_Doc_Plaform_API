@@ -1597,6 +1597,27 @@ class SecurityRulesTest {
                     .andExpect(status().isForbidden());
         }
 
+        // --- Run history (ADR-078): a plain read, at the GET floor. Which
+        // projects a caller may read is the service's membership check.
+
+        @ParameterizedTest
+        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER", "REVIEWER", "LEAD", "ADMIN"})
+        void run_history_is_a_plain_read_admitted_at_the_user_floor(AppRole role) throws Exception {
+            org.mockito.Mockito.when(axRenewalService.listRuns(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/runs")
+                            .with(as(role)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void run_history_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(get("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/runs"))
+                    .andExpect(status().isUnauthorized());
+        }
+
         @Test
         void a_local_run_s_status_is_a_plain_read_admitted_at_the_user_floor() throws Exception {
             org.mockito.Mockito.when(axRenewalService.runLocallyStatus(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
