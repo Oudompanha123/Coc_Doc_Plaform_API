@@ -91,7 +91,7 @@ class AxRenewalRebuildReplayTest {
         // hash of.
         for (AxRenewalSection section : AxRenewalSection.values()) {
             when(confirmations.find(projectId, section)).thenReturn(Optional.of(new AxRenewalConfirmation(
-                    projectId, section, Instant.EPOCH, actor.id(), AxRenewalConfirmation.VIA_SUPER_ADMIN)));
+                    projectId, section, Instant.EPOCH, actor.id(), AxRenewalConfirmation.VIA_SUPER_ADMIN, "Admin")));
         }
         when(plan.findStackLayers(projectId)).thenReturn(List.of(new AxRenewalStackLayer(
                 UUID.randomUUID(), projectId, "runtime", "PHP 5.6", "Node 20", 0, Instant.EPOCH, actor.id())));
@@ -169,7 +169,8 @@ class AxRenewalRebuildReplayTest {
                 generator,
                 mock(AxRenewalImplementationRunner.class),
                 mock(AxRenewalLocalRunner.class),
-                mock(AxRenewalTestRunner.class));
+                mock(AxRenewalTestRunner.class),
+                event -> {});
     }
 
     private void filesystemDestination() {

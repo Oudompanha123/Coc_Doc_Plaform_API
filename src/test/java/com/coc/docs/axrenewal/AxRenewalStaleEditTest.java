@@ -92,7 +92,8 @@ class AxRenewalStaleEditTest {
                 mock(AxRenewalCodeGenerator.class),
                 mock(AxRenewalImplementationRunner.class),
                 mock(AxRenewalLocalRunner.class),
-                mock(AxRenewalTestRunner.class));
+                mock(AxRenewalTestRunner.class),
+                event -> {});
     }
 
     /** Every plan edit, called with the revision given — one row per endpoint that must refuse a stale write. */
@@ -191,7 +192,8 @@ class AxRenewalStaleEditTest {
                         AxRenewalSection.PAGES,
                         Instant.EPOCH,
                         developer.id(),
-                        AxRenewalConfirmation.VIA_DEVELOPER_ROLE)));
+                        AxRenewalConfirmation.VIA_DEVELOPER_ROLE,
+                        "Developer")));
 
         service.confirmSection(projectId, AxRenewalSection.PAGES, CURRENT, developer);
 

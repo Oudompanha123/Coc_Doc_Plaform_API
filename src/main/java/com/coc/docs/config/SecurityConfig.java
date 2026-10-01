@@ -410,6 +410,12 @@ public class SecurityConfig {
                         // authorisation decision, so it does not live here.
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/ax-renewal/projects/*")
                         .hasRole(AppRole.ADMIN.name())
+                        // Renaming / re-describing a project (ADR-076): the
+                        // same project-lifecycle floor as creating or deleting
+                        // one. Whether this caller is on the project is row
+                        // data, checked by AxRenewalService.
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/ax-renewal/projects/*")
+                        .hasRole(AppRole.ADMIN.name())
                         // Project members (ADR-069): who is on the team is a
                         // project-lifecycle decision, the same floor as
                         // creating the project. Whether this caller is on

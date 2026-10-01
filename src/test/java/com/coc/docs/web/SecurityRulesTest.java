@@ -1200,6 +1200,45 @@ class SecurityRulesTest {
                     .andExpect(status().isUnauthorized());
         }
 
+        // --- Renaming a project (ADR-076): the same floor as deleting one.
+
+        @ParameterizedTest
+        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER", "REVIEWER", "LEAD"})
+        void renaming_a_project_refuses_every_role_below_admin(AppRole role) throws Exception {
+            mvc.perform(patch("/api/v1/ax-renewal/projects/" + UUID.randomUUID())
+                            .with(as(role))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Renamed\"}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void renaming_a_project_admits_an_admin() throws Exception {
+            org.mockito.Mockito.doThrow(ApiException.notFound("project"))
+                    .when(axRenewalService)
+                    .updateDetails(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any());
+
+            // 404 from the stub, not 403 — the route was reached.
+            mvc.perform(patch("/api/v1/ax-renewal/projects/" + UUID.randomUUID())
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Renamed\",\"description\":\"notes\"}"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void renaming_a_project_to_a_blank_name_is_refused_before_it_reaches_the_service() throws Exception {
+            mvc.perform(patch("/api/v1/ax-renewal/projects/" + UUID.randomUUID())
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"   \"}"))
+                    .andExpect(status().isBadRequest());
+        }
+
         @Test
         void deleting_a_project_admits_an_admin() throws Exception {
             org.mockito.Mockito.doThrow(ApiException.notFound("project"))

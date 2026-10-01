@@ -22,6 +22,7 @@ import com.coc.docs.auth.TestCallers;
 import com.coc.docs.web.ApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -56,6 +57,8 @@ class AxRenewalMembershipTest {
     private AxRenewalMemberRepository members;
     private AccountRepository accounts;
     private AuditRepository audit;
+    /** Every event the service published — the member-added notification's trigger (ADR-075). */
+    private final List<Object> published = new ArrayList<>();
     private AxRenewalService service;
 
     private final UUID projectId = UUID.randomUUID();
@@ -95,7 +98,8 @@ class AxRenewalMembershipTest {
                 mock(AxRenewalCodeGenerator.class),
                 mock(AxRenewalImplementationRunner.class),
                 mock(AxRenewalLocalRunner.class),
-                mock(AxRenewalTestRunner.class));
+                mock(AxRenewalTestRunner.class),
+                published::add);
     }
 
     @FunctionalInterface
@@ -123,6 +127,7 @@ class AxRenewalMembershipTest {
                 change("comment", (s, p, a) -> s.addComment(p, "hello", a)),
                 change("remove a comment", (s, p, a) -> s.deleteComment(p, UUID.randomUUID(), a)),
                 change("delete project", (s, p, a) -> s.delete(p, a)),
+                change("rename project", (s, p, a) -> s.updateDetails(p, "Renamed", "new description", a)),
                 change("attach manifest", (s, p, a) -> s.attachManifest(p, null, null, null, a)),
                 change("run analysis", (s, p, a) -> s.runAnalysis(p, false, null, a)),
                 change("edit stack move", (s, p, a) -> s.updateStackMove(p, List.of(), 0, a)),
@@ -306,6 +311,8 @@ class AxRenewalMembershipTest {
             service.addMember(projectId, "  reviewer@example.com ", admin);
 
             verify(members).add(projectId, reviewer.id(), admin.id());
+            // ADR-075: the person added is told — by an event, handled after commit.
+            assertThat(published).containsExactly(new AxRenewalMemberAddedEvent(projectId, reviewer.id()));
             verify(audit).append(
                     eq(admin.id()),
                     eq(admin.email()),
@@ -324,6 +331,31 @@ class AxRenewalMembershipTest {
             service.addMember(projectId, "dev@example.com", admin);
 
             verifyNoInteractions(audit);
+            // Already a member: nothing new happened to them, so nothing to tell.
+            assertThat(published).isEmpty();
+        }
+
+        @Test
+        void adding_yourself_notifies_nobody() {
+            // A super admin may add themselves to any project (ADR-070); they
+            // know already, so a notification would only be noise.
+            CurrentUser superAdmin = TestCallers.user(AppRole.SUPER_ADMIN);
+            when(accounts.findByEmail(any())).thenReturn(Optional.of(superAdmin.account()));
+            when(members.add(projectId, superAdmin.id(), superAdmin.id())).thenReturn(true);
+
+            service.addMember(projectId, "me@example.com", superAdmin);
+
+            verify(members).add(projectId, superAdmin.id(), superAdmin.id());
+            assertThat(published).isEmpty();
+        }
+
+        @Test
+        void a_refused_add_notifies_nobody() {
+            when(accounts.findByEmail(any())).thenReturn(Optional.of(accountWith(AccountStatus.ACTIVE, AppRole.USER)));
+
+            assertThatThrownBy(() -> service.addMember(projectId, "user@example.com", admin))
+                    .isInstanceOf(ApiException.class);
+            assertThat(published).isEmpty();
         }
 
         @Test

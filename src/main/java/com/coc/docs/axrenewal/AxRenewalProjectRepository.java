@@ -87,6 +87,19 @@ public class AxRenewalProjectRepository {
                 .single();
     }
 
+    /** Renames a project and replaces its description (ADR-076). Returns the row as it now is. */
+    public AxRenewalProject updateDetails(UUID id, String name, String description) {
+        return jdbc.sql("""
+                        update ax_renewal_project
+                        set name = ?, description = ?, updated_at = now()
+                        where id = ?
+                        returning
+                        """ + COLUMNS)
+                .params(name, description, id)
+                .query(this::map)
+                .single();
+    }
+
     public void attachManifest(UUID id, String filename, String content, JsonNode stats, UUID attachedBy) {
         jdbc.sql("""
                         update ax_renewal_project

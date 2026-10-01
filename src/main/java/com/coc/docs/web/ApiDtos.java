@@ -1542,6 +1542,9 @@ public final class ApiDtos {
 
     public record AddAxRenewalCommentRequest(@NotBlank String body) {}
 
+    /** A project's name and description, both replaced (ADR-076). A blank description clears it. */
+    public record UpdateAxRenewalProjectRequest(@NotBlank String name, String description) {}
+
     /** By email: nobody below super admin can list accounts to pick from (NFR-SEC-PII, ADR-069). */
     public record AddAxRenewalMemberRequest(@NotBlank String email) {}
 
@@ -1665,15 +1668,17 @@ public final class ApiDtos {
         }
     }
 
+    /** {@code confirmedByName} is the confirmer's display name — never an email — so the plan can say who signed it off. */
     public record AxRenewalConfirmationResponse(
-            String section, Instant confirmedAt, UUID confirmedBy, String confirmedVia) {
+            String section, Instant confirmedAt, UUID confirmedBy, String confirmedVia, String confirmedByName) {
 
         public static AxRenewalConfirmationResponse of(AxRenewalConfirmation confirmation) {
             return new AxRenewalConfirmationResponse(
                     confirmation.section().wire(),
                     confirmation.confirmedAt(),
                     confirmation.confirmedBy(),
-                    confirmation.confirmedVia());
+                    confirmation.confirmedVia(),
+                    confirmation.confirmedByName());
         }
     }
 

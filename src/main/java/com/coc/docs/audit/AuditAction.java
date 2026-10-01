@@ -150,6 +150,13 @@ public final class AuditAction {
      */
     public static final String AX_RENEWAL_PROJECT_DELETE = "ax_renewal.project_delete";
 
+    /**
+     * A project renamed or its description changed (ADR-076). {@code detail}
+     * carries the name before and after — what a reader of the trail needs to
+     * recognise the project under either.
+     */
+    public static final String AX_RENEWAL_PROJECT_UPDATE = "ax_renewal.project_update";
+
     public static final String AX_RENEWAL_MANIFEST_ATTACH = "ax_renewal.manifest_attach";
     public static final String AX_RENEWAL_ANALYSIS_RUN = "ax_renewal.analysis_run";
     public static final String AX_RENEWAL_STACK_MOVE_EDIT = "ax_renewal.stack_move_edit";

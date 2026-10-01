@@ -87,7 +87,8 @@ class AxRenewalErrorFixAndUiChangeTest {
                 generator,
                 mock(AxRenewalImplementationRunner.class),
                 localRunner,
-                mock(AxRenewalTestRunner.class));
+                mock(AxRenewalTestRunner.class),
+                event -> {});
     }
 
     private void appliedDestination() {
