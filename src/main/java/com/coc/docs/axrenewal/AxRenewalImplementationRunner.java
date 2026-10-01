@@ -2,7 +2,9 @@ package com.coc.docs.axrenewal;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -43,15 +45,28 @@ public class AxRenewalImplementationRunner {
     private final AxRenewalCodeGenerator generator;
     private final AxRenewalImplementationRepository implementations;
 
-    /** The one live CLI process a {@code generating} run has, if any — registered the instant it starts, removed once {@link AxRenewalCodeGenerator#generate} returns either way. */
     /**
      * Every staging directory's name starts with this, directly under the
-     * system temp directory — which is also what lets a sweep (ADR-072) check
-     * that a path read back from the database really is one of these before
-     * deleting it.
+     * system temp directory — which is also what lets a sweep (ADR-072,
+     * ADR-073) check that a path read back from the database really is one of
+     * these before deleting it.
      */
     static final String STAGING_PREFIX = "ax-renewal-generate-";
 
+    /**
+     * How long a {@code generating} run can genuinely last before it must be
+     * dead, wherever it was started (ADR-073): three times the CLI's own hard
+     * timeout ({@link AxRenewalCodeGenerator#TIMEOUT}), which leaves room for
+     * copying the source in before the process starts and diffing it after.
+     * Older than this, no backend's process can still be working on it — the
+     * one rule that is safe on a database several developers' backends share.
+     */
+    static final Duration GENERATING_ORPHANED_AFTER = AxRenewalCodeGenerator.TIMEOUT.multipliedBy(3);
+
+    static final String INTERRUPTED_REASON =
+            "interrupted — the backend stopped before this run finished. Nothing was applied; start it again.";
+
+    /** The one live CLI process a {@code generating} run has, if any — registered the instant it starts, removed once {@link AxRenewalCodeGenerator#generate} returns either way. */
     private final Map<UUID, Process> runningProcesses = new ConcurrentHashMap<>();
     /** Runs {@link #cancel} was asked to stop — read once by {@link #runGeneration}'s own failure branch to report "cancelled", not a generic failure, then cleared. */
     private final Set<UUID> cancelledRuns = ConcurrentHashMap.newKeySet();
@@ -83,10 +98,17 @@ public class AxRenewalImplementationRunner {
         try {
             staging = Files.createTempDirectory(STAGING_PREFIX);
         } catch (IOException e) {
-            implementations.markFailed(runId, "could not create a staging directory: " + e.getMessage());
+            fail(runId, "could not create a staging directory: " + e.getMessage());
             return;
         }
-        implementations.markStaging(runId, staging.toString());
+        // Every transition below states the status it expects (ADR-073). If
+        // this run was already cancelled or recovered — possibly by another
+        // backend sharing the database — it is not ours to carry on with.
+        if (!implementations.markStagingIfGenerating(runId, staging.toString())) {
+            deleteQuietly(staging);
+            log.info("generation run {} was closed before it started; not generating", runId);
+            return;
+        }
 
         Optional<AxRenewalCodeGenerator.Result> result;
         try {
@@ -96,7 +118,7 @@ public class AxRenewalImplementationRunner {
             log.warn("generation run {} failed unexpectedly", runId, e);
             deleteQuietly(staging);
             implementations.clearStaging(runId);
-            implementations.markFailed(runId, "generation failed unexpectedly: " + e.getMessage());
+            fail(runId, "generation failed unexpectedly: " + e.getMessage());
             return;
         } finally {
             runningProcesses.remove(runId);
@@ -110,9 +132,13 @@ public class AxRenewalImplementationRunner {
             deleteQuietly(staging);
             implementations.clearStaging(runId);
             if (wasCancelled) {
-                implementations.markCancelled(runId);
+                implementations.endIfStatus(
+                        runId,
+                        AxRenewalImplementationRun.STATUS_GENERATING,
+                        AxRenewalImplementationRun.STATUS_CANCELLED,
+                        null);
             } else {
-                implementations.markFailed(
+                fail(
                         runId,
                         "the local model could not be reached, timed out, or the run otherwise failed — see the backend log for the exact reason");
             }
@@ -123,8 +149,7 @@ public class AxRenewalImplementationRunner {
         if (files.isEmpty()) {
             deleteQuietly(staging);
             implementations.clearStaging(runId);
-            implementations.markFailed(
-                    runId, "the model made no file changes it could carry out — nothing to review");
+            fail(runId, "the model made no file changes it could carry out — nothing to review");
             return;
         }
 
@@ -134,7 +159,22 @@ public class AxRenewalImplementationRunner {
                         .map(f -> new AxRenewalImplementationRepository.GeneratedChangeInput(
                                 f.path(), f.changeKind(), f.beforeContent(), f.afterContent()))
                         .toList());
-        implementations.updateStatus(runId, AxRenewalImplementationRun.STATUS_AWAITING_REVIEW);
+        boolean stillOurs = implementations.transitionIfStatus(
+                runId, AxRenewalImplementationRun.STATUS_GENERATING, AxRenewalImplementationRun.STATUS_AWAITING_REVIEW);
+        if (!stillOurs) {
+            // Closed while this process was still working — by a Cancel with
+            // no process to reach, or by startup recovery on some backend.
+            // That outcome stands; this result is discarded, not reviewed.
+            implementations.deleteGeneratedChanges(runId);
+            deleteQuietly(staging);
+            log.info("generation run {} was closed while generating; its result was discarded", runId);
+        }
+    }
+
+    /** Ends a still-{@code generating} run as failed — and does nothing if it was already closed (ADR-073). */
+    private void fail(UUID runId, String reason) {
+        implementations.endIfStatus(
+                runId, AxRenewalImplementationRun.STATUS_GENERATING, AxRenewalImplementationRun.STATUS_FAILED, reason);
     }
 
     /**
@@ -160,6 +200,32 @@ public class AxRenewalImplementationRunner {
         process.descendants().forEach(ProcessHandle::destroy);
         process.destroyForcibly();
         return true;
+    }
+
+    /**
+     * Deletes one staging copy named by a path read back from the database —
+     * only if it really is one: a directory directly under the system temp
+     * directory whose name carries {@link #STAGING_PREFIX} (ADR-072, ADR-073).
+     * A value that had been changed in the database must not be able to point
+     * this recursive delete at anything else on the machine. A path from
+     * another developer's machine simply is not here, and is left alone.
+     */
+    static void deleteStagingCopy(String stagingPath) {
+        if (stagingPath == null) {
+            return;
+        }
+        Path path;
+        try {
+            path = Path.of(stagingPath).toAbsolutePath().normalize();
+        } catch (InvalidPathException e) {
+            return;
+        }
+        Path tempRoot = Path.of(System.getProperty("java.io.tmpdir")).toAbsolutePath().normalize();
+        boolean isStagingCopy = tempRoot.equals(path.getParent())
+                && path.getFileName().toString().startsWith(STAGING_PREFIX);
+        if (isStagingCopy && Files.isDirectory(path)) {
+            deleteQuietly(path);
+        }
     }
 
     /** Best-effort cleanup of a disposable staging copy — a leftover temp directory is not worth failing a run over. */

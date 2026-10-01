@@ -9,6 +9,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -19,6 +21,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 
 /**
  * {@link AxRenewalImplementationRunner#cancel} — the real subprocess-kill
@@ -73,6 +77,7 @@ class AxRenewalImplementationRunnerTest {
         AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
         AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations);
         UUID runId = UUID.randomUUID();
+        when(implementations.markStagingIfGenerating(eq(runId), any())).thenReturn(true);
 
         CountDownLatch processRegistered = new CountDownLatch(1);
         when(generator.generate(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
@@ -97,8 +102,9 @@ class AxRenewalImplementationRunnerTest {
         assertThat(runner.cancel(runId)).isTrue();
         generation.join(TimeUnit.SECONDS.toMillis(15));
 
-        verify(implementations).markCancelled(runId);
-        verify(implementations, never()).markFailed(eq(runId), any());
+        verify(implementations).endIfStatus(runId, AxRenewalImplementationRun.STATUS_GENERATING, AxRenewalImplementationRun.STATUS_CANCELLED, null);
+        verify(implementations, never())
+                .endIfStatus(eq(runId), any(), eq(AxRenewalImplementationRun.STATUS_FAILED), any());
     }
 
     @Test
@@ -108,13 +114,16 @@ class AxRenewalImplementationRunnerTest {
         AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
         AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations);
         UUID runId = UUID.randomUUID();
+        when(implementations.markStagingIfGenerating(eq(runId), any())).thenReturn(true);
 
         when(generator.generate(any(), any(), any(), any(), any())).thenReturn(Optional.empty());
 
         runner.runGeneration(runId, AxRenewalImplementationRun.RUN_KIND_PLAN, "a confirmed plan", "/tmp/legacy-source");
 
-        verify(implementations).markFailed(eq(runId), any());
-        verify(implementations, never()).markCancelled(any());
+        verify(implementations)
+                .endIfStatus(eq(runId), eq(AxRenewalImplementationRun.STATUS_GENERATING), eq(AxRenewalImplementationRun.STATUS_FAILED), any());
+        verify(implementations, never())
+                .endIfStatus(any(), any(), eq(AxRenewalImplementationRun.STATUS_CANCELLED), any());
     }
 
     @Test
@@ -124,6 +133,7 @@ class AxRenewalImplementationRunnerTest {
         AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
         AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations);
         UUID runId = UUID.randomUUID();
+        when(implementations.markStagingIfGenerating(eq(runId), any())).thenReturn(true);
 
         CountDownLatch processRegistered = new CountDownLatch(1);
         when(generator.generate(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
@@ -145,5 +155,116 @@ class AxRenewalImplementationRunnerTest {
 
         waitUntil(() -> !generation.isAlive());
         assertThat(runner.cancel(runId)).isFalse();
+    }
+
+    // -----------------------------------------------------------------------
+    // Compare-and-set (ADR-073): a run closed by someone else — a Cancel with
+    // no process to reach, or startup recovery on any backend sharing the
+    // database — stays closed. The runner discards its own work instead.
+    // -----------------------------------------------------------------------
+
+    @Test
+    void a_run_already_closed_before_it_starts_is_never_generated_and_leaves_no_staging_copy() {
+        AxRenewalCodeGenerator generator = mock(AxRenewalCodeGenerator.class);
+        AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
+        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations);
+        UUID runId = UUID.randomUUID();
+        ArgumentCaptor<String> staging = ArgumentCaptor.forClass(String.class);
+        when(implementations.markStagingIfGenerating(eq(runId), staging.capture())).thenReturn(false);
+
+        runner.runGeneration(runId, AxRenewalImplementationRun.RUN_KIND_PLAN, "a confirmed plan", "/tmp/legacy-source");
+
+        verify(generator, never()).generate(any(), any(), any(), any(), any());
+        verify(implementations, never()).endIfStatus(any(), any(), any(), any());
+        assertThat(Path.of(staging.getValue())).doesNotExist();
+    }
+
+    @Test
+    void a_run_closed_while_it_was_generating_discards_its_result_instead_of_going_to_review() {
+        AxRenewalCodeGenerator generator = mock(AxRenewalCodeGenerator.class);
+        AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
+        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations);
+        UUID runId = UUID.randomUUID();
+        ArgumentCaptor<String> staging = ArgumentCaptor.forClass(String.class);
+        when(implementations.markStagingIfGenerating(eq(runId), staging.capture())).thenReturn(true);
+        when(generator.generate(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.of(new AxRenewalCodeGenerator.Result(List.of(
+                        new AxRenewalCodeGenerator.GeneratedFile("src/App.tsx", "modify", "a", "b")))));
+        // Someone else closed it meanwhile: the claim on "awaiting review" fails.
+        when(implementations.transitionIfStatus(
+                        runId, AxRenewalImplementationRun.STATUS_GENERATING, AxRenewalImplementationRun.STATUS_AWAITING_REVIEW))
+                .thenReturn(false);
+
+        runner.runGeneration(runId, AxRenewalImplementationRun.RUN_KIND_PLAN, "a confirmed plan", "/tmp/legacy-source");
+
+        verify(implementations).deleteGeneratedChanges(runId);
+        assertThat(Path.of(staging.getValue())).doesNotExist();
+    }
+
+    @Test
+    void a_run_still_generating_goes_to_review_and_keeps_its_changes() {
+        AxRenewalCodeGenerator generator = mock(AxRenewalCodeGenerator.class);
+        AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
+        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations);
+        UUID runId = UUID.randomUUID();
+        ArgumentCaptor<String> staging = ArgumentCaptor.forClass(String.class);
+        when(implementations.markStagingIfGenerating(eq(runId), staging.capture())).thenReturn(true);
+        when(generator.generate(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.of(new AxRenewalCodeGenerator.Result(List.of(
+                        new AxRenewalCodeGenerator.GeneratedFile("src/App.tsx", "modify", "a", "b")))));
+        when(implementations.transitionIfStatus(
+                        runId, AxRenewalImplementationRun.STATUS_GENERATING, AxRenewalImplementationRun.STATUS_AWAITING_REVIEW))
+                .thenReturn(true);
+
+        try {
+            runner.runGeneration(
+                    runId, AxRenewalImplementationRun.RUN_KIND_PLAN, "a confirmed plan", "/tmp/legacy-source");
+
+            verify(implementations, never()).deleteGeneratedChanges(any());
+            // The staging copy is what Approve applies from — it must survive.
+            assertThat(Path.of(staging.getValue())).isDirectory();
+        } finally {
+            AxRenewalImplementationRunner.deleteQuietly(Path.of(staging.getValue()));
+        }
+    }
+
+    // --- deleteStagingCopy: never deletes what is not its own -------------
+
+    @Test
+    void deletes_one_of_its_own_staging_copies() throws IOException {
+        Path staging = Files.createTempDirectory(AxRenewalImplementationRunner.STAGING_PREFIX);
+        Files.writeString(staging.resolve("Generated.java"), "class Generated {}");
+
+        AxRenewalImplementationRunner.deleteStagingCopy(staging.toString());
+
+        assertThat(staging).doesNotExist();
+    }
+
+    @Test
+    void never_deletes_a_path_that_is_not_one_of_its_own_staging_copies(@TempDir Path elsewhere) throws IOException {
+        // The path comes back from the database; one changed there — to the
+        // team's real output folder, say — must not be deleted.
+        Path notStaging = Files.createDirectory(elsewhere.resolve("renewed-app"));
+        Files.writeString(notStaging.resolve("keep.txt"), "the team's own code");
+
+        AxRenewalImplementationRunner.deleteStagingCopy(notStaging.toString());
+
+        assertThat(notStaging.resolve("keep.txt")).exists();
+    }
+
+    @Test
+    void ignores_a_missing_or_empty_staging_path() {
+        AxRenewalImplementationRunner.deleteStagingCopy(null);
+        AxRenewalImplementationRunner.deleteStagingCopy(
+                Path.of(System.getProperty("java.io.tmpdir"), AxRenewalImplementationRunner.STAGING_PREFIX + "gone")
+                        .toString());
+    }
+
+    @Test
+    void a_generating_run_is_only_considered_dead_well_after_the_cli_s_own_timeout() {
+        // The one rule startup recovery may apply on a database several
+        // developers' backends share: older than any real attempt can last.
+        assertThat(AxRenewalImplementationRunner.GENERATING_ORPHANED_AFTER)
+                .isGreaterThanOrEqualTo(AxRenewalCodeGenerator.TIMEOUT.multipliedBy(2));
     }
 }

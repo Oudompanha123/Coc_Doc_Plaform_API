@@ -66,7 +66,7 @@ public class AxRenewalCodeGenerator {
      * {@link AxRenewalService}'s async wiring). Long enough for real work,
      * short enough that a stuck process still surfaces as a failure.
      */
-    private static final Duration TIMEOUT = Duration.ofMinutes(20);
+    static final Duration TIMEOUT = Duration.ofMinutes(20);
 
     /** Same directories the browser's own attach-time scan already skips (attachStats.ts) — dependency trees and build output describe nothing about the change being made. */
     private static final Set<String> SKIPPED_DIR_NAMES = Set.of(

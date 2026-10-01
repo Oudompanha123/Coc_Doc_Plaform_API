@@ -4,7 +4,9 @@ import com.coc.docs.web.Jsonb;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -190,6 +192,76 @@ public class AxRenewalImplementationRepository {
         jdbc.sql("update ax_renewal_implementation_run set staging_path = null where id = ?")
                 .param(id)
                 .update();
+    }
+
+    // -----------------------------------------------------------------------
+    // Compare-and-set transitions (ADR-073)
+    //
+    // The dev database is shared by several developers' backends, each with
+    // its own Generate runner. A run's row can therefore be closed (cancelled,
+    // or recovered as interrupted) by a backend other than the one whose
+    // process is still working on it. Every transition the runner makes
+    // therefore states the status it expects to find, and does nothing —
+    // returning false — if the row has already moved on. Whoever closes a run
+    // first wins; a late runner discards its own result instead of
+    // overwriting the outcome somebody else already recorded.
+    // -----------------------------------------------------------------------
+
+    /** {@link #markStaging}, but only while the run is still {@code generating}. */
+    public boolean markStagingIfGenerating(UUID id, String stagingPath) {
+        return jdbc.sql("""
+                        update ax_renewal_implementation_run set staging_path = ?
+                        where id = ? and status = 'generating'
+                        """)
+                .params(stagingPath, id)
+                .update() > 0;
+    }
+
+    /** Moves a run from {@code from} to the non-terminal {@code to} (e.g. {@code awaiting_review}), only if it is still at {@code from}. */
+    public boolean transitionIfStatus(UUID id, String from, String to) {
+        return jdbc.sql("update ax_renewal_implementation_run set status = ? where id = ? and status = ?")
+                .params(to, id, from)
+                .update() > 0;
+    }
+
+    /**
+     * Ends a run — {@code failed} or {@code cancelled} — only if it is still
+     * at {@code from}. {@code failureReason} may be null (a cancel has none).
+     */
+    public boolean endIfStatus(UUID id, String from, String to, String failureReason) {
+        return jdbc.sql("""
+                        update ax_renewal_implementation_run
+                        set status = ?, failure_reason = ?, completed_at = now()
+                        where id = ? and status = ?
+                        """)
+                .params(to, failureReason, id, from)
+                .update() > 0;
+    }
+
+    /** Removes a run's proposed changes — for a run that was closed while its runner was still producing them. */
+    public void deleteGeneratedChanges(UUID runId) {
+        jdbc.sql("delete from ax_renewal_generated_change where run_id = ?").param(runId).update();
+    }
+
+    /**
+     * Runs that cannot still be in progress anywhere (ADR-073):
+     * <ul>
+     *   <li>{@code running} or {@code applying} at all — both are set and
+     *       finished inside one transaction, so a <em>committed</em> row in
+     *       either status only exists if that transaction's backend died
+     *       half way; and
+     *   <li>{@code generating} that started before {@code generatingStartedBefore}
+     *       — longer ago than any real Generate attempt can last.
+     * </ul>
+     */
+    public List<AxRenewalImplementationRun> findOrphaned(Instant generatingStartedBefore) {
+        return jdbc.sql("select " + COLUMNS + " from ax_renewal_implementation_run "
+                        + "where status in ('running','applying') "
+                        + "or (status = 'generating' and started_at < ?) "
+                        + "order by started_at")
+                .param(OffsetDateTime.ofInstant(generatingStartedBefore, ZoneOffset.UTC))
+                .query(this::map)
+                .list();
     }
 
     /** A terminal failure, in the run's own words — never a bare status with the reason left for someone to guess at. */

@@ -316,7 +316,7 @@ public class AxRenewalService {
         // exists and its log and staging copies still belong to it.
         afterCommit(() -> {
             localRunner.forget(projectId);
-            stagingPaths.forEach(AxRenewalService::deleteStagingCopy);
+            stagingPaths.forEach(AxRenewalImplementationRunner::deleteStagingCopy);
         });
     }
 
@@ -332,28 +332,6 @@ public class AxRenewalService {
                 action.run();
             }
         });
-    }
-
-    /**
-     * Deletes one staging copy — only if the path really is one: a directory
-     * directly under the system temp directory whose name carries the
-     * generator's own prefix. The path comes back from the database, and a
-     * value that had been changed there must not be able to point this
-     * recursive delete at anything else on the machine.
-     */
-    private static void deleteStagingCopy(String stagingPath) {
-        Path path;
-        try {
-            path = Path.of(stagingPath).toAbsolutePath().normalize();
-        } catch (InvalidPathException e) {
-            return;
-        }
-        Path tempRoot = Path.of(System.getProperty("java.io.tmpdir")).toAbsolutePath().normalize();
-        boolean isStagingCopy = tempRoot.equals(path.getParent())
-                && path.getFileName().toString().startsWith(AxRenewalImplementationRunner.STAGING_PREFIX);
-        if (isStagingCopy && Files.isDirectory(path)) {
-            AxRenewalImplementationRunner.deleteQuietly(path);
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -1356,6 +1334,13 @@ public class AxRenewalService {
      * {@code runGeneration}'s own failure branch — not synchronously here,
      * the same "the caller polls, this does not wait" shape {@code
      * approveImplementation}'s own async sibling steps already have.
+     *
+     * <p>With no live process on this backend (ADR-073) — it was restarted
+     * mid-run, or the run belongs to a teammate's backend on the same
+     * database — the run is closed as {@code cancelled} at once, its staging
+     * copy removed if it is on this machine. This used to refuse ("no active
+     * process to cancel"), which left such a run stuck at {@code generating}
+     * for good and its project impossible to delete.
      */
     @Transactional
     public AxRenewalImplementationRun cancelImplementation(UUID projectId, UUID runId, CurrentUser actor) {
@@ -1364,8 +1349,29 @@ public class AxRenewalService {
         if (!AxRenewalImplementationRun.STATUS_GENERATING.equals(run.status())) {
             throw ApiException.conflict("this run is not currently generating");
         }
-        if (!runner.cancel(runId)) {
-            throw ApiException.conflict("this run has no active process to cancel");
+        // A live process here: kill it, and the runner records the cancel
+        // as the process ends (ADR-049). No process here (ADR-073): the
+        // backend that started it was stopped, or it runs on a teammate's
+        // backend sharing this database. Either way the person asked for the
+        // run to stop, so it is closed now. A process still alive elsewhere
+        // finds its run already closed when it finishes and discards its
+        // own result — every runner transition is compare-and-set.
+        boolean hadLocalProcess = runner.cancel(runId);
+        if (!hadLocalProcess) {
+            boolean closed = implementations.endIfStatus(
+                    runId,
+                    AxRenewalImplementationRun.STATUS_GENERATING,
+                    AxRenewalImplementationRun.STATUS_CANCELLED,
+                    null);
+            if (!closed) {
+                // It finished — or was closed — between the read above and now.
+                throw ApiException.conflict("this run is not currently generating");
+            }
+            implementations.clearStaging(runId);
+            // After commit: rolled back, the run is still generating and its
+            // staging copy still belongs to it.
+            String stagingPath = run.stagingPath();
+            afterCommit(() -> AxRenewalImplementationRunner.deleteStagingCopy(stagingPath));
         }
 
         audit.append(
@@ -1374,7 +1380,9 @@ public class AxRenewalService {
                 AuditAction.AX_RENEWAL_IMPLEMENTATION_CANCEL,
                 AuditAction.TARGET_AX_RENEWAL_PROJECT,
                 projectId,
-                json.createObjectNode().put("project", project.name()));
+                json.createObjectNode()
+                        .put("project", project.name())
+                        .put("hadLocalProcess", hadLocalProcess));
 
         return requireOwnRun(projectId, runId);
     }
