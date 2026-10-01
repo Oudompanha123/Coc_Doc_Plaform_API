@@ -47,6 +47,7 @@ class NotificationTypeTest {
         assertThat(NotificationType.NEW_DEVICE_SIGN_IN.deepLink(ORIGIN, "x")).contains("session=x");
         assertThat(NotificationType.AX_RENEWAL_MEMBER_ADDED.deepLink(ORIGIN, "x")).contains("project=x");
         assertThat(NotificationType.AX_RENEWAL_RUN_READY.deepLink(ORIGIN, "x")).contains("project=x");
+        assertThat(NotificationType.AX_RENEWAL_COMMENT_ADDED.deepLink(ORIGIN, "x")).contains("project=x");
     }
 
     @Test
@@ -75,5 +76,15 @@ class NotificationTypeTest {
         assertThat(NotificationType.AX_RENEWAL_RUN_READY.body())
                 .isEqualTo("An AX Renewal implementation run is ready for review");
         assertThat(NotificationType.AX_RENEWAL_RUN_READY.key()).isEqualTo("ax-renewal.run-ready");
+    }
+
+    @Test
+    @DisplayName("a comment notification opens that project, and its lock-screen sentence carries no text (ADR-080)")
+    void commentAddedOpensTheProjectAndSaysNothingIdentifying() {
+        assertThat(NotificationType.AX_RENEWAL_COMMENT_ADDED.deepLink(ORIGIN, "p1"))
+                .isEqualTo("https://docs.example.com/ax-renewal?project=p1");
+        assertThat(NotificationType.AX_RENEWAL_COMMENT_ADDED.body())
+                .isEqualTo("Someone commented on an AX Renewal project");
+        assertThat(NotificationType.AX_RENEWAL_COMMENT_ADDED.key()).isEqualTo("ax-renewal.comment-added");
     }
 }

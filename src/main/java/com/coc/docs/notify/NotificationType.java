@@ -84,6 +84,22 @@ public enum NotificationType {
             "Ready for review",
             "An AX Renewal implementation run is ready for review",
             "/ax-renewal",
+            "project"),
+
+    /**
+     * Somebody commented on an AX Renewal project this account belongs to
+     * (ADR-080). Goes to every member but the author, once the comment is
+     * saved.
+     *
+     * <p>A fixed sentence: neither the project's name nor the comment's text
+     * goes on a lock screen. Opening it opens the project, whose one comment
+     * thread is always on screen there.
+     */
+    AX_RENEWAL_COMMENT_ADDED(
+            "ax-renewal.comment-added",
+            "New comment",
+            "Someone commented on an AX Renewal project",
+            "/ax-renewal",
             "project");
 
     private final String key;

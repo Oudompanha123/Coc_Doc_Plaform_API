@@ -1848,6 +1848,9 @@ public class AxRenewalService {
                 AuditAction.TARGET_AX_RENEWAL_PROJECT,
                 projectId,
                 json.createObjectNode());
+        // Heard after this transaction commits (ADR-080), so a comment that
+        // rolls back tells nobody.
+        events.publishEvent(new AxRenewalCommentAddedEvent(projectId, created.id(), actor.id()));
 
         return created;
     }
