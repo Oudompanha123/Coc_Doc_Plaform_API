@@ -100,7 +100,31 @@ public enum NotificationType {
             "New comment",
             "Someone commented on an AX Renewal project",
             "/ax-renewal",
+            "project"),
+
+    /**
+     * Somebody else approved or rejected the implementation run this account
+     * started (ADR-081). Goes to the starter only, and only while they are
+     * still a member; nobody is told about their own decision.
+     *
+     * <p>The body is replaced at send time with the outcome — {@link
+     * #RUN_APPROVED_BODY} or {@link #RUN_REJECTED_BODY} — because "reviewed"
+     * alone does not say whether there is anything left to do. Both are fixed
+     * sentences: no project name and no reviewer, since this renders on a
+     * lock screen. Who reviewed it is in the project's run history.
+     */
+    AX_RENEWAL_RUN_REVIEWED(
+            "ax-renewal.run-reviewed",
+            "Run reviewed",
+            "Your AX Renewal implementation run was reviewed",
+            "/ax-renewal",
             "project");
+
+    /** {@link #AX_RENEWAL_RUN_REVIEWED}'s body for a run that was approved — and so applied (ADR-081). */
+    public static final String RUN_APPROVED_BODY = "Your AX Renewal implementation run was approved and applied";
+
+    /** {@link #AX_RENEWAL_RUN_REVIEWED}'s body for a run that was rejected (ADR-081). */
+    public static final String RUN_REJECTED_BODY = "Your AX Renewal implementation run was rejected";
 
     private final String key;
     private final String title;

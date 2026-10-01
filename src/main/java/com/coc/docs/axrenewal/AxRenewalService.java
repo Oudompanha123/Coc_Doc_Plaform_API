@@ -1340,6 +1340,9 @@ public class AxRenewalService {
                 AuditAction.TARGET_AX_RENEWAL_PROJECT,
                 projectId,
                 json.createObjectNode().put("project", project.name()).put("filesApplied", changes.size()));
+        // Only now, applied: a refused or failed approve never gets here
+        // (ADR-081). Heard after commit; the notifier decides who to tell.
+        events.publishEvent(new AxRenewalRunReviewedEvent(projectId, runId, run.startedBy(), actor.id(), true));
 
         return implementations.findLatest(projectId).orElseThrow();
     }
@@ -1368,6 +1371,7 @@ public class AxRenewalService {
                 AuditAction.TARGET_AX_RENEWAL_PROJECT,
                 projectId,
                 json.createObjectNode().put("project", project.name()));
+        events.publishEvent(new AxRenewalRunReviewedEvent(projectId, runId, run.startedBy(), actor.id(), false));
 
         return implementations.findLatest(projectId).orElseThrow();
     }
