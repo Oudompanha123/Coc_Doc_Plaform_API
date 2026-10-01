@@ -127,6 +127,7 @@ class AxRenewalMembershipTest {
                 change("comment", (s, p, a) -> s.addComment(p, "hello", a)),
                 change("remove a comment", (s, p, a) -> s.deleteComment(p, UUID.randomUUID(), a)),
                 change("delete project", (s, p, a) -> s.delete(p, a)),
+                change("rename project", (s, p, a) -> s.updateDetails(p, "Renamed", "new description", a)),
                 change("attach manifest", (s, p, a) -> s.attachManifest(p, null, null, null, a)),
                 change("run analysis", (s, p, a) -> s.runAnalysis(p, false, null, a)),
                 change("edit stack move", (s, p, a) -> s.updateStackMove(p, List.of(), 0, a)),

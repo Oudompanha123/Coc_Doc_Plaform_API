@@ -161,6 +161,46 @@ public class AxRenewalService {
         return created;
     }
 
+    /**
+     * Renames a project and sets its description (ADR-075) — the same rules
+     * as every other change to a project: the Admin route floor
+     * ({@code SecurityConfig}), and on this project or a super admin
+     * ({@link #requireMember}).
+     *
+     * <p>Deliberately <em>not</em> revision-checked or bumped (ADR-067): a
+     * project's name is not plan content, and bumping the plan revision for it
+     * would refuse a teammate's plan save with "changed by someone else" for a
+     * change they could not have overwritten.
+     *
+     * <p>A blank description is stored as none. Nothing changed, nothing
+     * audited — saving the form untouched is not an event.
+     */
+    @Transactional
+    public AxRenewalProject updateDetails(UUID projectId, String name, String description, CurrentUser actor) {
+        AxRenewalProject before = requireMember(projectId, actor);
+        if (name == null || name.isBlank()) {
+            throw ApiException.badRequest("a project needs a name");
+        }
+        String newName = name.trim();
+        String newDescription = description == null || description.isBlank() ? null : description.trim();
+        if (newName.equals(before.name()) && java.util.Objects.equals(newDescription, before.description())) {
+            return before;
+        }
+
+        AxRenewalProject after = projects.updateDetails(projectId, newName, newDescription);
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.AX_RENEWAL_PROJECT_UPDATE,
+                AuditAction.TARGET_AX_RENEWAL_PROJECT,
+                projectId,
+                json.createObjectNode()
+                        .put("previousName", before.name())
+                        .put("name", after.name())
+                        .put("descriptionChanged", !java.util.Objects.equals(newDescription, before.description())));
+        return after;
+    }
+
     /** Everything one project's screen renders, assembled in one call. */
     public AxRenewalProjectDetail detail(UUID projectId, CurrentUser actor) {
         AxRenewalProject project = requireMember(projectId, actor);

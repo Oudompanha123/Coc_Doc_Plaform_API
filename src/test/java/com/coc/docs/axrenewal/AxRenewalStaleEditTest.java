@@ -192,7 +192,8 @@ class AxRenewalStaleEditTest {
                         AxRenewalSection.PAGES,
                         Instant.EPOCH,
                         developer.id(),
-                        AxRenewalConfirmation.VIA_DEVELOPER_ROLE)));
+                        AxRenewalConfirmation.VIA_DEVELOPER_ROLE,
+                        "Developer")));
 
         service.confirmSection(projectId, AxRenewalSection.PAGES, CURRENT, developer);
 

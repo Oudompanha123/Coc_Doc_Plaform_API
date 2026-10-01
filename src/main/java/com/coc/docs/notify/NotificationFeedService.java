@@ -334,6 +334,7 @@ public class NotificationFeedService {
             case AuditAction.CLAUDE_USAGE_CLI_AUTHORIZE -> "Connected the usage CLI on a machine";
             case AuditAction.AX_RENEWAL_PROJECT_CREATE -> "Started an AX Renewal project";
             case AuditAction.AX_RENEWAL_PROJECT_DELETE -> "Deleted an AX Renewal project";
+            case AuditAction.AX_RENEWAL_PROJECT_UPDATE -> "Renamed or re-described an AX Renewal project";
             case AuditAction.AX_RENEWAL_MANIFEST_ATTACH -> "Attached a codebase manifest";
             case AuditAction.AX_RENEWAL_ANALYSIS_RUN -> "Analysed a codebase";
             case AuditAction.AX_RENEWAL_STACK_MOVE_EDIT -> "Changed a stack move target";

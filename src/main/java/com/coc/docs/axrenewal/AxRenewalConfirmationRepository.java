@@ -34,15 +34,25 @@ public class AxRenewalConfirmationRepository {
                                 "ax_renewal_confirmation.section holds an unrecognised value: " + sectionKey)),
                 rs.getObject("confirmed_at", OffsetDateTime.class).toInstant(),
                 rs.getObject("confirmed_by", UUID.class),
-                rs.getString("confirmed_via"));
+                rs.getString("confirmed_via"),
+                rs.getString("confirmed_by_name"));
     }
 
+    /**
+     * The confirmer's display name is joined from {@code account} at read
+     * time — the same as a comment's author (ADR-045), so a later name change
+     * shows up here too, and the same exposure: a display name, never an
+     * email (NFR-SEC-PII).
+     */
+    private static final String SELECT = """
+            select c.project_id, c.section, c.confirmed_at, c.confirmed_by, c.confirmed_via,
+                   a.display_name as confirmed_by_name
+            from ax_renewal_confirmation c
+            left join account a on a.id = c.confirmed_by
+            """;
+
     public Optional<AxRenewalConfirmation> find(UUID projectId, AxRenewalSection section) {
-        return jdbc.sql("""
-                        select project_id, section, confirmed_at, confirmed_by, confirmed_via
-                        from ax_renewal_confirmation
-                        where project_id = ? and section = ?
-                        """)
+        return jdbc.sql(SELECT + "where c.project_id = ? and c.section = ?")
                 .params(projectId, section.wire())
                 .query(this::map)
                 .optional();
@@ -50,11 +60,7 @@ public class AxRenewalConfirmationRepository {
 
     /** Every confirmed section for this project, keyed by section — a section absent from this map is unconfirmed. */
     public Map<AxRenewalSection, AxRenewalConfirmation> findAllForProject(UUID projectId) {
-        List<AxRenewalConfirmation> rows = jdbc.sql("""
-                        select project_id, section, confirmed_at, confirmed_by, confirmed_via
-                        from ax_renewal_confirmation
-                        where project_id = ?
-                        """)
+        List<AxRenewalConfirmation> rows = jdbc.sql(SELECT + "where c.project_id = ?")
                 .param(projectId)
                 .query(this::map)
                 .list();

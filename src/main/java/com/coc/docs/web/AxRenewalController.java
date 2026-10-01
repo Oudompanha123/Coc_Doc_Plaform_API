@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -100,6 +101,16 @@ public class AxRenewalController {
             @PathVariable UUID projectId, @PathVariable UUID accountId, @AuthenticationPrincipal CurrentUser actor) {
         projects.removeMember(projectId, accountId, actor);
         return ResponseEntity.noContent().build();
+    }
+
+    /** Renames a project and sets its description (ADR-075). */
+    @PatchMapping("/projects/{projectId}")
+    ApiDtos.AxRenewalProjectResponse updateDetails(
+            @PathVariable UUID projectId,
+            @Valid @RequestBody ApiDtos.UpdateAxRenewalProjectRequest request,
+            @AuthenticationPrincipal CurrentUser actor) {
+        var updated = projects.updateDetails(projectId, request.name(), request.description(), actor);
+        return ApiDtos.AxRenewalProjectResponse.of(updated, projects.isMember(projectId, actor));
     }
 
     /** Deletes a project outright (ADR-051). 204, since there is nothing left to return. */
