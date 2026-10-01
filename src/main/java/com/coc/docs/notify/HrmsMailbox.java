@@ -42,6 +42,20 @@ public interface HrmsMailbox {
     record Arrival(String messageId, String subject, Instant sentAt) {}
 
     /**
+     * Credentials for one mailbox that is not the configured one (ADR-075).
+     *
+     * <p>Only the identity varies. Host, port, folder and the sender being
+     * watched stay as configured, because everybody here is on the same relay
+     * reading mail from the same HRMS address — and a deployment that moves
+     * off Gmail should move every inbox with it, not one at a time.
+     *
+     * <p>Instances hold a decrypted App Password and exist only for the length
+     * of one poll. Do not log one, store one, or put one in an exception
+     * message.
+     */
+    record Login(String username, String password) {}
+
+    /**
      * Envelopes from the configured sender sent at or after {@code since},
      * oldest first.
      *
@@ -58,6 +72,23 @@ public interface HrmsMailbox {
      * covers both "no new mail" and "could not look".
      */
     List<Arrival> arrivalsSince(Instant since);
+
+    /**
+     * The same, read from {@code login}'s own mailbox instead of the
+     * configured one (ADR-075).
+     *
+     * <p>Abstract rather than a {@code default} delegating to
+     * {@link #arrivalsSince(Instant)} on purpose. A default would make
+     * "forgot to implement this" indistinguishable from "read this person's
+     * inbox", and the failure would be one account being shown envelopes out
+     * of somebody else's mailbox. An implementation that cannot honour a login
+     * must return an empty list, not fall back to the shared one.
+     *
+     * <p>Same error contract as {@link #arrivalsSince(Instant)}: a refused
+     * credential is an empty list and a logged warning, never an exception.
+     * A revoked App Password is an ordinary Tuesday, not an outage.
+     */
+    List<Arrival> arrivalsSince(Instant since, Login login);
 
     /**
      * The HTML body of one message, fetched on demand.
@@ -80,4 +111,14 @@ public interface HrmsMailbox {
      *     arrival was first seen
      */
     Optional<String> htmlBodyOf(String messageId);
+
+    /**
+     * The same, fetched from {@code login}'s own mailbox (ADR-075).
+     *
+     * <p>A report recorded against an owner can only be re-read from that
+     * owner's mailbox — the shared inbox never held it. Abstract for the same
+     * reason as {@link #arrivalsSince(Instant, Login)}: silently reading the
+     * wrong mailbox is worse than reading none.
+     */
+    Optional<String> htmlBodyOf(String messageId, Login login);
 }

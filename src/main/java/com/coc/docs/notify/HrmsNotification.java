@@ -25,7 +25,15 @@ import java.time.LocalDate;
 public record HrmsNotification(
         long id, String messageId, String subject, LocalDate reportDate, Instant receivedAt) {
 
-    /** An arrival that has not been written yet. */
+    /**
+     * An arrival that has not been written yet.
+     *
+     * <p>Carries no owner (ADR-075): which mailbox a row came from is passed
+     * to {@link HrmsNotificationRepository#record} separately and enforced in
+     * SQL on every read. Keeping it off this record means no query can return
+     * a row to the wrong person by forgetting to check a field — the
+     * predicate is in the statement, not in the caller.
+     */
     public static HrmsNotification unsaved(
             String messageId, String subject, LocalDate reportDate, Instant receivedAt) {
         return new HrmsNotification(0L, messageId, subject, reportDate, receivedAt);

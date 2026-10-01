@@ -79,12 +79,29 @@ public class HrmsImapMailbox implements HrmsMailbox {
             // once at startup rather than every thirty minutes.
             return List.of();
         }
+        return arrivalsSince(since, configuredLogin());
+    }
+
+    /**
+     * Reads one person's own inbox (ADR-075).
+     *
+     * <p>Only {@code login} differs from the configured poll — host, port,
+     * folder and the watched sender are shared, and the search is still
+     * restricted to {@code app.hrms.sender}. That restriction is a line of
+     * code and not a permission: the credential can read the whole mailbox.
+     * ADR-075 §4.2 records that rather than leaving it to be noticed.
+     */
+    @Override
+    public List<Arrival> arrivalsSince(Instant since, Login login) {
+        if (!usable(login)) {
+            return List.of();
+        }
 
         Store store = null;
         Folder folder = null;
         try {
             store = Session.getInstance(sessionProperties()).getStore("imaps");
-            store.connect(properties.host(), properties.port(), properties.username(), properties.password());
+            store.connect(properties.host(), properties.port(), login.username(), login.password());
 
             folder = store.getFolder(properties.folder());
             if (!folder.exists()) {
@@ -120,7 +137,7 @@ public class HrmsImapMailbox implements HrmsMailbox {
             // are all "try again in thirty minutes", and none of them is worth
             // unwinding a scheduled job over. Logged at warn with the reason,
             // never with the credential.
-            log.warn("HRMS: could not read {} ({})", properties.describe(), e.getMessage());
+            log.warn("HRMS: could not read {} ({})", describe(login), e.getMessage());
             return List.of();
         } finally {
             closeQuietly(folder);
@@ -146,7 +163,16 @@ public class HrmsImapMailbox implements HrmsMailbox {
      */
     @Override
     public Optional<String> htmlBodyOf(String messageId) {
-        if (!properties.usable() || messageId == null || messageId.isBlank()) {
+        if (!properties.usable()) {
+            return Optional.empty();
+        }
+        return htmlBodyOf(messageId, configuredLogin());
+    }
+
+    /** The same, from the owner's mailbox — the only place their copy exists (ADR-075). */
+    @Override
+    public Optional<String> htmlBodyOf(String messageId, Login login) {
+        if (!usable(login) || messageId == null || messageId.isBlank()) {
             return Optional.empty();
         }
 
@@ -154,7 +180,7 @@ public class HrmsImapMailbox implements HrmsMailbox {
         Folder folder = null;
         try {
             store = Session.getInstance(sessionProperties()).getStore("imaps");
-            store.connect(properties.host(), properties.port(), properties.username(), properties.password());
+            store.connect(properties.host(), properties.port(), login.username(), login.password());
 
             folder = store.getFolder(properties.folder());
             if (!folder.exists()) {
@@ -263,6 +289,60 @@ public class HrmsImapMailbox implements HrmsMailbox {
             log.warn("HRMS: could not read a message envelope ({}); skipped", e.getMessage());
             return Optional.empty();
         }
+    }
+
+    /**
+     * The configured mailbox, as a login.
+     *
+     * <p>So that the shared poll and a personal poll travel the same code
+     * path. The alternative — a null meaning "use the properties" threaded
+     * through both methods — gives two connection routines that can drift, and
+     * the one that drifts is the one nobody is watching.
+     */
+    private Login configuredLogin() {
+        return new Login(properties.username(), properties.password());
+    }
+
+    /**
+     * Whether this login can be attempted at all.
+     *
+     * <p>{@code properties.usable()} still gates the host and the watched
+     * sender, which every login shares; this adds only the credential. A blank
+     * one is not logged: for a personal mailbox it means a stored credential
+     * failed to decrypt, which the repository has already reported, and
+     * repeating it every thirty minutes per account would bury the mailbox
+     * failures that matter.
+     */
+    /**
+     * Names a mailbox in a log line without naming the person.
+     *
+     * <p>The configured one keeps {@code properties.describe()}, which already
+     * masks. A personal one gets its local part truncated: a poll that fails
+     * for one account out of ten has to be attributable, and "a g***@gmail.com
+     * account" is not. Three characters identify it to someone with the
+     * account list and to nobody reading a log in isolation.
+     */
+    private String describe(Login login) {
+        if (login == null || login.username() == null || login.username().isBlank()) {
+            return properties.describe();
+        }
+        if (login.username().equals(properties.username())) {
+            return properties.describe();
+        }
+        String user = login.username();
+        int at = user.indexOf('@');
+        String local = at < 0 ? user : user.substring(0, at);
+        String shown = local.length() <= 3 ? local : local.substring(0, 3) + "...";
+        return "the mailbox of " + shown + (at < 0 ? "" : user.substring(at));
+    }
+
+    private boolean usable(Login login) {
+        return properties.usable()
+                && login != null
+                && login.username() != null
+                && !login.username().isBlank()
+                && login.password() != null
+                && !login.password().isBlank();
     }
 
     private Properties sessionProperties() {
