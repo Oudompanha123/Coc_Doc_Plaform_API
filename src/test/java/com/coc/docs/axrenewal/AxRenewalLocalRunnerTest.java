@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -22,11 +23,33 @@ import org.junit.jupiter.api.io.TempDir;
  * (mirrors {@link AxRenewalCodeGeneratorTest}'s own {@code copyTree}/{@code
  * diffAgainstSource} testability seams).
  *
- * <p>// req: ADR-048
+ * <p>// req: ADR-048, ADR-083
  */
 class AxRenewalLocalRunnerTest {
 
-    private final AxRenewalLocalRunner runner = new AxRenewalLocalRunner();
+    /** This test's own pid directory — never this machine's real one (ADR-083). */
+    @TempDir
+    Path pidDir;
+
+    private AxRenewalLocalRunner runner;
+
+    @BeforeEach
+    void setUp() {
+        runner = new AxRenewalLocalRunner(pidDir);
+    }
+
+    /** The live root process the runner recorded for {@code projectId}, read from its pid file. */
+    private ProcessHandle recordedRoot(UUID projectId) throws IOException {
+        String[] parts = Files.readString(pidDir.resolve(projectId + ".pid")).trim().split(" ");
+        return ProcessHandle.of(Long.parseLong(parts[0])).orElseThrow();
+    }
+
+    /** {@code root} and everything under it, as of now. */
+    private static List<ProcessHandle> treeOf(ProcessHandle root) {
+        List<ProcessHandle> tree = new java.util.ArrayList<>(root.descendants().toList());
+        tree.add(root);
+        return tree;
+    }
 
     private static boolean windows() {
         return System.getProperty("os.name", "").toLowerCase().contains("win");
@@ -121,6 +144,82 @@ class AxRenewalLocalRunnerTest {
                     return;
                 }
             }
+        }
+    }
+
+    // --- ADR-083: a rerun gets its port back --------------------------------
+
+    @Test
+    void stop_returns_only_once_the_whole_process_tree_has_exited(@TempDir Path cwd) throws IOException {
+        UUID projectId = UUID.randomUUID();
+        runner.start(projectId, echoThenIdle("http://localhost:4130"), cwd);
+        waitUntil(() -> runner.status(projectId).state().equals(AxRenewalLocalRunner.Status.STATE_RUNNING));
+        List<ProcessHandle> tree = treeOf(recordedRoot(projectId));
+        // The idle child (ping/sleep) is what would hold a port in real life.
+        assertThat(tree).hasSizeGreaterThan(1);
+
+        runner.stop(projectId);
+
+        // No waiting here: stop() itself waited.
+        assertThat(tree).noneMatch(ProcessHandle::isAlive);
+        assertThat(pidDir.resolve(projectId + ".pid")).doesNotExist();
+        waitUntilDeletable(cwd);
+    }
+
+    @Test
+    void a_dev_server_an_earlier_backend_left_running_is_stopped_before_the_next_start(@TempDir Path cwd)
+            throws IOException {
+        UUID projectId = UUID.randomUUID();
+        runner.start(projectId, echoThenIdle("http://localhost:4131"), cwd);
+        waitUntil(() -> runner.status(projectId).state().equals(AxRenewalLocalRunner.Status.STATE_RUNNING));
+        List<ProcessHandle> leftover = treeOf(recordedRoot(projectId));
+
+        // The backend restarts without a graceful shutdown: a new runner, with
+        // nothing in memory, but the same pid directory.
+        AxRenewalLocalRunner afterRestart = new AxRenewalLocalRunner(pidDir);
+        assertThat(afterRestart.status(projectId).state()).isEqualTo(AxRenewalLocalRunner.Status.STATE_STOPPED);
+        try {
+            afterRestart.start(projectId, echoThenIdle("http://localhost:4132"), cwd);
+
+            assertThat(leftover).noneMatch(ProcessHandle::isAlive);
+            waitUntil(() -> afterRestart.status(projectId).state().equals(AxRenewalLocalRunner.Status.STATE_RUNNING));
+            assertThat(afterRestart.status(projectId).url()).isEqualTo("http://localhost:4132");
+        } finally {
+            afterRestart.stop(projectId);
+            waitUntilDeletable(cwd);
+        }
+    }
+
+    @Test
+    void a_recorded_pid_that_now_belongs_to_another_process_is_never_touched(@TempDir Path cwd) throws IOException {
+        UUID projectId = UUID.randomUUID();
+        Process unrelated = new ProcessBuilder(echoThenIdle("unrelated")).directory(cwd.toFile()).start();
+        try {
+            // Its pid, but a start time that is not its own: a reused pid.
+            Files.writeString(pidDir.resolve(projectId + ".pid"), unrelated.pid() + " 1");
+
+            runner.stop(projectId);
+            runner.start(projectId, echoThenIdle("http://localhost:4133"), cwd);
+
+            assertThat(unrelated.isAlive()).isTrue();
+        } finally {
+            runner.stop(projectId);
+            AxRenewalLocalRunner.killTree(unrelated.toHandle());
+            waitUntilDeletable(cwd);
+        }
+    }
+
+    @Test
+    void a_record_that_cannot_be_read_does_not_stop_the_start(@TempDir Path cwd) throws IOException {
+        UUID projectId = UUID.randomUUID();
+        Files.writeString(pidDir.resolve(projectId + ".pid"), "not a pid");
+        try {
+            runner.start(projectId, echoThenIdle("http://localhost:4134"), cwd);
+
+            waitUntil(() -> runner.status(projectId).state().equals(AxRenewalLocalRunner.Status.STATE_RUNNING));
+        } finally {
+            runner.stop(projectId);
+            waitUntilDeletable(cwd);
         }
     }
 
