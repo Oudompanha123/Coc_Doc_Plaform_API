@@ -66,7 +66,8 @@ class AxRenewalImplementationRunnerTest {
     @Test
     void cancel_returns_false_when_this_run_has_no_live_process() {
         AxRenewalImplementationRunner runner =
-                new AxRenewalImplementationRunner(mock(AxRenewalCodeGenerator.class), mock(AxRenewalImplementationRepository.class));
+                new AxRenewalImplementationRunner(
+                        mock(AxRenewalCodeGenerator.class), mock(AxRenewalImplementationRepository.class), event -> {});
 
         assertThat(runner.cancel(UUID.randomUUID())).isFalse();
     }
@@ -75,7 +76,7 @@ class AxRenewalImplementationRunnerTest {
     void cancel_kills_the_tracked_process_and_the_run_is_marked_cancelled_not_failed() throws Exception {
         AxRenewalCodeGenerator generator = mock(AxRenewalCodeGenerator.class);
         AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
-        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations);
+        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations, event -> {});
         UUID runId = UUID.randomUUID();
         when(implementations.markStagingIfGenerating(eq(runId), any())).thenReturn(true);
 
@@ -112,7 +113,7 @@ class AxRenewalImplementationRunnerTest {
             throws Exception {
         AxRenewalCodeGenerator generator = mock(AxRenewalCodeGenerator.class);
         AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
-        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations);
+        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations, event -> {});
         UUID runId = UUID.randomUUID();
         when(implementations.markStagingIfGenerating(eq(runId), any())).thenReturn(true);
 
@@ -131,7 +132,7 @@ class AxRenewalImplementationRunnerTest {
             throws Exception {
         AxRenewalCodeGenerator generator = mock(AxRenewalCodeGenerator.class);
         AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
-        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations);
+        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations, event -> {});
         UUID runId = UUID.randomUUID();
         when(implementations.markStagingIfGenerating(eq(runId), any())).thenReturn(true);
 
@@ -167,7 +168,7 @@ class AxRenewalImplementationRunnerTest {
     void a_run_already_closed_before_it_starts_is_never_generated_and_leaves_no_staging_copy() {
         AxRenewalCodeGenerator generator = mock(AxRenewalCodeGenerator.class);
         AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
-        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations);
+        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations, event -> {});
         UUID runId = UUID.randomUUID();
         ArgumentCaptor<String> staging = ArgumentCaptor.forClass(String.class);
         when(implementations.markStagingIfGenerating(eq(runId), staging.capture())).thenReturn(false);
@@ -183,7 +184,7 @@ class AxRenewalImplementationRunnerTest {
     void a_run_closed_while_it_was_generating_discards_its_result_instead_of_going_to_review() {
         AxRenewalCodeGenerator generator = mock(AxRenewalCodeGenerator.class);
         AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
-        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations);
+        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations, event -> {});
         UUID runId = UUID.randomUUID();
         ArgumentCaptor<String> staging = ArgumentCaptor.forClass(String.class);
         when(implementations.markStagingIfGenerating(eq(runId), staging.capture())).thenReturn(true);
@@ -205,7 +206,7 @@ class AxRenewalImplementationRunnerTest {
     void a_run_still_generating_goes_to_review_and_keeps_its_changes() {
         AxRenewalCodeGenerator generator = mock(AxRenewalCodeGenerator.class);
         AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
-        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations);
+        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations, event -> {});
         UUID runId = UUID.randomUUID();
         ArgumentCaptor<String> staging = ArgumentCaptor.forClass(String.class);
         when(implementations.markStagingIfGenerating(eq(runId), staging.capture())).thenReturn(true);
@@ -226,6 +227,73 @@ class AxRenewalImplementationRunnerTest {
         } finally {
             AxRenewalImplementationRunner.deleteQuietly(Path.of(staging.getValue()));
         }
+    }
+
+    // --- "Ready for review" (ADR-079): announced once the run is there --------
+
+    /** A runner whose announcements land in {@code published}, with one file of output ready. */
+    private static AxRenewalImplementationRunner announcingRunner(
+            AxRenewalImplementationRepository implementations, List<Object> published, boolean generates) {
+        AxRenewalCodeGenerator generator = mock(AxRenewalCodeGenerator.class);
+        when(implementations.markStagingIfGenerating(any(), any())).thenReturn(true);
+        when(generator.generate(any(), any(), any(), any(), any()))
+                .thenReturn(generates
+                        ? Optional.of(new AxRenewalCodeGenerator.Result(List.of(
+                                new AxRenewalCodeGenerator.GeneratedFile("src/App.tsx", "modify", "a", "b"))))
+                        : Optional.empty());
+        return new AxRenewalImplementationRunner(generator, implementations, published::add);
+    }
+
+    @Test
+    void a_run_that_reaches_review_is_announced_to_its_project_starter_included() {
+        AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
+        List<Object> published = new java.util.ArrayList<>();
+        AxRenewalImplementationRunner runner = announcingRunner(implementations, published, true);
+        UUID runId = UUID.randomUUID();
+        UUID projectId = UUID.randomUUID();
+        when(implementations.transitionIfStatus(
+                        runId, AxRenewalImplementationRun.STATUS_GENERATING, AxRenewalImplementationRun.STATUS_AWAITING_REVIEW))
+                .thenReturn(true);
+        when(implementations.findById(runId)).thenReturn(Optional.of(new AxRenewalImplementationRun(
+                runId, projectId, AxRenewalImplementationRun.STATUS_AWAITING_REVIEW, null, null, Instant.EPOCH,
+                UUID.randomUUID(), null, null, null, null)));
+        ArgumentCaptor<String> staging = ArgumentCaptor.forClass(String.class);
+        when(implementations.markStagingIfGenerating(eq(runId), staging.capture())).thenReturn(true);
+
+        try {
+            runner.runGeneration(runId, AxRenewalImplementationRun.RUN_KIND_PLAN, "a confirmed plan", "/tmp/legacy-source");
+        } finally {
+            AxRenewalImplementationRunner.deleteQuietly(Path.of(staging.getValue()));
+        }
+
+        // Nobody skipped: the starter has been waiting minutes for this.
+        assertThat(published).containsExactly(new AxRenewalRunReadyEvent(projectId, runId, null));
+    }
+
+    @Test
+    void a_result_discarded_because_the_run_was_closed_announces_nothing() {
+        AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
+        List<Object> published = new java.util.ArrayList<>();
+        AxRenewalImplementationRunner runner = announcingRunner(implementations, published, true);
+        UUID runId = UUID.randomUUID();
+        when(implementations.transitionIfStatus(any(), any(), any())).thenReturn(false);
+
+        runner.runGeneration(runId, AxRenewalImplementationRun.RUN_KIND_PLAN, "a confirmed plan", "/tmp/legacy-source");
+
+        assertThat(published).isEmpty();
+    }
+
+    @Test
+    void a_failed_run_announces_nothing() {
+        AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
+        List<Object> published = new java.util.ArrayList<>();
+        AxRenewalImplementationRunner runner = announcingRunner(implementations, published, false);
+
+        runner.runGeneration(
+                UUID.randomUUID(), AxRenewalImplementationRun.RUN_KIND_PLAN, "a confirmed plan", "/tmp/legacy-source");
+
+        assertThat(published).isEmpty();
+        verify(implementations, never()).transitionIfStatus(any(), any(), any());
     }
 
     // --- deleteStagingCopy: never deletes what is not its own -------------

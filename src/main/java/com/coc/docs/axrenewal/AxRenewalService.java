@@ -1068,6 +1068,9 @@ public class AxRenewalService {
                         .put("project", project.name())
                         .put("replayedFromRunId", appliedRun.id().toString())
                         .put("filesReplayed", priorChanges.size()));
+        // Ready for review the moment it exists (ADR-079). Heard after this
+        // transaction commits; not by the actor, who is looking at it.
+        events.publishEvent(new AxRenewalRunReadyEvent(projectId, run.id(), actor.id()));
 
         return run;
     }

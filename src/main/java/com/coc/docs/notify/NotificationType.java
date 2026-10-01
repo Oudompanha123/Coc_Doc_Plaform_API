@@ -66,6 +66,24 @@ public enum NotificationType {
             "Added to a project",
             "You were added to an AX Renewal project",
             "/ax-renewal",
+            "project"),
+
+    /**
+     * An implementation run in a project this account belongs to has reached
+     * {@code awaiting_review} (ADR-079): its changes are generated and wait
+     * for somebody to approve or reject them. Goes to the project's members —
+     * the starter included when the result took minutes to generate, since
+     * they are the one waiting; not the starter of a replay, who is looking at
+     * it already.
+     *
+     * <p>A fixed sentence for the same reason as the member-added one: the
+     * project's name says which legacy system is being replaced.
+     */
+    AX_RENEWAL_RUN_READY(
+            "ax-renewal.run-ready",
+            "Ready for review",
+            "An AX Renewal implementation run is ready for review",
+            "/ax-renewal",
             "project");
 
     private final String key;

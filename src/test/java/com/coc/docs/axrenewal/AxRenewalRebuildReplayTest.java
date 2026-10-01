@@ -58,6 +58,8 @@ class AxRenewalRebuildReplayTest {
 
     private final UUID projectId = UUID.randomUUID();
     private final CurrentUser actor = TestCallers.user(AppRole.SUPER_ADMIN);
+    /** Every event the service published — "ready for review" among them (ADR-079). */
+    private final List<Object> published = new java.util.ArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -170,7 +172,7 @@ class AxRenewalRebuildReplayTest {
                 mock(AxRenewalImplementationRunner.class),
                 mock(AxRenewalLocalRunner.class),
                 mock(AxRenewalTestRunner.class),
-                event -> {});
+                published::add);
     }
 
     private void filesystemDestination() {
@@ -244,6 +246,10 @@ class AxRenewalRebuildReplayTest {
                         eq(projectId),
                         detail.capture());
         assertThat(detail.getValue().path("replayedFromRunId").asText()).isEqualTo(priorRunId.toString());
+
+        // Ready for review at once (ADR-079) — announced to the team, but not
+        // to the actor, who is looking at it.
+        assertThat(published).containsExactly(new AxRenewalRunReadyEvent(projectId, result.id(), actor.id()));
     }
 
     @Test
@@ -260,6 +266,8 @@ class AxRenewalRebuildReplayTest {
         verify(implementations, never()).insertGeneratedChanges(any(), anyList());
         verify(audit, never())
                 .append(any(), any(), eq(AuditAction.AX_RENEWAL_IMPLEMENTATION_REPLAY), any(), any(), any());
+        // Not ready for anything yet — nothing is announced.
+        assertThat(published).noneMatch(AxRenewalRunReadyEvent.class::isInstance);
     }
 
     @Test
