@@ -48,7 +48,25 @@ public enum NotificationType {
             "New sign-in",
             "Your account was signed in to from a new device",
             "/settings",
-            "session");
+            "session"),
+
+    /**
+     * Somebody added this account to an AX Renewal project (ADR-074). Goes to
+     * the account added and to nobody else, and only when they were actually
+     * added — not on a repeated add of an existing member, and not when an
+     * account adds itself.
+     *
+     * <p>The body is this fixed sentence and never the project's name: a
+     * renewal project's name says which legacy system a team is replacing,
+     * which is not something to put on a lock screen. The project is one tap
+     * away, behind a session — the deep link opens it.
+     */
+    AX_RENEWAL_MEMBER_ADDED(
+            "ax-renewal.member-added",
+            "Added to a project",
+            "You were added to an AX Renewal project",
+            "/ax-renewal",
+            "project");
 
     private final String key;
     private final String title;

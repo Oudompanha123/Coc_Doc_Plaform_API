@@ -78,7 +78,8 @@ class AxRenewalRunTestsTest {
                 mock(AxRenewalCodeGenerator.class),
                 mock(AxRenewalImplementationRunner.class),
                 mock(AxRenewalLocalRunner.class),
-                testRunner);
+                testRunner,
+                event -> {});
     }
 
     private AxRenewalImplementationRun runAt(String status, String stagingPath) {

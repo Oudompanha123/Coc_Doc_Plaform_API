@@ -80,7 +80,8 @@ class AxRenewalApproveImplementationTest {
                 mock(AxRenewalCodeGenerator.class),
                 mock(AxRenewalImplementationRunner.class),
                 mock(AxRenewalLocalRunner.class),
-                mock(AxRenewalTestRunner.class));
+                mock(AxRenewalTestRunner.class),
+                event -> {});
     }
 
     @Test

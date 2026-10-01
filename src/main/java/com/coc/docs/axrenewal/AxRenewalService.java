@@ -25,6 +25,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -74,6 +75,7 @@ public class AxRenewalService {
     private final AxRenewalImplementationRunner runner;
     private final AxRenewalLocalRunner localRunner;
     private final AxRenewalTestRunner testRunner;
+    private final ApplicationEventPublisher events;
 
     public AxRenewalService(
             AxRenewalProjectRepository projects,
@@ -94,7 +96,8 @@ public class AxRenewalService {
             AxRenewalCodeGenerator generator,
             AxRenewalImplementationRunner runner,
             AxRenewalLocalRunner localRunner,
-            AxRenewalTestRunner testRunner) {
+            AxRenewalTestRunner testRunner,
+            ApplicationEventPublisher events) {
         this.projects = projects;
         this.analyses = analyses;
         this.plan = plan;
@@ -114,6 +117,7 @@ public class AxRenewalService {
         this.runner = runner;
         this.localRunner = localRunner;
         this.testRunner = testRunner;
+        this.events = events;
     }
 
     // -----------------------------------------------------------------------
@@ -1689,6 +1693,10 @@ public class AxRenewalService {
      * (NFR-SEC-PII) — the person adding a teammate already knows their
      * address. Adding someone already on the project is not an error.
      *
+     * <p>A real add notifies the person added (ADR-074) — after commit, via
+     * {@link AxRenewalMemberAddedEvent}. A repeat add, and an add of oneself,
+     * notify nobody.
+     *
      * @return the project's members after the change
      */
     @Transactional
@@ -1718,6 +1726,12 @@ public class AxRenewalService {
                     json.createObjectNode()
                             .put("accountId", account.id().toString())
                             .put("displayName", account.displayName()));
+            // Tell the person added (ADR-074) — handled after commit, so a
+            // rolled-back add notifies nobody. Not when somebody adds
+            // themselves: they already know.
+            if (!account.id().equals(actor.id())) {
+                events.publishEvent(new AxRenewalMemberAddedEvent(projectId, account.id()));
+            }
         }
         return members.listForProject(projectId);
     }

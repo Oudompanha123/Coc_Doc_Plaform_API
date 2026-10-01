@@ -169,7 +169,8 @@ class AxRenewalRebuildReplayTest {
                 generator,
                 mock(AxRenewalImplementationRunner.class),
                 mock(AxRenewalLocalRunner.class),
-                mock(AxRenewalTestRunner.class));
+                mock(AxRenewalTestRunner.class),
+                event -> {});
     }
 
     private void filesystemDestination() {

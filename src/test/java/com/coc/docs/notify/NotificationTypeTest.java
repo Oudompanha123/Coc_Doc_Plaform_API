@@ -45,5 +45,24 @@ class NotificationTypeTest {
     void eachTypeCarriesItsOwnParameterName() {
         assertThat(NotificationType.NEW_REGISTRATION.deepLink(ORIGIN, "x")).contains("approve=x");
         assertThat(NotificationType.NEW_DEVICE_SIGN_IN.deepLink(ORIGIN, "x")).contains("session=x");
+        assertThat(NotificationType.AX_RENEWAL_MEMBER_ADDED.deepLink(ORIGIN, "x")).contains("project=x");
+    }
+
+    @Test
+    @DisplayName("a member-added notification opens that project in the AX Renewal workspace (ADR-074)")
+    void memberAddedOpensTheProject() {
+        // `project=` is the query parameter useAxRenewalProject reads to pick
+        // the open project.
+        assertThat(NotificationType.AX_RENEWAL_MEMBER_ADDED.deepLink(ORIGIN, "p1"))
+                .isEqualTo("https://docs.example.com/ax-renewal?project=p1");
+    }
+
+    @Test
+    @DisplayName("a member-added notification's lock-screen sentence names no project")
+    void memberAddedSaysNothingIdentifying() {
+        // Fixed text, so the one thing it can never carry is which legacy
+        // system a team is renewing (ADR-025 decision 6).
+        assertThat(NotificationType.AX_RENEWAL_MEMBER_ADDED.body()).isEqualTo("You were added to an AX Renewal project");
+        assertThat(NotificationType.AX_RENEWAL_MEMBER_ADDED.key()).isEqualTo("ax-renewal.member-added");
     }
 }
