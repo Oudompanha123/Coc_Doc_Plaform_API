@@ -906,7 +906,9 @@ public final class ApiDtos {
             long inputTokens,
             long outputTokens,
             long totalTokens,
-            BigDecimal costUsd) {
+            BigDecimal costUsd,
+            /** Profile picture of the account with the same email, or null — the UI shows initials then. */
+            String avatarUrl) {
 
         public static ClaudeUsageMemberResponse of(ClaudeUsageMemberUsage usage) {
             var member = usage.member();
@@ -925,7 +927,8 @@ public final class ApiDtos {
                     usage.inputTokens(),
                     usage.outputTokens(),
                     usage.totalTokens(),
-                    usage.costUsd());
+                    usage.costUsd(),
+                    usage.avatarUrl());
         }
     }
 
@@ -1063,6 +1066,149 @@ public final class ApiDtos {
         }
     }
 
+    /**
+     * The admin "User Activity" detail for one member over a date range
+     * (ADR-074): summary, projects, activity sessions, then the reported days
+     * newest first. Every activity figure is nullable — null means the
+     * reporter did not send activity for that day, never zero. See
+     * {@link com.coc.docs.claudeusage.ClaudeUsageMemberActivity}.
+     */
+    public record ClaudeUsageMemberActivityResponse(
+            UUID memberId,
+            LocalDate from,
+            LocalDate to,
+            /** The project filter applied, or null for all projects. */
+            String project,
+            ClaudeUsageActivitySummaryResponse summary,
+            /** Days in range with tokens but no activity (an older reporter). */
+            int daysWithoutActivity,
+            List<ClaudeUsageActivityProjectResponse> projects,
+            List<ClaudeUsageActivitySessionResponse> sessions,
+            List<ClaudeUsageActivityDayResponse> days) {
+
+        public static ClaudeUsageMemberActivityResponse of(com.coc.docs.claudeusage.ClaudeUsageMemberActivity activity) {
+            return new ClaudeUsageMemberActivityResponse(
+                    activity.memberId(), activity.from(), activity.to(), activity.project(),
+                    ClaudeUsageActivitySummaryResponse.of(activity.summary()),
+                    activity.daysWithoutActivity(),
+                    activity.projects().stream().map(ClaudeUsageActivityProjectResponse::of).toList(),
+                    activity.sessions().stream().map(ClaudeUsageActivitySessionResponse::of).toList(),
+                    activity.days().stream().map(ClaudeUsageActivityDayResponse::of).toList());
+        }
+    }
+
+    public record ClaudeUsageActivitySummaryResponse(
+            Integer requestCount,
+            Integer apiCallCount,
+            Integer conversationCount,
+            Integer sessionCount,
+            Long activeSeconds,
+            long inputTokens,
+            long outputTokens,
+            long cacheReadTokens,
+            long cacheWriteTokens,
+            long totalTokens) {
+
+        static ClaudeUsageActivitySummaryResponse of(com.coc.docs.claudeusage.ClaudeUsageMemberActivity.Summary s) {
+            return new ClaudeUsageActivitySummaryResponse(
+                    s.requestCount(), s.apiCallCount(), s.conversationCount(), s.sessionCount(), s.activeSeconds(),
+                    s.inputTokens(), s.outputTokens(), s.cacheReadTokens(), s.cacheCreationTokens(), s.totalTokens());
+        }
+    }
+
+    /** One project — over a whole range in the response's {@code projects}, or one day inside a day. */
+    public record ClaudeUsageActivityProjectResponse(
+            String name,
+            int requestCount,
+            int apiCallCount,
+            int conversationCount,
+            int sessionCount,
+            long activeSeconds,
+            long inputTokens,
+            long outputTokens,
+            long cacheReadTokens,
+            long cacheWriteTokens,
+            long totalTokens,
+            Instant firstAt,
+            Instant lastAt) {
+
+        static ClaudeUsageActivityProjectResponse of(com.coc.docs.claudeusage.ClaudeUsageDayActivity.Project p) {
+            return new ClaudeUsageActivityProjectResponse(
+                    p.name(), p.requestCount(), p.apiCallCount(), p.conversationCount(), p.sessionCount(),
+                    p.activeSeconds(), p.inputTokens(), p.outputTokens(), p.cacheReadTokens(), p.cacheCreationTokens(),
+                    p.totalTokens(), p.firstAt(), p.lastAt());
+        }
+    }
+
+    public record ClaudeUsageActivitySessionResponse(
+            LocalDate date,
+            Instant startedAt,
+            Instant endedAt,
+            long durationSeconds,
+            int requestCount,
+            List<String> projects) {
+
+        static ClaudeUsageActivitySessionResponse of(com.coc.docs.claudeusage.ClaudeUsageMemberActivity.Session s) {
+            return new ClaudeUsageActivitySessionResponse(
+                    s.date(), s.startedAt(), s.endedAt(), s.durationSeconds(), s.requestCount(), s.projects());
+        }
+    }
+
+    public record ClaudeUsageActivityDayResponse(
+            LocalDate date,
+            Instant reportedAt,
+            long inputTokens,
+            long outputTokens,
+            long cacheReadTokens,
+            long cacheWriteTokens,
+            long totalTokens,
+            /** Null under a project filter — cost is not split by project. */
+            BigDecimal costUsd,
+            List<ClaudeUsageActivityModelResponse> models,
+            /** The activity fields below are all null when this day was reported without activity. */
+            Integer requestCount,
+            Integer apiCallCount,
+            Integer conversationCount,
+            Integer sessionCount,
+            Long activeSeconds,
+            List<ClaudeUsageActivityProjectResponse> projects,
+            List<ClaudeUsageActivitySessionResponse> sessions) {
+
+        public static ClaudeUsageActivityDayResponse of(com.coc.docs.claudeusage.ClaudeUsageMemberActivity.Day day) {
+            var a = day.activity();
+            return new ClaudeUsageActivityDayResponse(
+                    day.date(), day.reportedAt(), day.inputTokens(), day.outputTokens(), day.cacheReadTokens(),
+                    day.cacheCreationTokens(), day.totalTokens(), day.costUsd(),
+                    day.models().stream().map(ClaudeUsageActivityModelResponse::of).toList(),
+                    a == null ? null : a.requestCount(),
+                    a == null ? null : a.apiCallCount(),
+                    a == null ? null : a.conversationCount(),
+                    a == null ? null : a.sessionCount(),
+                    a == null ? null : a.activeSeconds(),
+                    a == null ? null : a.projects().stream().map(ClaudeUsageActivityProjectResponse::of).toList(),
+                    a == null ? null : a.sessions().stream()
+                            .map(s -> ClaudeUsageActivitySessionResponse.of(new com.coc.docs.claudeusage.ClaudeUsageMemberActivity.Session(
+                                    day.date(), s.startedAt(), s.endedAt(), s.requestCount(), s.projects())))
+                            .toList());
+        }
+    }
+
+    public record ClaudeUsageActivityModelResponse(
+            String model,
+            long inputTokens,
+            long outputTokens,
+            long cacheReadTokens,
+            long cacheWriteTokens,
+            long totalTokens,
+            BigDecimal costUsd) {
+
+        public static ClaudeUsageActivityModelResponse of(com.coc.docs.claudeusage.ClaudeUsageMemberActivity.ModelTokens m) {
+            return new ClaudeUsageActivityModelResponse(
+                    m.model(), m.inputTokens(), m.outputTokens(), m.cacheReadTokens(), m.cacheCreationTokens(),
+                    m.totalTokens(), m.costUsd());
+        }
+    }
+
     /** One (day, model) entry of the personal screen's "Recent Usage" table (ADR-058). */
     public record ClaudeUsageDayModelResponse(
             LocalDate date,
@@ -1186,7 +1332,41 @@ public final class ApiDtos {
             long cacheRead,
             long cacheCreation,
             List<String> models,
-            Map<String, ClaudeUsageModelTokensRequest> byModel) {}
+            Map<String, ClaudeUsageModelTokensRequest> byModel,
+            /** Optional (ADR-074): requests, sessions, active time and projects. Absent from older reporters. */
+            ClaudeUsageActivityRequest activity) {}
+
+    /**
+     * The day's activity as the reporter computed it (ADR-074). Field names
+     * match the claude-team-usage payload exactly; definitions are in V60.
+     */
+    public record ClaudeUsageActivityRequest(
+            int requestCount,
+            int apiCallCount,
+            int conversationCount,
+            int sessionCount,
+            long activeSeconds,
+            List<ClaudeUsageActivityProjectRequest> projects,
+            List<ClaudeUsageActivitySessionRequest> sessions) {}
+
+    /** One project's share of the day — {@code name} is a folder name, never a path. */
+    public record ClaudeUsageActivityProjectRequest(
+            String name,
+            int requestCount,
+            int apiCallCount,
+            int conversationCount,
+            int sessionCount,
+            long activeSeconds,
+            long input,
+            long output,
+            long cacheRead,
+            long cacheCreation,
+            Instant firstAt,
+            Instant lastAt) {}
+
+    /** One continuous-activity block (split after 30 minutes idle). */
+    public record ClaudeUsageActivitySessionRequest(
+            Instant startedAt, Instant endedAt, int requestCount, List<String> projects) {}
 
     public record ClaudeUsageIngestResponse(String action) {}
 

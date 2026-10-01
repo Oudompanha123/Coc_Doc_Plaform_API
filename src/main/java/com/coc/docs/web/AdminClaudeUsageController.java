@@ -5,15 +5,19 @@ import com.coc.docs.claudeusage.ClaudeUsageMember;
 import com.coc.docs.claudeusage.ClaudeUsageService;
 import jakarta.validation.Valid;
 import java.net.URI;
+import java.time.LocalDate;
 import java.util.UUID;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -47,6 +51,30 @@ public class AdminClaudeUsageController {
      * an admin may do: change a dashboard role, set a budget, take somebody
      * off tracking.
      */
+
+    /**
+     * One member's usage detail — the "User Activity" view an admin opens from
+     * the per-user table: requests, sessions, active time and projects
+     * (ADR-074) alongside the day/model token split.
+     *
+     * <p>Admin-only, unlike the dashboard read: it is a single colleague's
+     * day-by-day usage, which a plain {@code user} is never shown. The range
+     * is {@code from}/{@code to} (ISO dates, both or neither) when given,
+     * else {@code period}/{@code offset} with the same clamping as {@code GET
+     * /api/v1/claude-usage}. {@code project} narrows every figure to one
+     * project.
+     */
+    @GetMapping("/members/{id}/activity")
+    ApiDtos.ClaudeUsageMemberActivityResponse activity(
+            @PathVariable UUID id,
+            @RequestParam(defaultValue = "week") String period,
+            @RequestParam(defaultValue = "0") int offset,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) String project) {
+
+        return ApiDtos.ClaudeUsageMemberActivityResponse.of(usage.memberActivity(id, period, offset, from, to, project));
+    }
 
     /**
      * Adds someone to the tracking roster, {@code invited} until their own

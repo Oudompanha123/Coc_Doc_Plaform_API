@@ -35,9 +35,10 @@ class ClaudeUsageServiceTest {
     private final ClaudeUsageMemberRepository members = mock(ClaudeUsageMemberRepository.class);
     private final ClaudeUsageDailyRepository daily = mock(ClaudeUsageDailyRepository.class);
     private final ClaudeUsageDailyModelRepository dailyModels = mock(ClaudeUsageDailyModelRepository.class);
+    private final ClaudeUsageActivityRepository activities = mock(ClaudeUsageActivityRepository.class);
     private final AuditRepository audit = mock(AuditRepository.class);
     private final ClaudeUsageService service =
-            new ClaudeUsageService(members, daily, dailyModels, audit, new ObjectMapper());
+            new ClaudeUsageService(members, daily, dailyModels, activities, audit, new ObjectMapper());
 
     private static final CurrentUser ACTOR = TestCallers.user(AppRole.ADMIN);
 
@@ -926,6 +927,350 @@ class ClaudeUsageServiceTest {
 
             assertThat(service.myDashboard(actor, today, 999).usage().rangeDays()).isEqualTo(7);
             assertThat(service.myDashboard(actor, today, 30).usage().rangeDays()).isEqualTo(30);
+        }
+    }
+
+    @Nested
+    @DisplayName("memberActivity — the admin User Activity detail")
+    class MemberActivity {
+
+        private final LocalDate wednesday = LocalDate.of(2026, 9, 16);
+        private final LocalDate monday = LocalDate.of(2026, 9, 14);
+
+        @Test
+        @DisplayName("covers the dashboard's own period and returns days newest first, split by model")
+        void daysNewestFirstWithModels() {
+            ClaudeUsageMember m = member("dev@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findById(m.id())).thenReturn(Optional.of(m));
+            Instant reported = Instant.parse("2026-09-16T09:42:00Z");
+            ClaudeUsageDaily mon = new ClaudeUsageDaily(
+                    UUID.randomUUID(), m.id(), monday, 100, 40, 0, 0, new BigDecimal("0.10"), "a", reported);
+            ClaudeUsageDaily wed = new ClaudeUsageDaily(
+                    UUID.randomUUID(), m.id(), wednesday, 300, 200, 10, 5, new BigDecimal("0.50"), "a,b", reported);
+            when(daily.listInRangeForMember(m.id(), monday, wednesday)).thenReturn(List.of(mon, wed));
+            when(dailyModels.listInRangeForMember(m.id(), monday, wednesday)).thenReturn(List.of(
+                    new ClaudeUsageDailyModel(m.id(), wednesday, "opus", 200, 150, 10, 5, 0, new BigDecimal("0.40")),
+                    new ClaudeUsageDailyModel(m.id(), wednesday, "haiku", 100, 50, 0, 0, 0, new BigDecimal("0.10"))));
+
+            var activity = service.memberActivity(m.id(), "week", 0, wednesday);
+
+            assertThat(activity.from()).isEqualTo(monday);
+            assertThat(activity.to()).isEqualTo(wednesday);
+            assertThat(activity.days()).extracting(ClaudeUsageMemberActivity.Day::date).containsExactly(wednesday, monday);
+            var first = activity.days().get(0);
+            assertThat(first.totalTokens()).isEqualTo(500);
+            assertThat(first.reportedAt()).isEqualTo(reported);
+            assertThat(first.models()).extracting(ClaudeUsageMemberActivity.ModelTokens::model).containsExactly("opus", "haiku");
+        }
+
+        @Test
+        @DisplayName("a day with no per-model rows gets one unattributed entry equal to the day")
+        void legacyDayIsUnattributed() {
+            ClaudeUsageMember m = member("dev@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findById(m.id())).thenReturn(Optional.of(m));
+            ClaudeUsageDaily legacy = new ClaudeUsageDaily(
+                    UUID.randomUUID(), m.id(), monday, 100, 40, 7, 3, new BigDecimal("0.10"), "x", Instant.now());
+            when(daily.listInRangeForMember(m.id(), monday, wednesday)).thenReturn(List.of(legacy));
+            when(dailyModels.listInRangeForMember(m.id(), monday, wednesday)).thenReturn(List.of());
+
+            var day = service.memberActivity(m.id(), "week", 0, wednesday).days().get(0);
+
+            assertThat(day.models()).singleElement().satisfies(model -> {
+                assertThat(model.model()).isEqualTo(ClaudeUsageService.UNATTRIBUTED_MODEL);
+                assertThat(model.totalTokens()).isEqualTo(140);
+                assertThat(model.cacheReadTokens()).isEqualTo(7);
+            });
+        }
+
+        @Test
+        @DisplayName("skips days that reported no tokens at all")
+        void skipsEmptyDays() {
+            ClaudeUsageMember m = member("dev@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findById(m.id())).thenReturn(Optional.of(m));
+            ClaudeUsageDaily empty = new ClaudeUsageDaily(
+                    UUID.randomUUID(), m.id(), monday, 0, 0, 0, 0, BigDecimal.ZERO, "", Instant.now());
+            when(daily.listInRangeForMember(m.id(), monday, wednesday)).thenReturn(List.of(empty));
+            when(dailyModels.listInRangeForMember(m.id(), monday, wednesday)).thenReturn(List.of());
+
+            assertThat(service.memberActivity(m.id(), "week", 0, wednesday).days()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("an unknown member is a 404")
+        void unknownMemberIsNotFound() {
+            UUID id = UUID.randomUUID();
+            when(members.findById(id)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.memberActivity(id, "week", 0, wednesday))
+                    .isInstanceOf(ApiException.class)
+                    .extracting(e -> ((ApiException) e).status())
+                    .isEqualTo(HttpStatus.NOT_FOUND);
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Activity: requests, sessions, active time, projects (ADR-074)
+    // -------------------------------------------------------------------
+
+    private static final Instant T0 = Instant.parse("2026-09-15T02:15:00Z"); // 09:15 Asia/Phnom_Penh
+
+    private static Instant at(int minutes) {
+        return T0.plusSeconds(minutes * 60L);
+    }
+
+    private static ClaudeUsageDayActivity.Project project(
+            String name, int requests, int sessions, long activeSeconds, long input, long output, Instant first, Instant last) {
+        return new ClaudeUsageDayActivity.Project(name, requests, requests * 4, 1, sessions, activeSeconds, input, output, 0, 0, first, last);
+    }
+
+    private static ClaudeUsageDayActivity.Session session(Instant start, Instant end, int requests, String... projects) {
+        return new ClaudeUsageDayActivity.Session(start, end, requests, List.of(projects));
+    }
+
+    @Nested
+    @DisplayName("ingest — the optional activity object")
+    class IngestActivity {
+
+        private final LocalDate today = LocalDate.now(java.time.ZoneId.of("Asia/Phnom_Penh"));
+        private ClaudeUsageMember m;
+
+        private void existingMember() {
+            m = member("dev@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findByEmail("dev@cocdocs.example")).thenReturn(Optional.of(m));
+            when(daily.upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any())).thenReturn(false);
+        }
+
+        private void ingest(long input, long output, ClaudeUsageDayActivity activity) {
+            service.recordUsage("dev@cocdocs.example", null, today, input, output, 0, 0, List.of(), Map.of(), activity);
+        }
+
+        @Test
+        @DisplayName("stores it beside the totals, with project names trimmed")
+        void storesActivity() {
+            existingMember();
+            var activity = new ClaudeUsageDayActivity(3, 12, 1, 1, 1620, List.of(
+                    project("  coc-docs-platform ", 3, 1, 1620, 100, 50, at(0), at(27))),
+                    List.of(session(at(0), at(27), 3, "coc-docs-platform")));
+
+            ingest(100, 50, activity);
+
+            ArgumentCaptor<ClaudeUsageDayActivity> stored = ArgumentCaptor.forClass(ClaudeUsageDayActivity.class);
+            verify(activities).replaceDay(eq(m.id()), eq(today), stored.capture());
+            assertThat(stored.getValue().requestCount()).isEqualTo(3);
+            assertThat(stored.getValue().projects()).extracting(ClaudeUsageDayActivity.Project::name)
+                    .containsExactly("coc-docs-platform");
+        }
+
+        @Test
+        @DisplayName("an ingest without activity removes the day's stored activity")
+        void noActivityClearsDay() {
+            existingMember();
+
+            ingest(100, 50, null);
+
+            verify(activities).replaceDay(m.id(), today, null);
+        }
+
+        @Test
+        @DisplayName("refuses project tokens that add up to more than the day")
+        void projectTokensMayNotExceedDay() {
+            existingMember();
+            var activity = new ClaudeUsageDayActivity(1, 1, 1, 1, 0, List.of(
+                    project("a", 1, 1, 0, 80, 50, null, null),
+                    project("b", 0, 0, 0, 30, 0, null, null)), List.of());
+
+            assertThatThrownBy(() -> ingest(100, 50, activity))
+                    .isInstanceOf(ApiException.class).hasMessageContaining("exceed");
+            verify(activities, never()).replaceDay(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("refuses a path where a project name belongs")
+        void projectIsANameNotAPath() {
+            existingMember();
+            var activity = new ClaudeUsageDayActivity(1, 1, 1, 1, 0, List.of(
+                    project("D:\\CLAUDE\\coc-docs-platform", 1, 1, 0, 1, 1, null, null)), List.of());
+
+            assertThatThrownBy(() -> ingest(100, 50, activity))
+                    .isInstanceOf(ApiException.class).hasMessageContaining("not a path");
+        }
+
+        @Test
+        @DisplayName("refuses a session that ends before it starts")
+        void sessionMustNotRunBackwards() {
+            existingMember();
+            var activity = new ClaudeUsageDayActivity(1, 1, 1, 1, 0, List.of(),
+                    List.of(session(at(30), at(10), 1, "a")));
+
+            assertThatThrownBy(() -> ingest(100, 50, activity)).isInstanceOf(ApiException.class);
+        }
+
+        @Test
+        @DisplayName("refuses more active time than a day has")
+        void activeTimeIsBoundedByTheDay() {
+            existingMember();
+            var activity = new ClaudeUsageDayActivity(1, 1, 1, 1, 86_401, List.of(), List.of());
+
+            assertThatThrownBy(() -> ingest(100, 50, activity)).isInstanceOf(ApiException.class);
+        }
+    }
+
+    @Nested
+    @DisplayName("memberActivity — requests, sessions, duration and projects")
+    class MemberActivityDetail {
+
+        private final LocalDate mon = LocalDate.of(2026, 9, 14);
+        private final LocalDate tue = LocalDate.of(2026, 9, 15);
+        private final LocalDate wed = LocalDate.of(2026, 9, 16);
+        private ClaudeUsageMember m;
+
+        /** Mon: no activity (old reporter). Tue and Wed: two projects each. */
+        private void twoDaysOfActivity() {
+            m = member("dev@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findById(m.id())).thenReturn(Optional.of(m));
+            Instant reported = Instant.parse("2026-09-16T09:00:00Z");
+            when(daily.listInRangeForMember(m.id(), mon, wed)).thenReturn(List.of(
+                    new ClaudeUsageDaily(UUID.randomUUID(), m.id(), mon, 10, 10, 0, 0, new BigDecimal("0.01"), "a", reported),
+                    new ClaudeUsageDaily(UUID.randomUUID(), m.id(), tue, 160, 40, 0, 0, new BigDecimal("0.20"), "a", reported),
+                    new ClaudeUsageDaily(UUID.randomUUID(), m.id(), wed, 70, 30, 0, 0, new BigDecimal("0.10"), "a", reported)));
+            when(dailyModels.listInRangeForMember(m.id(), mon, wed)).thenReturn(List.of());
+
+            Instant tue0915 = Instant.parse("2026-09-15T02:15:00Z");
+            Instant wed0900 = Instant.parse("2026-09-16T02:00:00Z");
+            Map<LocalDate, ClaudeUsageDayActivity> act = new java.util.TreeMap<>();
+            act.put(tue, new ClaudeUsageDayActivity(8, 30, 2, 2, (27 + 26) * 60, List.of(
+                            project("coc-docs-platform", 6, 1, 27 * 60, 120, 30, tue0915, tue0915.plusSeconds(27 * 60)),
+                            project("ax-harness", 2, 1, 26 * 60, 40, 10, tue0915.plusSeconds(50 * 60), tue0915.plusSeconds(76 * 60))),
+                    List.of(
+                            session(tue0915, tue0915.plusSeconds(27 * 60), 6, "coc-docs-platform"),
+                            session(tue0915.plusSeconds(50 * 60), tue0915.plusSeconds(76 * 60), 2, "ax-harness"))));
+            act.put(wed, new ClaudeUsageDayActivity(5, 20, 1, 1, 45 * 60, List.of(
+                            project("coc-docs-platform", 4, 1, 45 * 60, 60, 25, wed0900, wed0900.plusSeconds(45 * 60)),
+                            project("claude-team-usage", 1, 1, 5 * 60, 10, 5, wed0900.plusSeconds(10 * 60), wed0900.plusSeconds(15 * 60))),
+                    List.of(session(wed0900, wed0900.plusSeconds(45 * 60), 5, "claude-team-usage", "coc-docs-platform"))));
+            when(activities.listInRangeForMember(m.id(), mon, wed)).thenReturn(act);
+        }
+
+        private ClaudeUsageMemberActivity load(String project) {
+            return service.memberActivity(m.id(), "week", 0, mon, wed, project, wed);
+        }
+
+        @Test
+        @DisplayName("summary: requests, sessions and active time summed over the days that reported them")
+        void summary() {
+            twoDaysOfActivity();
+
+            var a = load(null);
+
+            assertThat(a.summary().requestCount()).isEqualTo(13);
+            assertThat(a.summary().sessionCount()).isEqualTo(3);
+            assertThat(a.summary().activeSeconds()).isEqualTo((27 + 26 + 45) * 60L);
+            assertThat(a.summary().apiCallCount()).isEqualTo(50);
+            // Tokens cover every day, including Monday's (no activity).
+            assertThat(a.summary().totalTokens()).isEqualTo(20 + 200 + 100);
+            assertThat(a.daysWithoutActivity()).isEqualTo(1);
+            assertThat(a.days()).extracting(d -> d.activity() == null).containsExactly(false, false, true);
+        }
+
+        @Test
+        @DisplayName("summary activity is null — not zero — when no day reported activity")
+        void summaryWithoutActivityIsNull() {
+            m = member("dev@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findById(m.id())).thenReturn(Optional.of(m));
+            when(daily.listInRangeForMember(m.id(), mon, wed)).thenReturn(List.of(new ClaudeUsageDaily(
+                    UUID.randomUUID(), m.id(), mon, 10, 10, 0, 0, BigDecimal.ZERO, "a", Instant.now())));
+
+            var a = load(null);
+
+            assertThat(a.summary().requestCount()).isNull();
+            assertThat(a.summary().activeSeconds()).isNull();
+            assertThat(a.summary().totalTokens()).isEqualTo(20);
+            assertThat(a.projects()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("projects: summed across days, largest total first, first/last use spanning the range")
+        void projectAggregation() {
+            twoDaysOfActivity();
+
+            var projects = load(null).projects();
+
+            assertThat(projects).extracting(ClaudeUsageDayActivity.Project::name)
+                    .containsExactly("coc-docs-platform", "ax-harness", "claude-team-usage");
+            var docs = projects.get(0);
+            assertThat(docs.requestCount()).isEqualTo(10);
+            assertThat(docs.sessionCount()).isEqualTo(2);
+            assertThat(docs.activeSeconds()).isEqualTo((27 + 45) * 60L);
+            assertThat(docs.firstAt()).isEqualTo(Instant.parse("2026-09-15T02:15:00Z"));
+            assertThat(docs.lastAt()).isEqualTo(Instant.parse("2026-09-16T02:45:00Z"));
+        }
+
+        @Test
+        @DisplayName("token usage by project: input/output/total summed per project across days")
+        void tokensByProject() {
+            twoDaysOfActivity();
+
+            var projects = load(null).projects();
+
+            assertThat(projects).extracting(
+                            ClaudeUsageDayActivity.Project::name,
+                            ClaudeUsageDayActivity.Project::inputTokens,
+                            ClaudeUsageDayActivity.Project::outputTokens,
+                            ClaudeUsageDayActivity.Project::totalTokens)
+                    .containsExactly(
+                            org.assertj.core.groups.Tuple.tuple("coc-docs-platform", 180L, 55L, 235L),
+                            org.assertj.core.groups.Tuple.tuple("ax-harness", 40L, 10L, 50L),
+                            org.assertj.core.groups.Tuple.tuple("claude-team-usage", 10L, 5L, 15L));
+        }
+
+        @Test
+        @DisplayName("sessions: every activity session in range, newest first, with its day")
+        void sessionsNewestFirst() {
+            twoDaysOfActivity();
+
+            var sessions = load(null).sessions();
+
+            assertThat(sessions).extracting(ClaudeUsageMemberActivity.Session::date).containsExactly(wed, tue, tue);
+            assertThat(sessions.get(0).durationSeconds()).isEqualTo(45 * 60L);
+            assertThat(sessions.get(0).projects()).containsExactly("claude-team-usage", "coc-docs-platform");
+        }
+
+        @Test
+        @DisplayName("a project filter narrows days, tokens, sessions and summary to that project; cost is not guessed")
+        void projectFilter() {
+            twoDaysOfActivity();
+
+            var a = load("ax-harness");
+
+            assertThat(a.project()).isEqualTo("ax-harness");
+            assertThat(a.days()).singleElement().satisfies(day -> {
+                assertThat(day.date()).isEqualTo(tue);
+                assertThat(day.totalTokens()).isEqualTo(50);
+                assertThat(day.costUsd()).isNull();
+                assertThat(day.models()).isEmpty();
+            });
+            assertThat(a.summary().requestCount()).isEqualTo(2);
+            assertThat(a.summary().activeSeconds()).isEqualTo(26 * 60L);
+            assertThat(a.sessions()).singleElement().satisfies(s -> assertThat(s.projects()).containsExactly("ax-harness"));
+            assertThat(a.projects()).extracting(ClaudeUsageDayActivity.Project::name).containsExactly("ax-harness");
+        }
+
+        @Test
+        @DisplayName("custom range: from and to together, never reversed, capped at today, at most a year")
+        void customRangeValidation() {
+            m = member("dev@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findById(m.id())).thenReturn(Optional.of(m));
+
+            assertThatThrownBy(() -> service.memberActivity(m.id(), "week", 0, mon, null, null, wed))
+                    .isInstanceOf(ApiException.class);
+            assertThatThrownBy(() -> service.memberActivity(m.id(), "week", 0, wed, mon, null, wed))
+                    .isInstanceOf(ApiException.class);
+            assertThatThrownBy(() -> service.memberActivity(m.id(), "week", 0, wed.minusDays(400), wed, null, wed))
+                    .isInstanceOf(ApiException.class);
+
+            var capped = service.memberActivity(m.id(), "week", 0, mon, wed.plusDays(10), null, wed);
+            assertThat(capped.from()).isEqualTo(mon);
+            assertThat(capped.to()).isEqualTo(wed);
         }
     }
 }

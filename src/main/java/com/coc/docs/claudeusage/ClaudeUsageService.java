@@ -14,10 +14,12 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -93,9 +95,22 @@ public class ClaudeUsageService {
     /** Per-model cost is kept at this scale — finer than the daily column's 4, so a cheap model's fraction of a cent survives. */
     private static final int MODEL_COST_SCALE = 6;
 
+    /** Longest custom range the User Activity detail accepts, in days. */
+    static final int MAX_ACTIVITY_RANGE_DAYS = 366;
+
+    /** Ingest guards on the optional activity object (ADR-074) - generous, but bounded. */
+    private static final int MAX_ACTIVITY_PROJECTS = 200;
+
+    private static final int MAX_ACTIVITY_SESSIONS = 500;
+
+    private static final int MAX_PROJECT_NAME = 100;
+
+    private static final long SECONDS_PER_DAY = 86_400;
+
     private final ClaudeUsageMemberRepository members;
     private final ClaudeUsageDailyRepository daily;
     private final ClaudeUsageDailyModelRepository dailyModels;
+    private final ClaudeUsageActivityRepository activities;
     private final AuditRepository audit;
     private final ObjectMapper json;
 
@@ -103,11 +118,13 @@ public class ClaudeUsageService {
             ClaudeUsageMemberRepository members,
             ClaudeUsageDailyRepository daily,
             ClaudeUsageDailyModelRepository dailyModels,
+            ClaudeUsageActivityRepository activities,
             AuditRepository audit,
             ObjectMapper json) {
         this.members = members;
         this.daily = daily;
         this.dailyModels = dailyModels;
+        this.activities = activities;
         this.audit = audit;
         this.json = json;
     }
@@ -237,7 +254,6 @@ public class ClaudeUsageService {
      * the secret's only job is proving the caller may write at all, not who
      * they are.
      */
-    @Transactional
     public IngestOutcome recordUsage(
             String rawEmail,
             String rawDisplayName,
@@ -248,6 +264,27 @@ public class ClaudeUsageService {
             long cacheCreation,
             List<String> rawModels,
             Map<String, ClaudeUsageModelTokens> byModel) {
+        return recordUsage(rawEmail, rawDisplayName, date, input, output, cacheRead, cacheCreation, rawModels, byModel, null);
+    }
+
+    /**
+     * As above, with the day's activity (ADR-074) - requests, sessions,
+     * active time and projects, or null from a reporter that predates it.
+     * Null removes any activity stored for the day, so the detail never
+     * describes a different upload than the totals beside it.
+     */
+    @Transactional
+    public IngestOutcome recordUsage(
+            String rawEmail,
+            String rawDisplayName,
+            LocalDate date,
+            long input,
+            long output,
+            long cacheRead,
+            long cacheCreation,
+            List<String> rawModels,
+            Map<String, ClaudeUsageModelTokens> byModel,
+            ClaudeUsageDayActivity rawActivity) {
 
         String email = normalizeEmail(rawEmail);
 
@@ -277,6 +314,8 @@ public class ClaudeUsageService {
                 }
             }
         }
+
+        ClaudeUsageDayActivity activity = normalizeActivity(rawActivity, input, output);
 
         ClaudeUsageMember member = members.findByEmail(email).orElse(null);
         if (member == null) {
@@ -314,7 +353,101 @@ public class ClaudeUsageService {
         // upsert above (ADR-058) — the per-model rows can never drift from
         // the totals they break down, and a replay never adds a second set.
         dailyModels.replaceDay(member.id(), date, modelRowsFor(member.id(), date, byModel));
+        activities.replaceDay(member.id(), date, activity);
         return new IngestOutcome(created ? IngestOutcome.CREATED : IngestOutcome.UPDATED);
+    }
+
+    /**
+     * Validates the optional activity object and trims its project names.
+     * Rejects rather than repairs: a malformed object means a broken reporter,
+     * and storing half of it would be worse than storing none. The projects'
+     * tokens are a split of the day's, so together they may not exceed it.
+     */
+    private static ClaudeUsageDayActivity normalizeActivity(ClaudeUsageDayActivity a, long dayInput, long dayOutput) {
+        if (a == null) {
+            return null;
+        }
+        if (a.requestCount() < 0 || a.apiCallCount() < 0 || a.conversationCount() < 0 || a.sessionCount() < 0) {
+            throw ApiException.badRequest("activity counts must not be negative");
+        }
+        if (a.activeSeconds() < 0 || a.activeSeconds() > SECONDS_PER_DAY) {
+            throw ApiException.badRequest("activity.activeSeconds must be between 0 and " + SECONDS_PER_DAY);
+        }
+        if (a.projects().size() > MAX_ACTIVITY_PROJECTS) {
+            throw ApiException.badRequest("activity.projects must not list more than " + MAX_ACTIVITY_PROJECTS);
+        }
+        if (a.sessions().size() > MAX_ACTIVITY_SESSIONS) {
+            throw ApiException.badRequest("activity.sessions must not list more than " + MAX_ACTIVITY_SESSIONS);
+        }
+
+        Set<String> names = new HashSet<>();
+        long projectInput = 0;
+        long projectOutput = 0;
+        List<ClaudeUsageDayActivity.Project> projects = new ArrayList<>();
+        for (ClaudeUsageDayActivity.Project p : a.projects()) {
+            if (p == null) {
+                throw ApiException.badRequest("activity.projects must not contain null");
+            }
+            String name = projectName(p.name());
+            if (!names.add(name)) {
+                throw ApiException.badRequest("activity.projects lists \"" + name + "\" twice");
+            }
+            if (p.requestCount() < 0 || p.apiCallCount() < 0 || p.conversationCount() < 0 || p.sessionCount() < 0
+                    || p.activeSeconds() < 0 || p.activeSeconds() > SECONDS_PER_DAY
+                    || p.inputTokens() < 0 || p.outputTokens() < 0
+                    || p.cacheReadTokens() < 0 || p.cacheCreationTokens() < 0) {
+                throw ApiException.badRequest("activity.projects figures must not be negative");
+            }
+            if (p.firstAt() != null && p.lastAt() != null && p.lastAt().isBefore(p.firstAt())) {
+                throw ApiException.badRequest("activity.projects lastAt must not be before firstAt");
+            }
+            projectInput += p.inputTokens();
+            projectOutput += p.outputTokens();
+            projects.add(new ClaudeUsageDayActivity.Project(
+                    name, p.requestCount(), p.apiCallCount(), p.conversationCount(), p.sessionCount(), p.activeSeconds(),
+                    p.inputTokens(), p.outputTokens(), p.cacheReadTokens(), p.cacheCreationTokens(), p.firstAt(), p.lastAt()));
+        }
+        if (projectInput > dayInput || projectOutput > dayOutput) {
+            throw ApiException.badRequest("activity.projects tokens must not exceed the day's totals");
+        }
+
+        Set<Instant> starts = new HashSet<>();
+        List<ClaudeUsageDayActivity.Session> sessions = new ArrayList<>();
+        for (ClaudeUsageDayActivity.Session s : a.sessions()) {
+            if (s == null || s.startedAt() == null || s.endedAt() == null) {
+                throw ApiException.badRequest("activity.sessions need startedAt and endedAt");
+            }
+            if (s.endedAt().isBefore(s.startedAt()) || s.durationSeconds() > SECONDS_PER_DAY) {
+                throw ApiException.badRequest("activity.sessions must end after they start, within one day");
+            }
+            if (s.requestCount() < 0) {
+                throw ApiException.badRequest("activity.sessions requestCount must not be negative");
+            }
+            if (!starts.add(s.startedAt())) {
+                throw ApiException.badRequest("activity.sessions must not repeat a startedAt");
+            }
+            if (s.projects().size() > MAX_ACTIVITY_PROJECTS) {
+                throw ApiException.badRequest("activity.sessions projects must not list more than " + MAX_ACTIVITY_PROJECTS);
+            }
+            List<String> sessionProjects = s.projects().stream().map(ClaudeUsageService::projectName).distinct().toList();
+            sessions.add(new ClaudeUsageDayActivity.Session(s.startedAt(), s.endedAt(), s.requestCount(), sessionProjects));
+        }
+
+        return new ClaudeUsageDayActivity(
+                a.requestCount(), a.apiCallCount(), a.conversationCount(), a.sessionCount(), a.activeSeconds(),
+                projects, sessions);
+    }
+
+    /** A project is a folder name: trimmed, 1-100 characters, no control characters, never a path. */
+    private static String projectName(String raw) {
+        String name = raw == null ? "" : raw.strip();
+        if (name.isEmpty() || name.length() > MAX_PROJECT_NAME) {
+            throw ApiException.badRequest("activity project names must be 1-" + MAX_PROJECT_NAME + " characters");
+        }
+        if (name.chars().anyMatch(Character::isISOControl) || name.contains("/") || name.contains("\\")) {
+            throw ApiException.badRequest("activity project names must be a folder name, not a path");
+        }
+        return name;
     }
 
     /** One row per model that actually consumed tokens, each priced on its own (ADR-058). */
@@ -464,10 +597,12 @@ public class ClaudeUsageService {
 
         Map<UUID, List<ClaudeUsageDaily>> rowsByMember =
                 rows.stream().collect(Collectors.groupingBy(ClaudeUsageDaily::memberId));
+        Map<UUID, String> avatarUrls = members.avatarUrlsByMemberId();
 
         List<ClaudeUsageMemberUsage> memberUsages = new ArrayList<>();
         for (ClaudeUsageMember member : roster) {
-            memberUsages.add(rollupMember(member, rowsByMember.getOrDefault(member.id(), List.of()), daysInRange));
+            memberUsages.add(rollupMember(
+                    member, rowsByMember.getOrDefault(member.id(), List.of()), daysInRange, avatarUrls.get(member.id())));
         }
         memberUsages.sort((a, b) -> Long.compare(b.totalTokens(), a.totalTokens()));
 
@@ -491,6 +626,235 @@ public class ClaudeUsageService {
                 rows.stream().map(ClaudeUsageDaily::reportedAt).max(Instant::compareTo).orElse(null);
 
         return new ClaudeUsageDashboard(period, from, to, memberUsages, dailyPoints, totals, activeUsers, nearLimit, lastUpdated);
+    }
+
+    // -----------------------------------------------------------------------
+    // Member activity — the admin "User Activity" detail
+    // -----------------------------------------------------------------------
+
+    /**
+     * One member's reported days over the same period the dashboard is
+     * showing ({@code period}/{@code offset} resolved and clamped exactly as
+     * {@link #dashboard(String, int)} does), newest first, each split by model.
+     *
+     * <p>Read-only and admin-only (the route sits under {@code
+     * /api/v1/admin/**}). Day totals are read off {@code claude_usage_daily}
+     * and the split off {@code claude_usage_daily_model} unchanged — nothing
+     * is re-priced or re-summed, so a day here always equals that member's
+     * contribution to the dashboard's chart. A day with tokens but no
+     * per-model rows (reported before V49) gets one {@link #UNATTRIBUTED_MODEL}
+     * entry, the same fallback {@link #modelBreakdown} uses.
+     *
+     * <p>// req: FR-USAGE-001, ADR-035, ADR-058
+     */
+    public ClaudeUsageMemberActivity memberActivity(UUID memberId, String rawPeriod, int rawOffset) {
+        return memberActivity(memberId, rawPeriod, rawOffset, LocalDate.now(REPORT_ZONE));
+    }
+
+    /** As {@link #memberActivity(UUID, String, int)}, with "today" taken as a parameter so a test can fix it. */
+    ClaudeUsageMemberActivity memberActivity(UUID memberId, String rawPeriod, int rawOffset, LocalDate today) {
+        return memberActivity(memberId, rawPeriod, rawOffset, null, null, null, today);
+    }
+
+    /**
+     * The User Activity detail (ADR-074): {@code from}/{@code to} pick a custom
+     * range (both or neither; {@code to} is capped at today), otherwise
+     * {@code period}/{@code offset} resolve exactly as the dashboard's do.
+     * {@code project}, when given, narrows every figure to that project.
+     */
+    public ClaudeUsageMemberActivity memberActivity(
+            UUID memberId, String rawPeriod, int rawOffset, LocalDate rawFrom, LocalDate rawTo, String rawProject) {
+        return memberActivity(memberId, rawPeriod, rawOffset, rawFrom, rawTo, rawProject, LocalDate.now(REPORT_ZONE));
+    }
+
+    ClaudeUsageMemberActivity memberActivity(
+            UUID memberId,
+            String rawPeriod,
+            int rawOffset,
+            LocalDate rawFrom,
+            LocalDate rawTo,
+            String rawProject,
+            LocalDate today) {
+        require(memberId);
+
+        LocalDate from;
+        LocalDate to;
+        if (rawFrom != null || rawTo != null) {
+            if (rawFrom == null || rawTo == null) {
+                throw ApiException.badRequest("from and to must be given together");
+            }
+            if (rawTo.isBefore(rawFrom)) {
+                throw ApiException.badRequest("to must not be before from");
+            }
+            from = rawFrom;
+            to = cap(rawTo, today);
+            if (to.isBefore(from)) {
+                throw ApiException.badRequest("from must not be in the future");
+            }
+            if (ChronoUnit.DAYS.between(from, to) + 1 > MAX_ACTIVITY_RANGE_DAYS) {
+                throw ApiException.badRequest("a range may cover at most " + MAX_ACTIVITY_RANGE_DAYS + " days");
+            }
+        } else {
+            String period = PERIODS.contains(rawPeriod) ? rawPeriod : "week";
+            int offset = Math.max(MIN_OFFSET, Math.min(0, rawOffset));
+            from = rangeStart(period, today, offset);
+            to = cap(rangeEnd(period, from), today);
+        }
+        String project = rawProject == null || rawProject.isBlank() ? null : rawProject.strip();
+
+        Map<LocalDate, List<ClaudeUsageDailyModel>> modelsByDay = dailyModels.listInRangeForMember(memberId, from, to)
+                .stream()
+                .collect(Collectors.groupingBy(ClaudeUsageDailyModel::usageDate));
+        Map<LocalDate, ClaudeUsageDayActivity> activityByDay = activities.listInRangeForMember(memberId, from, to);
+
+        List<ClaudeUsageMemberActivity.Day> days = new ArrayList<>();
+        for (ClaudeUsageDaily day : daily.listInRangeForMember(memberId, from, to)) {
+            boolean hasTokens =
+                    day.inputTokens() + day.outputTokens() + day.cacheReadTokens() + day.cacheCreationTokens() > 0;
+            if (!hasTokens) {
+                continue;
+            }
+            ClaudeUsageDayActivity activity = activityByDay.get(day.usageDate());
+
+            if (project != null) {
+                // Narrowed to one project: its split of the day's tokens, its own
+                // sessions. Cost and models are not attributed per project, so
+                // they are left out rather than estimated.
+                ClaudeUsageDayActivity.Project p = activity == null ? null : activity.projects().stream()
+                        .filter(candidate -> candidate.name().equals(project))
+                        .findFirst()
+                        .orElse(null);
+                if (p == null) {
+                    continue;
+                }
+                List<ClaudeUsageDayActivity.Session> mine = activity.sessions().stream()
+                        .filter(s -> s.projects().contains(project))
+                        .toList();
+                ClaudeUsageDayActivity narrowed = new ClaudeUsageDayActivity(
+                        p.requestCount(), p.apiCallCount(), p.conversationCount(), p.sessionCount(), p.activeSeconds(),
+                        List.of(p), mine);
+                days.add(new ClaudeUsageMemberActivity.Day(
+                        day.usageDate(), day.reportedAt(), p.inputTokens(), p.outputTokens(), p.cacheReadTokens(),
+                        p.cacheCreationTokens(), null, List.of(), narrowed));
+                continue;
+            }
+
+            List<ClaudeUsageMemberActivity.ModelTokens> models = modelsByDay.getOrDefault(day.usageDate(), List.of())
+                    .stream()
+                    .map(m -> new ClaudeUsageMemberActivity.ModelTokens(
+                            m.model(), m.inputTokens(), m.outputTokens(), m.cacheReadTokens(), m.cacheCreationTokens(),
+                            m.costUsd()))
+                    .toList();
+            if (models.isEmpty()) {
+                models = List.of(new ClaudeUsageMemberActivity.ModelTokens(
+                        UNATTRIBUTED_MODEL, day.inputTokens(), day.outputTokens(), day.cacheReadTokens(),
+                        day.cacheCreationTokens(), day.costUsd()));
+            }
+            days.add(new ClaudeUsageMemberActivity.Day(
+                    day.usageDate(), day.reportedAt(), day.inputTokens(), day.outputTokens(), day.cacheReadTokens(),
+                    day.cacheCreationTokens(), day.costUsd(), models, activity));
+        }
+        days.sort((a, b) -> b.date().compareTo(a.date()));
+
+        return new ClaudeUsageMemberActivity(
+                memberId, from, to, project, summarize(days), (int) days.stream().filter(d -> d.activity() == null).count(),
+                projectTotals(days), sessionsOf(days), days);
+    }
+
+    /** Range totals: tokens over every day, activity over the days that carried it (null if none did). */
+    private static ClaudeUsageMemberActivity.Summary summarize(List<ClaudeUsageMemberActivity.Day> days) {
+        long input = 0;
+        long output = 0;
+        long cacheRead = 0;
+        long cacheCreation = 0;
+        boolean anyActivity = false;
+        int requests = 0;
+        int apiCalls = 0;
+        int conversations = 0;
+        int sessions = 0;
+        long activeSeconds = 0;
+        for (ClaudeUsageMemberActivity.Day day : days) {
+            input += day.inputTokens();
+            output += day.outputTokens();
+            cacheRead += day.cacheReadTokens();
+            cacheCreation += day.cacheCreationTokens();
+            ClaudeUsageDayActivity a = day.activity();
+            if (a != null) {
+                anyActivity = true;
+                requests += a.requestCount();
+                apiCalls += a.apiCallCount();
+                conversations += a.conversationCount();
+                sessions += a.sessionCount();
+                activeSeconds += a.activeSeconds();
+            }
+        }
+        return anyActivity
+                ? new ClaudeUsageMemberActivity.Summary(
+                        requests, apiCalls, conversations, sessions, activeSeconds, input, output, cacheRead, cacheCreation)
+                : new ClaudeUsageMemberActivity.Summary(null, null, null, null, null, input, output, cacheRead, cacheCreation);
+    }
+
+    /**
+     * Each project summed across the range's days, largest total first.
+     * {@code firstAt}/{@code lastAt} are the earliest and latest use in range.
+     */
+    static List<ClaudeUsageDayActivity.Project> projectTotals(List<ClaudeUsageMemberActivity.Day> days) {
+        Map<String, ClaudeUsageDayActivity.Project> totals = new LinkedHashMap<>();
+        for (ClaudeUsageMemberActivity.Day day : days) {
+            if (day.activity() == null) {
+                continue;
+            }
+            for (ClaudeUsageDayActivity.Project p : day.activity().projects()) {
+                totals.merge(p.name(), p, (a, b) -> new ClaudeUsageDayActivity.Project(
+                        a.name(),
+                        a.requestCount() + b.requestCount(),
+                        a.apiCallCount() + b.apiCallCount(),
+                        a.conversationCount() + b.conversationCount(),
+                        a.sessionCount() + b.sessionCount(),
+                        a.activeSeconds() + b.activeSeconds(),
+                        a.inputTokens() + b.inputTokens(),
+                        a.outputTokens() + b.outputTokens(),
+                        a.cacheReadTokens() + b.cacheReadTokens(),
+                        a.cacheCreationTokens() + b.cacheCreationTokens(),
+                        earliest(a.firstAt(), b.firstAt()),
+                        latest(a.lastAt(), b.lastAt())));
+            }
+        }
+        List<ClaudeUsageDayActivity.Project> out = new ArrayList<>(totals.values());
+        out.sort((a, b) -> b.totalTokens() != a.totalTokens()
+                ? Long.compare(b.totalTokens(), a.totalTokens())
+                : a.name().compareTo(b.name()));
+        return out;
+    }
+
+    /** Every activity session in range, newest first. */
+    private static List<ClaudeUsageMemberActivity.Session> sessionsOf(List<ClaudeUsageMemberActivity.Day> days) {
+        List<ClaudeUsageMemberActivity.Session> out = new ArrayList<>();
+        for (ClaudeUsageMemberActivity.Day day : days) {
+            if (day.activity() == null) {
+                continue;
+            }
+            for (ClaudeUsageDayActivity.Session s : day.activity().sessions()) {
+                out.add(new ClaudeUsageMemberActivity.Session(
+                        day.date(), s.startedAt(), s.endedAt(), s.requestCount(), s.projects()));
+            }
+        }
+        out.sort((a, b) -> b.startedAt().compareTo(a.startedAt()));
+        return out;
+    }
+
+    private static Instant earliest(Instant a, Instant b) {
+        if (a == null || b == null) {
+            return Objects.requireNonNullElse(a, b);
+        }
+        return a.isBefore(b) ? a : b;
+    }
+
+    private static Instant latest(Instant a, Instant b) {
+        if (a == null || b == null) {
+            return Objects.requireNonNullElse(a, b);
+        }
+        return a.isAfter(b) ? a : b;
     }
 
     // -----------------------------------------------------------------------
@@ -540,7 +904,7 @@ public class ClaudeUsageService {
         String displayName = member != null ? member.displayName() : displayNameOrFallback(actor.account().displayName(), email);
 
         ClaudeUsageMemberUsage todayUsage =
-                member == null ? null : rollupMember(member, todayRow == null ? List.of() : List.of(todayRow), 1);
+                member == null ? null : rollupMember(member, todayRow == null ? List.of() : List.of(todayRow), 1, actor.account().avatarUrl());
 
         int rangeDays = MY_RANGE_DAYS.contains(rawRangeDays) ? rawRangeDays : MY_DEFAULT_RANGE_DAYS;
         ClaudeUsageMyDashboard.ModelBreakdown breakdown = member == null
@@ -634,7 +998,8 @@ public class ClaudeUsageService {
                 previousCost, models, recent);
     }
 
-    private ClaudeUsageMemberUsage rollupMember(ClaudeUsageMember member, List<ClaudeUsageDaily> rows, long daysInRange) {
+    private ClaudeUsageMemberUsage rollupMember(
+            ClaudeUsageMember member, List<ClaudeUsageDaily> rows, long daysInRange, String avatarUrl) {
         long input = 0;
         long output = 0;
         long cacheRead = 0;
@@ -668,7 +1033,7 @@ public class ClaudeUsageService {
 
         return new ClaudeUsageMemberUsage(
                 member, input, output, cacheRead, cacheCreation, cost, List.copyOf(models), lastActive, effectiveBudget, pct,
-                budgetStatusFor(pct));
+                budgetStatusFor(pct), avatarUrl);
     }
 
     /** Green below {@link #AMBER_AT_PCT}, amber below {@link #RED_AT_PCT}, red at or above it. */

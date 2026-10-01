@@ -3,7 +3,9 @@ package com.coc.docs.claudeusage;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -41,6 +43,27 @@ public class ClaudeUsageMemberRepository {
         return jdbc.sql("select " + COLUMNS + " from claude_usage_member order by created_at desc")
                 .query(this::map)
                 .list();
+    }
+
+    /**
+     * Profile picture per member, keyed by member id, for members whose email
+     * matches a platform {@code account} that has one. A tracked person need
+     * not have an account at all (see {@link ClaudeUsageMember}), so the match
+     * is by email rather than a foreign key, and a member with no match is
+     * simply absent from the map -- the frontend falls back to initials.
+     */
+    public Map<UUID, String> avatarUrlsByMemberId() {
+        Map<UUID, String> urls = new HashMap<>();
+        jdbc.sql("""
+                        select m.id, a.avatar_url
+                        from claude_usage_member m
+                        join account a on lower(a.email) = lower(m.email)
+                        where a.avatar_url is not null
+                        """)
+                .query(rs -> {
+                    urls.put(rs.getObject("id", UUID.class), rs.getString("avatar_url"));
+                });
+        return urls;
     }
 
     public Optional<ClaudeUsageMember> findById(UUID id) {

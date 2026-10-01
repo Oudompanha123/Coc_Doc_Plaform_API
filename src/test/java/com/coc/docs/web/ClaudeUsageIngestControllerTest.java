@@ -38,7 +38,7 @@ class ClaudeUsageIngestControllerTest {
 
     private static ApiDtos.ClaudeUsageIngestRequest request(String email) {
         return new ApiDtos.ClaudeUsageIngestRequest(
-                email, "Display Name", LocalDate.of(2026, 1, 1), 100, 50, 0, 0, List.of("claude-sonnet-5"), null);
+                email, "Display Name", LocalDate.of(2026, 1, 1), 100, 50, 0, 0, List.of("claude-sonnet-5"), null, null);
     }
 
     private ClaudeUsageIngestController controllerWithSecret(String configuredSecret) {
@@ -53,7 +53,7 @@ class ClaudeUsageIngestControllerTest {
         @DisplayName("correct secret succeeds, whatever the request's email")
         void correctSecretSucceeds() {
             when(usage.recordUsage(
-                            anyString(), any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any()))
+                            anyString(), any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), any()))
                     .thenReturn(new ClaudeUsageService.IngestOutcome(ClaudeUsageService.IngestOutcome.CREATED));
 
             ApiDtos.ClaudeUsageIngestResponse response = controllerWithSecret("s3cr3t")
@@ -71,7 +71,7 @@ class ClaudeUsageIngestControllerTest {
             assertThatThrownBy(() -> controllerWithSecret("s3cr3t").ingest("Bearer wrong", request("a@example.com")))
                     .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.UNAUTHORIZED));
 
-            verify(usage, never()).recordUsage(any(), any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any());
+            verify(usage, never()).recordUsage(any(), any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), any());
         }
     }
 
@@ -85,7 +85,7 @@ class ClaudeUsageIngestControllerTest {
             var owner = TestCallers.user(AppRole.ADMIN).account();
             when(tokens.resolve("coc_abc")).thenReturn(Optional.of(owner));
             when(usage.recordUsage(
-                            anyString(), any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any()))
+                            anyString(), any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), any()))
                     .thenReturn(new ClaudeUsageService.IngestOutcome(ClaudeUsageService.IngestOutcome.UPDATED));
 
             ApiDtos.ClaudeUsageIngestResponse response =
@@ -103,7 +103,7 @@ class ClaudeUsageIngestControllerTest {
             assertThatThrownBy(() -> controllerWithSecret(null).ingest("Bearer coc_abc", request("someone-else@example.com")))
                     .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.FORBIDDEN));
 
-            verify(usage, never()).recordUsage(any(), any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any());
+            verify(usage, never()).recordUsage(any(), any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), any());
         }
 
         @Test
@@ -123,6 +123,6 @@ class ClaudeUsageIngestControllerTest {
                 .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.UNAUTHORIZED));
 
         verify(tokens, never()).resolve(any());
-        verify(usage, never()).recordUsage(any(), any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any());
+        verify(usage, never()).recordUsage(any(), any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), any());
     }
 }

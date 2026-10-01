@@ -24,6 +24,9 @@ import java.util.List;
  *     can never disagree about which zone a member is in.
  * @param lastActiveAt the latest {@code reported_at} in range, or null if
  *     nothing was reported in this window.
+ * @param avatarUrl the profile picture of the platform {@code account} with
+ *     the same email, or null when there is no such account or it has no
+ *     picture — the frontend shows initials then.
  */
 public record ClaudeUsageMemberUsage(
         ClaudeUsageMember member,
@@ -36,7 +39,8 @@ public record ClaudeUsageMemberUsage(
         Instant lastActiveAt,
         long effectiveBudgetTokens,
         int budgetPct,
-        String budgetStatus) {
+        String budgetStatus,
+        String avatarUrl) {
 
     /** Comfortably under budget. */
     public static final String STATUS_GREEN = "green";

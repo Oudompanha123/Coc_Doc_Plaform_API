@@ -1,6 +1,7 @@
 package com.coc.docs.web;
 
 import com.coc.docs.account.Account;
+import com.coc.docs.claudeusage.ClaudeUsageDayActivity;
 import com.coc.docs.claudeusage.ClaudeUsageIngestTokenService;
 import com.coc.docs.claudeusage.ClaudeUsageModelTokens;
 import com.coc.docs.claudeusage.ClaudeUsageProperties;
@@ -9,8 +10,10 @@ import jakarta.validation.Valid;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -76,7 +79,8 @@ public class ClaudeUsageIngestController {
                 request.cacheRead(),
                 request.cacheCreation(),
                 request.models(),
-                toDomain(request.byModel()));
+                toDomain(request.byModel()),
+                toDomain(request.activity()));
 
         return new ApiDtos.ClaudeUsageIngestResponse(outcome.action());
     }
@@ -90,6 +94,24 @@ public class ClaudeUsageIngestController {
         byModel.forEach((model, t) ->
                 out.put(model, new ClaudeUsageModelTokens(t.input(), t.output(), t.cacheRead(), t.cacheCreation(), t.cacheCreation1h())));
         return out;
+    }
+
+    private static ClaudeUsageDayActivity toDomain(ApiDtos.ClaudeUsageActivityRequest a) {
+        if (a == null) {
+            return null;
+        }
+        List<ClaudeUsageDayActivity.Project> projects = a.projects() == null ? List.of() : a.projects().stream()
+                .map(p -> p == null ? null : new ClaudeUsageDayActivity.Project(
+                        p.name(), p.requestCount(), p.apiCallCount(), p.conversationCount(), p.sessionCount(),
+                        p.activeSeconds(), p.input(), p.output(), p.cacheRead(), p.cacheCreation(), p.firstAt(), p.lastAt()))
+                .collect(Collectors.toList());
+        List<ClaudeUsageDayActivity.Session> sessions = a.sessions() == null ? List.of() : a.sessions().stream()
+                .map(s -> s == null ? null : new ClaudeUsageDayActivity.Session(
+                        s.startedAt(), s.endedAt(), s.requestCount(), s.projects()))
+                .collect(Collectors.toList());
+        return new ClaudeUsageDayActivity(
+                a.requestCount(), a.apiCallCount(), a.conversationCount(), a.sessionCount(), a.activeSeconds(),
+                projects, sessions);
     }
 
     /**

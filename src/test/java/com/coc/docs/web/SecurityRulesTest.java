@@ -672,6 +672,28 @@ class SecurityRulesTest {
         }
 
         @Test
+        void member_activity_refuses_a_plain_user_and_admits_an_admin() throws Exception {
+            // One colleague's day-by-day usage: an admin read, never a plain
+            // user's, even though the team dashboard itself admits them.
+            java.util.UUID id = java.util.UUID.randomUUID();
+            mvc.perform(get("/api/v1/admin/claude-usage/members/" + id + "/activity").with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+
+            org.mockito.Mockito.when(claudeUsageService.memberActivity(
+                            org.mockito.ArgumentMatchers.eq(id),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyInt(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageMemberActivity(
+                            id, java.time.LocalDate.now(), java.time.LocalDate.now(), List.of()));
+
+            mvc.perform(get("/api/v1/admin/claude-usage/members/" + id + "/activity").with(as(AppRole.ADMIN)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
         void the_dashboard_admits_an_admin() throws Exception {
             org.mockito.Mockito.when(claudeUsageService.dashboardFor(
                             org.mockito.ArgumentMatchers.any(),
