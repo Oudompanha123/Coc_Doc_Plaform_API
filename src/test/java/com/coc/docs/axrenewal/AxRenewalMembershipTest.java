@@ -122,6 +122,7 @@ class AxRenewalMembershipTest {
                 change("read project detail", (s, p, a) -> s.detail(p, a)),
                 change("read generated changes", (s, p, a) -> s.findGeneratedChanges(p, runId, a)),
                 change("read run history", (s, p, a) -> s.listRuns(p, a)),
+                change("read generation progress", (s, p, a) -> s.implementationProgress(p, runId, a)),
                 change("read run locally status", (s, p, a) -> s.runLocallyStatus(p, a)),
                 change("explain a run locally failure", (s, p, a) -> s.explainRunLocallyFailure(p, a)),
                 change("chat about the project", (s, p, a) -> s.chat(p, List.of(), "what runs this?", null, a)),

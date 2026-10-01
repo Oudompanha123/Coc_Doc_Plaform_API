@@ -225,7 +225,7 @@ class AxRenewalRebuildReplayTest {
         assertThat(result.confirmedPlanHash()).isEqualTo(PLAN_HASH);
 
         // The model is never asked -- this is the whole point of replaying.
-        verify(generator, never()).generate(any(), any(), any(), any(), any());
+        verify(generator, never()).generate(any(), any(), any(), any(), any(), any());
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<AxRenewalImplementationRepository.GeneratedChangeInput>> changesCaptor =

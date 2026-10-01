@@ -1455,6 +1455,20 @@ public class AxRenewalService {
         return implementations.listSummaries(projectId, RUN_HISTORY_LIMIT);
     }
 
+    /**
+     * What a {@code generating} run is doing right now (ADR-082): its step,
+     * counts, and the model's recent actions. Empty when this backend is not
+     * the one generating it — it has finished, or another backend sharing
+     * the database is running it. Readable by anyone who may open the
+     * project, the same audience as the run itself.
+     */
+    public Optional<AxRenewalGenerationProgress.Snapshot> implementationProgress(
+            UUID projectId, UUID runId, CurrentUser actor) {
+        requireMember(projectId, actor);
+        requireOwnRun(projectId, runId);
+        return runner.progress(runId);
+    }
+
     public List<AxRenewalGeneratedChange> findGeneratedChanges(UUID projectId, UUID runId, CurrentUser actor) {
         requireMember(projectId, actor);
         requireOwnRun(projectId, runId);
