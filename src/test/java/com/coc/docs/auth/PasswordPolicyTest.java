@@ -17,109 +17,79 @@ import org.junit.jupiter.params.provider.ValueSource;
  * deliberate: the frontend copy is advisory (CONST-TECH-07) and this one
  * decides, so the failure worth catching is the two disagreeing — a password
  * the form accepts and the server refuses looks, to the person typing it, like
- * the form is broken. One list on each side makes a one-sided change fail
- * somewhere rather than in production.
+ * the form is broken.
  *
  * <p>// req: NFR-SEC-AUTH, ADR-087
  */
 class PasswordPolicyTest {
 
     @ParameterizedTest
-    @ValueSource(strings = {"Str0ng!Passphrase", "aA1!aA1!aA1!", "Khmer-ភាសា1A!x", "p@ssW0rd-with-length"})
-    @DisplayName("accepts a password meeting every rule")
+    @ValueSource(strings = {"hunter22", "Str0ng!Passphrase", "        a", "ភាសាខ្មែរabc"})
+    @DisplayName("accepts a password of at least the minimum length")
     void accepts(String password) {
         assertThat(PasswordPolicy.violations(password)).isEmpty();
         assertThat(PasswordPolicy.isAcceptable(password)).isTrue();
     }
 
     @ParameterizedTest
-    @ValueSource(
-            strings = {
-                "qqq", // far too short -- the one from the bug report
-                "Passw0rd!", // nine characters, still under the floor
-                "alllowercase1!", // no uppercase
-                "ALLUPPERCASE1!", // no lowercase
-                "NoDigitsHere!!", // no number
-                "NoSymbolsHere1", // no symbol
-                "            " // whitespace only
-            })
-    @DisplayName("rejects a password breaking any rule")
+    @ValueSource(strings = {"qqq", "qqq111", "1234567"})
+    @DisplayName("rejects a password under the minimum length")
     void rejects(String password) {
         assertThat(PasswordPolicy.isAcceptable(password)).isFalse();
         assertThat(PasswordPolicy.violations(password)).isNotEmpty();
     }
 
     @Test
-    @DisplayName("rejects an empty password with one message, not five")
+    @DisplayName("rejects an empty password with one message")
     void emptyIsOneMessage() {
         assertThat(PasswordPolicy.violations("")).containsExactly("Enter a password.");
         assertThat(PasswordPolicy.violations(null)).containsExactly("Enter a password.");
     }
 
     @Test
-    @DisplayName("the floor is 12, not the 8 it replaces")
-    void twelveNotEight() {
-        assertThat(PasswordPolicy.isAcceptable("aA1!aA1!")).isFalse(); // 8
-        assertThat(PasswordPolicy.isAcceptable("aA1!aA1!aA1!")).isTrue(); // 12
+    @DisplayName("the floor is eight, exactly")
+    void floorIsEight() {
+        assertThat(PasswordPolicy.isAcceptable("a".repeat(7))).isFalse();
+        assertThat(PasswordPolicy.isAcceptable("a".repeat(8))).isTrue();
     }
 
     /**
-     * Reporting one problem at a time is what trains people to append "1!"
-     * until the complaining stops. The exact list and order are pinned because
-     * the frontend renders the same strings.
+     * Deliberately no composition rules (ADR-087 v1.1, NIST SP 800-63B
+     * §5.1.1.2). These pin that, so reintroducing one is a visible decision
+     * rather than a quiet tightening that starts refusing passwords people
+     * already hold.
      */
     @Test
-    @DisplayName("reports every unmet rule at once, in a fixable order")
-    void reportsEverythingAtOnce() {
-        assertThat(PasswordPolicy.violations("qqq"))
-                .containsExactly(
-                        "Use at least 12 characters.",
-                        "Include an uppercase letter.",
-                        "Include a number.",
-                        "Include a symbol, such as ! ? @ or #.");
+    @DisplayName("requires no particular character class")
+    void noCompositionRules() {
+        assertThat(PasswordPolicy.isAcceptable("alllowercase")).isTrue();
+        assertThat(PasswordPolicy.isAcceptable("ALLUPPERCASE")).isTrue();
+        assertThat(PasswordPolicy.isAcceptable("123456789")).isTrue();
+        assertThat(PasswordPolicy.isAcceptable("!!!!!!!!!")).isTrue();
     }
 
-    @Nested
-    @DisplayName("what counts as a symbol")
-    class Symbols {
+    @Test
+    @DisplayName("names the length rule, in the words the form shows")
+    void namesTheRule() {
+        assertThat(PasswordPolicy.violations("qqq")).containsExactly("Use at least 8 characters.");
+    }
 
-        /** By exclusion, so a symbol from any script counts. */
-        @Test
-        @DisplayName("punctuation and currency from any script")
-        void anyScript() {
-            assertThat(PasswordPolicy.isAcceptable("Aa1aaaaaaaaa€")).isTrue();
-            assertThat(PasswordPolicy.isAcceptable("Aa1aaaaaaaaa。")).isTrue();
-        }
-
-        @Test
-        @DisplayName("a space is not a symbol")
-        void spaceIsNot() {
-            assertThat(PasswordPolicy.violations("Aa1 aaaaaaaaa"))
-                    .contains("Include a symbol, such as ! ? @ or #.");
-        }
+    @Test
+    @DisplayName("rejects a password past the bcrypt-shaped ceiling")
+    void ceiling() {
+        assertThat(PasswordPolicy.isAcceptable("a".repeat(201))).isFalse();
+        assertThat(PasswordPolicy.isAcceptable("a".repeat(200))).isTrue();
     }
 
     @Nested
     @DisplayName("agreement with the frontend copy")
     class Parity {
 
-        /**
-         * The same strings as frontend/lib/auth/passwordPolicy.test.ts. If
-         * this list and that one drift, one of the two policies has changed
-         * alone, and the symptom in production is a form that refuses what the
-         * server accepts or accepts what it refuses.
-         */
+        /** The same strings as frontend/lib/auth/passwordPolicy.test.ts. */
         private static final List<String> ACCEPTED =
-                List.of("Str0ng!Passphrase", "aA1!aA1!aA1!", "Khmer-ភាសា1A!x", "p@ssW0rd-with-length");
+                List.of("hunter22", "Str0ng!Passphrase", "        a", "ភាសាខ្មែរabc");
 
-        private static final List<String> REJECTED = List.of(
-                "qqq",
-                "Passw0rd!",
-                "alllowercase1!",
-                "ALLUPPERCASE1!",
-                "NoDigitsHere!!",
-                "NoSymbolsHere1",
-                "            ");
+        private static final List<String> REJECTED = List.of("qqq", "qqq111", "1234567");
 
         @Test
         @DisplayName("every case the frontend accepts, this accepts")
