@@ -1068,6 +1068,9 @@ public class AxRenewalService {
                         .put("project", project.name())
                         .put("replayedFromRunId", appliedRun.id().toString())
                         .put("filesReplayed", priorChanges.size()));
+        // Ready for review the moment it exists (ADR-079). Heard after this
+        // transaction commits; not by the actor, who is looking at it.
+        events.publishEvent(new AxRenewalRunReadyEvent(projectId, run.id(), actor.id()));
 
         return run;
     }
@@ -1432,6 +1435,22 @@ public class AxRenewalService {
     }
 
     /** The files a Generate run actually found different, for the review screen. */
+    /** The most runs one history request returns (ADR-078) — enough to look back over, small enough to read in one go. */
+    static final int RUN_HISTORY_LIMIT = 50;
+
+    /**
+     * The project's implementation runs, newest first (ADR-078) — plan builds,
+     * error fixes and UI changes, whatever became of them. Read-only: it acts
+     * on nothing, and revert stays the latest applied run only.
+     *
+     * <p>Readable by anyone who may open the project ({@link #requireMember}),
+     * the same audience as the project's current run.
+     */
+    public List<AxRenewalRunSummary> listRuns(UUID projectId, CurrentUser actor) {
+        requireMember(projectId, actor);
+        return implementations.listSummaries(projectId, RUN_HISTORY_LIMIT);
+    }
+
     public List<AxRenewalGeneratedChange> findGeneratedChanges(UUID projectId, UUID runId, CurrentUser actor) {
         requireMember(projectId, actor);
         requireOwnRun(projectId, runId);
@@ -1829,6 +1848,9 @@ public class AxRenewalService {
                 AuditAction.TARGET_AX_RENEWAL_PROJECT,
                 projectId,
                 json.createObjectNode());
+        // Heard after this transaction commits (ADR-080), so a comment that
+        // rolls back tells nobody.
+        events.publishEvent(new AxRenewalCommentAddedEvent(projectId, created.id(), actor.id()));
 
         return created;
     }

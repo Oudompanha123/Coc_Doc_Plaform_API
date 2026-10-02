@@ -89,6 +89,44 @@ public class AxRenewalImplementationRepository {
                 .optional();
     }
 
+    /**
+     * The project's runs, newest first, at most {@code limit} — the
+     * Build → Implementation history (ADR-078). One query: the starter's
+     * display name is joined from {@code account} at read time (never the
+     * email), and each run's changed-file count is a correlated count, so a
+     * page of history never costs a query per row.
+     */
+    public List<AxRenewalRunSummary> listSummaries(UUID projectId, int limit) {
+        return jdbc.sql("""
+                        select r.id, r.run_kind, r.status, r.started_at, r.started_by,
+                               a.display_name as started_by_name, r.completed_at, r.failure_reason,
+                               r.instruction,
+                               (select count(*) from ax_renewal_generated_change c where c.run_id = r.id)
+                                   as changed_files
+                        from ax_renewal_implementation_run r
+                        left join account a on a.id = r.started_by
+                        where r.project_id = ?
+                        order by r.started_at desc
+                        limit ?
+                        """)
+                .params(projectId, limit)
+                .query((rs, rowNum) -> {
+                    OffsetDateTime completed = rs.getObject("completed_at", OffsetDateTime.class);
+                    return new AxRenewalRunSummary(
+                            rs.getObject("id", UUID.class),
+                            rs.getString("run_kind"),
+                            rs.getString("status"),
+                            rs.getObject("started_at", OffsetDateTime.class).toInstant(),
+                            rs.getObject("started_by", UUID.class),
+                            rs.getString("started_by_name"),
+                            completed == null ? null : completed.toInstant(),
+                            rs.getString("failure_reason"),
+                            rs.getString("instruction"),
+                            rs.getInt("changed_files"));
+                })
+                .list();
+    }
+
     public Optional<AxRenewalImplementationRun> findById(UUID id) {
         return jdbc.sql("select " + COLUMNS + " from ax_renewal_implementation_run where id = ?")
                 .param(id)

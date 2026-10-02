@@ -57,7 +57,7 @@ class AxRenewalMembershipTest {
     private AxRenewalMemberRepository members;
     private AccountRepository accounts;
     private AuditRepository audit;
-    /** Every event the service published — the member-added notification's trigger (ADR-075). */
+    /** Every event the service published — the member-added (ADR-075) and comment (ADR-080) notifications' triggers. */
     private final List<Object> published = new ArrayList<>();
     private AxRenewalService service;
 
@@ -121,6 +121,7 @@ class AxRenewalMembershipTest {
         return Stream.of(
                 change("read project detail", (s, p, a) -> s.detail(p, a)),
                 change("read generated changes", (s, p, a) -> s.findGeneratedChanges(p, runId, a)),
+                change("read run history", (s, p, a) -> s.listRuns(p, a)),
                 change("read run locally status", (s, p, a) -> s.runLocallyStatus(p, a)),
                 change("explain a run locally failure", (s, p, a) -> s.explainRunLocallyFailure(p, a)),
                 change("chat about the project", (s, p, a) -> s.chat(p, List.of(), "what runs this?", null, a)),
@@ -174,6 +175,8 @@ class AxRenewalMembershipTest {
             verify(members, never()).remove(any(), any());
             verify(members, never()).listForProject(any());
             verifyNoInteractions(plan, confirmations, implementations, comments, accounts, audit);
+            // Nor is anybody notified of anything (ADR-075, ADR-080).
+            assertThat(published).isEmpty();
         }
 
         @ParameterizedTest(name = "{0}")
@@ -245,13 +248,28 @@ class AxRenewalMembershipTest {
         void a_member_may_comment() {
             CurrentUser reviewer = TestCallers.user(Set.of(AppRole.REVIEWER));
             when(members.isMember(projectId, reviewer.id())).thenReturn(true);
+            UUID commentId = UUID.randomUUID();
             when(comments.insert(eq(projectId), eq(reviewer.id()), any(), anyString()))
                     .thenReturn(new AxRenewalComment(
-                            UUID.randomUUID(), projectId, reviewer.id(), "Reviewer", "looks right", Instant.EPOCH));
+                            commentId, projectId, reviewer.id(), "Reviewer", "looks right", Instant.EPOCH));
 
             service.addComment(projectId, "looks right", reviewer);
 
             verify(comments).insert(eq(projectId), eq(reviewer.id()), any(), eq("looks right"));
+            // The team is told — ids only; the notifier leaves out the author (ADR-080).
+            assertThat(published).containsExactly(new AxRenewalCommentAddedEvent(projectId, commentId, reviewer.id()));
+        }
+
+        @Test
+        void a_blank_comment_is_refused_and_notifies_nobody() {
+            CurrentUser reviewer = TestCallers.user(Set.of(AppRole.REVIEWER));
+            when(members.isMember(projectId, reviewer.id())).thenReturn(true);
+
+            assertThatThrownBy(() -> service.addComment(projectId, "   ", reviewer))
+                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.BAD_REQUEST));
+
+            verify(comments, never()).insert(any(), any(), any(), any());
+            assertThat(published).isEmpty();
         }
 
         @Test

@@ -266,6 +266,19 @@ public class AxRenewalController {
                 projects.startImplementation(projectId, sourcePath, actor));
     }
 
+    /**
+     * The project's implementation runs, newest first (ADR-078). A plain
+     * read: the {@code GET /api/v1/ax-renewal/**} floor in {@code
+     * SecurityConfig}, with membership checked by the service.
+     */
+    @GetMapping("/projects/{projectId}/implementation/runs")
+    List<ApiDtos.AxRenewalRunSummaryResponse> listRuns(
+            @PathVariable UUID projectId, @AuthenticationPrincipal CurrentUser actor) {
+        return projects.listRuns(projectId, actor).stream()
+                .map(ApiDtos.AxRenewalRunSummaryResponse::of)
+                .toList();
+    }
+
     /** The files a Generate run actually found different, once it reaches {@code awaiting_review} (ADR-044). */
     @GetMapping("/projects/{projectId}/implementation/{runId}/changes")
     List<ApiDtos.AxRenewalGeneratedChangeResponse> generatedChanges(

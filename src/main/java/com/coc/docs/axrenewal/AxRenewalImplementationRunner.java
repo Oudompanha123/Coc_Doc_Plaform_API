@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
@@ -44,6 +45,8 @@ public class AxRenewalImplementationRunner {
 
     private final AxRenewalCodeGenerator generator;
     private final AxRenewalImplementationRepository implementations;
+    /** Where "ready for review" is announced (ADR-079) — {@code AxRenewalRunReadyNotifier} listens. */
+    private final ApplicationEventPublisher events;
 
     /**
      * Every staging directory's name starts with this, directly under the
@@ -72,9 +75,12 @@ public class AxRenewalImplementationRunner {
     private final Set<UUID> cancelledRuns = ConcurrentHashMap.newKeySet();
 
     public AxRenewalImplementationRunner(
-            AxRenewalCodeGenerator generator, AxRenewalImplementationRepository implementations) {
+            AxRenewalCodeGenerator generator,
+            AxRenewalImplementationRepository implementations,
+            ApplicationEventPublisher events) {
         this.generator = generator;
         this.implementations = implementations;
+        this.events = events;
     }
 
     /**
@@ -168,7 +174,13 @@ public class AxRenewalImplementationRunner {
             implementations.deleteGeneratedChanges(runId);
             deleteQuietly(staging);
             log.info("generation run {} was closed while generating; its result was discarded", runId);
+            return;
         }
+        // Only now is it really awaiting review — after the compare-and-set,
+        // never for a result that was discarded (ADR-079). The starter is
+        // told too: they have been waiting minutes for this.
+        implementations.findById(runId)
+                .ifPresent(run -> events.publishEvent(new AxRenewalRunReadyEvent(run.projectId(), runId, null)));
     }
 
     /** Ends a still-{@code generating} run as failed — and does nothing if it was already closed (ADR-073). */
