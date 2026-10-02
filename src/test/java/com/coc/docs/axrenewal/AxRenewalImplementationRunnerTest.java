@@ -81,7 +81,7 @@ class AxRenewalImplementationRunnerTest {
         when(implementations.markStagingIfGenerating(eq(runId), any())).thenReturn(true);
 
         CountDownLatch processRegistered = new CountDownLatch(1);
-        when(generator.generate(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+        when(generator.generate(any(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
             @SuppressWarnings("unchecked")
             Consumer<Process> onStarted = invocation.getArgument(3);
             Process process = spawnIdleProcess();
@@ -117,7 +117,7 @@ class AxRenewalImplementationRunnerTest {
         UUID runId = UUID.randomUUID();
         when(implementations.markStagingIfGenerating(eq(runId), any())).thenReturn(true);
 
-        when(generator.generate(any(), any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(generator.generate(any(), any(), any(), any(), any(), any())).thenReturn(Optional.empty());
 
         runner.runGeneration(runId, AxRenewalImplementationRun.RUN_KIND_PLAN, "a confirmed plan", "/tmp/legacy-source");
 
@@ -137,7 +137,7 @@ class AxRenewalImplementationRunnerTest {
         when(implementations.markStagingIfGenerating(eq(runId), any())).thenReturn(true);
 
         CountDownLatch processRegistered = new CountDownLatch(1);
-        when(generator.generate(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+        when(generator.generate(any(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
             @SuppressWarnings("unchecked")
             Consumer<Process> onStarted = invocation.getArgument(3);
             Process process = spawnIdleProcess();
@@ -175,7 +175,7 @@ class AxRenewalImplementationRunnerTest {
 
         runner.runGeneration(runId, AxRenewalImplementationRun.RUN_KIND_PLAN, "a confirmed plan", "/tmp/legacy-source");
 
-        verify(generator, never()).generate(any(), any(), any(), any(), any());
+        verify(generator, never()).generate(any(), any(), any(), any(), any(), any());
         verify(implementations, never()).endIfStatus(any(), any(), any(), any());
         assertThat(Path.of(staging.getValue())).doesNotExist();
     }
@@ -188,7 +188,7 @@ class AxRenewalImplementationRunnerTest {
         UUID runId = UUID.randomUUID();
         ArgumentCaptor<String> staging = ArgumentCaptor.forClass(String.class);
         when(implementations.markStagingIfGenerating(eq(runId), staging.capture())).thenReturn(true);
-        when(generator.generate(any(), any(), any(), any(), any()))
+        when(generator.generate(any(), any(), any(), any(), any(), any()))
                 .thenReturn(Optional.of(new AxRenewalCodeGenerator.Result(List.of(
                         new AxRenewalCodeGenerator.GeneratedFile("src/App.tsx", "modify", "a", "b")))));
         // Someone else closed it meanwhile: the claim on "awaiting review" fails.
@@ -210,7 +210,7 @@ class AxRenewalImplementationRunnerTest {
         UUID runId = UUID.randomUUID();
         ArgumentCaptor<String> staging = ArgumentCaptor.forClass(String.class);
         when(implementations.markStagingIfGenerating(eq(runId), staging.capture())).thenReturn(true);
-        when(generator.generate(any(), any(), any(), any(), any()))
+        when(generator.generate(any(), any(), any(), any(), any(), any()))
                 .thenReturn(Optional.of(new AxRenewalCodeGenerator.Result(List.of(
                         new AxRenewalCodeGenerator.GeneratedFile("src/App.tsx", "modify", "a", "b")))));
         when(implementations.transitionIfStatus(
@@ -236,7 +236,7 @@ class AxRenewalImplementationRunnerTest {
             AxRenewalImplementationRepository implementations, List<Object> published, boolean generates) {
         AxRenewalCodeGenerator generator = mock(AxRenewalCodeGenerator.class);
         when(implementations.markStagingIfGenerating(any(), any())).thenReturn(true);
-        when(generator.generate(any(), any(), any(), any(), any()))
+        when(generator.generate(any(), any(), any(), any(), any(), any()))
                 .thenReturn(generates
                         ? Optional.of(new AxRenewalCodeGenerator.Result(List.of(
                                 new AxRenewalCodeGenerator.GeneratedFile("src/App.tsx", "modify", "a", "b"))))
@@ -294,6 +294,47 @@ class AxRenewalImplementationRunnerTest {
 
         assertThat(published).isEmpty();
         verify(implementations, never()).transitionIfStatus(any(), any(), any());
+    }
+
+    // --- Live progress (ADR-082): tracked while generating, gone after ------
+
+    @Test
+    void a_run_s_progress_is_readable_while_it_generates_and_gone_once_it_has_an_outcome() {
+        AxRenewalCodeGenerator generator = mock(AxRenewalCodeGenerator.class);
+        AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
+        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(generator, implementations, event -> {});
+        UUID runId = UUID.randomUUID();
+        when(implementations.markStagingIfGenerating(eq(runId), any())).thenReturn(true);
+        List<Optional<AxRenewalGenerationProgress.Snapshot>> seenMidRun = new java.util.ArrayList<>();
+        when(generator.generate(any(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+            AxRenewalGenerationProgress.Listener progress = invocation.getArgument(5);
+            progress.step(AxRenewalGenerationProgress.STEP_WORKING);
+            progress.activities(List.of(new AxRenewalGenerationProgress.Activity(
+                    Instant.EPOCH, "edit", "Editing src/App.tsx", "src/App.tsx")));
+            seenMidRun.add(runner.progress(runId));
+            return Optional.empty();
+        });
+
+        runner.runGeneration(runId, AxRenewalImplementationRun.RUN_KIND_PLAN, "a confirmed plan", "/tmp/legacy-source");
+
+        assertThat(seenMidRun).singleElement().satisfies(snapshot -> assertThat(snapshot).hasValueSatisfying(s -> {
+            assertThat(s.step()).isEqualTo(AxRenewalGenerationProgress.STEP_WORKING);
+            assertThat(s.filesChanged()).isEqualTo(1);
+        }));
+        assertThat(runner.progress(runId)).isEmpty();
+    }
+
+    @Test
+    void a_run_closed_before_it_starts_leaves_no_progress_behind() {
+        AxRenewalImplementationRepository implementations = mock(AxRenewalImplementationRepository.class);
+        AxRenewalImplementationRunner runner = new AxRenewalImplementationRunner(
+                mock(AxRenewalCodeGenerator.class), implementations, event -> {});
+        UUID runId = UUID.randomUUID();
+        when(implementations.markStagingIfGenerating(eq(runId), any())).thenReturn(false);
+
+        runner.runGeneration(runId, AxRenewalImplementationRun.RUN_KIND_PLAN, "a confirmed plan", "/tmp/legacy-source");
+
+        assertThat(runner.progress(runId)).isEmpty();
     }
 
     // --- deleteStagingCopy: never deletes what is not its own -------------

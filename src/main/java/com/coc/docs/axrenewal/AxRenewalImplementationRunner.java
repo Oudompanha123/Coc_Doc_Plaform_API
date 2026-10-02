@@ -73,6 +73,8 @@ public class AxRenewalImplementationRunner {
     private final Map<UUID, Process> runningProcesses = new ConcurrentHashMap<>();
     /** Runs {@link #cancel} was asked to stop — read once by {@link #runGeneration}'s own failure branch to report "cancelled", not a generic failure, then cleared. */
     private final Set<UUID> cancelledRuns = ConcurrentHashMap.newKeySet();
+    /** What each run this backend is generating is doing right now (ADR-082) — held only while it runs. */
+    private final AxRenewalGenerationProgress progress = new AxRenewalGenerationProgress();
 
     public AxRenewalImplementationRunner(
             AxRenewalCodeGenerator generator,
@@ -100,6 +102,26 @@ public class AxRenewalImplementationRunner {
      */
     @Async
     public void runGeneration(UUID runId, String runKind, String instruction, String sourcePath) {
+        // Tracked for exactly as long as this run is being generated here,
+        // whatever its outcome (ADR-082).
+        progress.begin(runId);
+        try {
+            generate(runId, runKind, instruction, sourcePath);
+        } finally {
+            progress.end(runId);
+        }
+    }
+
+    /**
+     * What {@code runId} is doing right now, if this backend is generating
+     * it (ADR-082) — empty once it has an outcome, or when another backend
+     * sharing the database is the one running it.
+     */
+    public Optional<AxRenewalGenerationProgress.Snapshot> progress(UUID runId) {
+        return progress.snapshot(runId);
+    }
+
+    private void generate(UUID runId, String runKind, String instruction, String sourcePath) {
         Path staging;
         try {
             staging = Files.createTempDirectory(STAGING_PREFIX);
@@ -119,7 +141,12 @@ public class AxRenewalImplementationRunner {
         Optional<AxRenewalCodeGenerator.Result> result;
         try {
             result = generator.generate(
-                    runKind, instruction, staging, process -> runningProcesses.put(runId, process), sourcePath);
+                    runKind,
+                    instruction,
+                    staging,
+                    process -> runningProcesses.put(runId, process),
+                    sourcePath,
+                    progress.listenerFor(runId));
         } catch (RuntimeException e) {
             log.warn("generation run {} failed unexpectedly", runId, e);
             deleteQuietly(staging);

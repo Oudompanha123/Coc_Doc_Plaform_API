@@ -48,6 +48,7 @@ class NotificationTypeTest {
         assertThat(NotificationType.AX_RENEWAL_MEMBER_ADDED.deepLink(ORIGIN, "x")).contains("project=x");
         assertThat(NotificationType.AX_RENEWAL_RUN_READY.deepLink(ORIGIN, "x")).contains("project=x");
         assertThat(NotificationType.AX_RENEWAL_COMMENT_ADDED.deepLink(ORIGIN, "x")).contains("project=x");
+        assertThat(NotificationType.AX_RENEWAL_RUN_REVIEWED.deepLink(ORIGIN, "x")).contains("project=x");
     }
 
     @Test
@@ -86,5 +87,18 @@ class NotificationTypeTest {
         assertThat(NotificationType.AX_RENEWAL_COMMENT_ADDED.body())
                 .isEqualTo("Someone commented on an AX Renewal project");
         assertThat(NotificationType.AX_RENEWAL_COMMENT_ADDED.key()).isEqualTo("ax-renewal.comment-added");
+    }
+
+    @Test
+    @DisplayName("a run-reviewed notification opens that project; its sentences name neither it nor the reviewer (ADR-081)")
+    void runReviewedOpensTheProjectAndSaysNothingIdentifying() {
+        assertThat(NotificationType.AX_RENEWAL_RUN_REVIEWED.deepLink(ORIGIN, "p1"))
+                .isEqualTo("https://docs.example.com/ax-renewal?project=p1");
+        assertThat(NotificationType.AX_RENEWAL_RUN_REVIEWED.key()).isEqualTo("ax-renewal.run-reviewed");
+        assertThat(NotificationType.AX_RENEWAL_RUN_REVIEWED.body())
+                .isEqualTo("Your AX Renewal implementation run was reviewed");
+        assertThat(NotificationType.RUN_APPROVED_BODY)
+                .isEqualTo("Your AX Renewal implementation run was approved and applied");
+        assertThat(NotificationType.RUN_REJECTED_BODY).isEqualTo("Your AX Renewal implementation run was rejected");
     }
 }

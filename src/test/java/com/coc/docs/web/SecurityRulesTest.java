@@ -1618,6 +1618,31 @@ class SecurityRulesTest {
                     .andExpect(status().isUnauthorized());
         }
 
+        // --- Live generation progress (ADR-082): a plain read, at the GET
+        // floor; membership is the service's check.
+
+        @ParameterizedTest
+        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER", "REVIEWER", "LEAD", "ADMIN"})
+        void generation_progress_is_a_plain_read_admitted_at_the_user_floor(AppRole role) throws Exception {
+            org.mockito.Mockito.when(axRenewalService.implementationProgress(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(java.util.Optional.empty());
+
+            mvc.perform(get("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/"
+                                    + UUID.randomUUID() + "/progress")
+                            .with(as(role)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void generation_progress_refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(get("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/"
+                            + UUID.randomUUID() + "/progress"))
+                    .andExpect(status().isUnauthorized());
+        }
+
         @Test
         void a_local_run_s_status_is_a_plain_read_admitted_at_the_user_floor() throws Exception {
             org.mockito.Mockito.when(axRenewalService.runLocallyStatus(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))

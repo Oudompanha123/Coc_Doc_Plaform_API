@@ -1710,6 +1710,41 @@ public final class ApiDtos {
         }
     }
 
+    /**
+     * A generating run's live progress (ADR-082). {@code available} false
+     * means this backend is not generating it — every other field is then
+     * empty, never a stand-in value.
+     */
+    public record AxRenewalGenerationProgressResponse(
+            boolean available,
+            String step,
+            Instant stepStartedAt,
+            int filesRead,
+            int filesChanged,
+            int actions,
+            List<Activity> activity,
+            boolean earlierActivityDropped) {
+
+        public record Activity(Instant at, String kind, String text, String path) {}
+
+        public static AxRenewalGenerationProgressResponse of(
+                java.util.Optional<com.coc.docs.axrenewal.AxRenewalGenerationProgress.Snapshot> snapshot) {
+            return snapshot
+                    .map(s -> new AxRenewalGenerationProgressResponse(
+                            true,
+                            s.step(),
+                            s.stepStartedAt(),
+                            s.filesRead(),
+                            s.filesChanged(),
+                            s.actions(),
+                            s.activity().stream()
+                                    .map(a -> new Activity(a.at(), a.kind(), a.text(), a.path()))
+                                    .toList(),
+                            s.earlierActivityDropped()))
+                    .orElseGet(() -> new AxRenewalGenerationProgressResponse(false, null, null, 0, 0, 0, List.of(), false));
+        }
+    }
+
     public record AxRenewalImplementationRunResponse(
             UUID id,
             String status,

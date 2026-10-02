@@ -279,6 +279,17 @@ public class AxRenewalController {
                 .toList();
     }
 
+    /**
+     * What a {@code generating} run is doing right now (ADR-082) — polled
+     * by the Implementation tab while it generates. {@code available} is
+     * false when this backend is not the one running it.
+     */
+    @GetMapping("/projects/{projectId}/implementation/{runId}/progress")
+    ApiDtos.AxRenewalGenerationProgressResponse implementationProgress(
+            @PathVariable UUID projectId, @PathVariable UUID runId, @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.AxRenewalGenerationProgressResponse.of(projects.implementationProgress(projectId, runId, actor));
+    }
+
     /** The files a Generate run actually found different, once it reaches {@code awaiting_review} (ADR-044). */
     @GetMapping("/projects/{projectId}/implementation/{runId}/changes")
     List<ApiDtos.AxRenewalGeneratedChangeResponse> generatedChanges(

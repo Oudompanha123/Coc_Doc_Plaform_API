@@ -2,7 +2,9 @@ package com.coc.docs.axrenewal;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
@@ -13,6 +15,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -134,13 +137,17 @@ public class AxRenewalCodeGenerator {
      *     RUN_KIND_ERROR_FIX}) or a person's own free-text UI description
      *     ({@code RUN_KIND_UI_CHANGE}) — still the confirmed Plan's own text
      *     for {@code RUN_KIND_PLAN}.
+     * @param progress told each step as it begins and each thing the model
+     *     reports doing as it happens (ADR-082). Nothing it does can fail the
+     *     generation: a listener that throws costs that one update.
      */
     public Optional<Result> generate(
             String runKind,
             String instruction,
             Path stagingDir,
             Consumer<Process> onProcessStarted,
-            String sourcePath) {
+            String sourcePath,
+            AxRenewalGenerationProgress.Listener progress) {
         if (!canGenerate()) {
             return Optional.empty();
         }
@@ -155,6 +162,7 @@ public class AxRenewalCodeGenerator {
         }
         Path source = Path.of(sourcePath);
 
+        report(() -> progress.step(AxRenewalGenerationProgress.STEP_PREPARING));
         try {
             copyTree(source, stagingDir);
         } catch (IOException e) {
@@ -165,8 +173,12 @@ public class AxRenewalCodeGenerator {
         List<String> command = List.of(
                 properties.claudeCliPath(),
                 "--print",
+                // One JSON event per line as the model works, not one envelope
+                // at the end — what the live progress view reads (ADR-082).
+                // --verbose is what --print requires alongside stream-json.
                 "--output-format",
-                "json",
+                "stream-json",
+                "--verbose",
                 "--add-dir",
                 stagingDir.toString(),
                 "--permission-mode",
@@ -179,14 +191,26 @@ public class AxRenewalCodeGenerator {
         try {
             ProcessBuilder builder = new ProcessBuilder(command);
             builder.directory(stagingDir.toFile());
-            builder.redirectErrorStream(false);
+            // Nothing reads stderr, and --verbose can write enough there to
+            // fill the pipe and stall the CLI mid-run. The stream on stdout is
+            // what is read (ADR-082).
+            builder.redirectError(ProcessBuilder.Redirect.DISCARD);
             Process process = builder.start();
             onProcessStarted.accept(process);
+            report(() -> progress.step(AxRenewalGenerationProgress.STEP_WORKING));
 
             try (OutputStream stdin = process.getOutputStream()) {
                 stdin.write(prompt(runKind, instruction).getBytes(StandardCharsets.UTF_8));
             }
-            String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            // Read as it arrives, until the process closes its output (it
+            // exits, or a cancel kills it).
+            try (BufferedReader out =
+                    new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = out.readLine()) != null) {
+                    onStreamLine(line, stagingDir, progress);
+                }
+            }
 
             if (!process.waitFor(TIMEOUT.toMinutes(), TimeUnit.MINUTES)) {
                 process.destroyForcibly();
@@ -197,7 +221,6 @@ public class AxRenewalCodeGenerator {
                 log.warn("local Claude generation exited {}", process.exitValue());
                 return Optional.empty();
             }
-            logResult(stdout);
         } catch (IOException e) {
             log.warn("could not start {}: {}", properties.claudeCliPath(), e.getMessage());
             return Optional.empty();
@@ -206,6 +229,7 @@ public class AxRenewalCodeGenerator {
             return Optional.empty();
         }
 
+        report(() -> progress.step(AxRenewalGenerationProgress.STEP_COMPARING));
         try {
             List<GeneratedFile> files = diffAgainstSource(source, stagingDir);
             return Optional.of(new Result(files));
@@ -215,13 +239,38 @@ public class AxRenewalCodeGenerator {
         }
     }
 
-    /** Logs the CLI's own summary for whoever debugs a run later — never parsed as structured data, since generation's real answer is the files themselves. */
-    private void logResult(String stdout) {
+    /**
+     * One line of the CLI's stream: what the model did, for the live view
+     * (ADR-082), and its closing summary, logged for whoever debugs a run
+     * later. Never a source of truth — generation's real answer is the files
+     * themselves. A line that is not JSON is skipped, not fatal.
+     */
+    private void onStreamLine(String line, Path stagingDir, AxRenewalGenerationProgress.Listener progress) {
+        if (line.isBlank()) {
+            return;
+        }
+        JsonNode event;
         try {
-            JsonNode envelope = json.readTree(stdout);
-            log.info("local Claude generation finished: {}", envelope.path("result").asText(""));
+            event = json.readTree(line);
         } catch (IOException e) {
-            log.warn("local Claude generation produced output that is not the JSON envelope it was asked for");
+            return;
+        }
+        if ("result".equals(event.path("type").asText(""))) {
+            log.info("local Claude generation finished: {}", event.path("result").asText(""));
+        }
+        List<AxRenewalGenerationProgress.Activity> activities =
+                AxRenewalStreamEvents.parse(event, stagingDir, Instant.now());
+        if (!activities.isEmpty()) {
+            report(() -> progress.activities(activities));
+        }
+    }
+
+    /** Progress is a view of the work, never part of it: a failing listener costs that one update. */
+    private static void report(Runnable update) {
+        try {
+            update.run();
+        } catch (RuntimeException e) {
+            log.debug("a generation progress update failed: {}", e.getMessage());
         }
     }
 

@@ -6,7 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -51,8 +54,121 @@ class AxRenewalCodeGeneratorTest {
                         "some plan",
                         tmp.resolve("staging"),
                         process -> {},
-                        source.toString()))
+                        source.toString(),
+                        AxRenewalGenerationProgress.Listener.NONE))
                 .isEmpty();
+    }
+
+    /**
+     * A stand-in CLI: drains the prompt from stdin, prints a few stream-json
+     * events (and one line that isn't JSON), and changes one file in its
+     * working directory, the staging copy — the shape of a real run (ADR-082).
+     */
+    private static Path fakeStreamingCli(Path dir) throws IOException {
+        String[] events = {
+            "{\"type\":\"system\",\"subtype\":\"init\"}",
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{\"file_path\":\"src/App.tsx\"}}]}}",
+            "not json at all",
+            "{\"type\":\"result\",\"subtype\":\"success\",\"num_turns\":3,\"result\":\"done\"}",
+        };
+        boolean windows = System.getProperty("os.name", "").toLowerCase().contains("win");
+        StringBuilder script = new StringBuilder();
+        if (windows) {
+            script.append("@echo off\r\nmore > nul\r\n");
+            for (int i = 0; i < 3; i++) {
+                script.append("echo ").append(events[i]).append("\r\n");
+            }
+            script.append("echo export const App = 2;> src\\App.tsx\r\n");
+            script.append("echo ").append(events[3]).append("\r\n");
+        } else {
+            script.append("#!/bin/sh\ncat > /dev/null\n");
+            for (int i = 0; i < 3; i++) {
+                script.append("echo '").append(events[i]).append("'\n");
+            }
+            script.append("echo 'export const App = 2;' > src/App.tsx\n");
+            script.append("echo '").append(events[3]).append("'\n");
+        }
+        Path cli = dir.resolve(windows ? "fake-claude.cmd" : "fake-claude.sh");
+        Files.writeString(cli, script.toString());
+        if (!windows) {
+            Files.setPosixFilePermissions(cli, Set.of(
+                    PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE));
+        }
+        return cli;
+    }
+
+    @Test
+    @DisplayName("reads the CLI's stream as it arrives: each step, and what the model reports doing (ADR-082)")
+    void reportsStepsAndActivityFromTheStream(@TempDir Path tmp) throws IOException {
+        Path source = tmp.resolve("source");
+        Files.createDirectories(source.resolve("src"));
+        Files.writeString(source.resolve("src/App.tsx"), "export const App = 1;\n");
+        var generator = new AxRenewalCodeGenerator(
+                new AxRenewalProperties(null, fakeStreamingCli(tmp).toString()), json);
+        List<String> steps = new ArrayList<>();
+        List<AxRenewalGenerationProgress.Activity> activity = new ArrayList<>();
+
+        var result = generator.generate(
+                AxRenewalImplementationRun.RUN_KIND_PLAN,
+                "some plan",
+                tmp.resolve("staging"),
+                process -> {},
+                source.toString(),
+                new AxRenewalGenerationProgress.Listener() {
+                    @Override
+                    public void step(String step) {
+                        steps.add(step);
+                    }
+
+                    @Override
+                    public void activities(List<AxRenewalGenerationProgress.Activity> activities) {
+                        activity.addAll(activities);
+                    }
+                });
+
+        assertThat(steps).containsExactly(
+                AxRenewalGenerationProgress.STEP_PREPARING,
+                AxRenewalGenerationProgress.STEP_WORKING,
+                AxRenewalGenerationProgress.STEP_COMPARING);
+        // The line that isn't JSON is skipped, not fatal.
+        assertThat(activity).extracting(AxRenewalGenerationProgress.Activity::text).containsExactly(
+                "Connected to the local model — starting work",
+                "Editing src/App.tsx",
+                "The model finished its work in 3 turns");
+        // And the generation's real answer is still the files.
+        assertThat(result).hasValueSatisfying(r -> assertThat(r.files())
+                .extracting(AxRenewalCodeGenerator.GeneratedFile::path)
+                .containsExactly("src/App.tsx"));
+    }
+
+    @Test
+    @DisplayName("a progress listener that throws costs that update, never the generation (ADR-082)")
+    void aFailingListenerDoesNotFailTheGeneration(@TempDir Path tmp) throws IOException {
+        Path source = tmp.resolve("source");
+        Files.createDirectories(source.resolve("src"));
+        Files.writeString(source.resolve("src/App.tsx"), "export const App = 1;\n");
+        var generator = new AxRenewalCodeGenerator(
+                new AxRenewalProperties(null, fakeStreamingCli(tmp).toString()), json);
+
+        var result = generator.generate(
+                AxRenewalImplementationRun.RUN_KIND_PLAN,
+                "some plan",
+                tmp.resolve("staging"),
+                process -> {},
+                source.toString(),
+                new AxRenewalGenerationProgress.Listener() {
+                    @Override
+                    public void step(String step) {
+                        throw new IllegalStateException("view broke");
+                    }
+
+                    @Override
+                    public void activities(List<AxRenewalGenerationProgress.Activity> activities) {
+                        throw new IllegalStateException("view broke");
+                    }
+                });
+
+        assertThat(result).isPresent();
     }
 
     @Test
@@ -68,7 +184,8 @@ class AxRenewalCodeGeneratorTest {
                         "some plan",
                         tmp.resolve("staging"),
                         process -> {},
-                        tmp.resolve("no-such-source").toString()))
+                        tmp.resolve("no-such-source").toString(),
+                        AxRenewalGenerationProgress.Listener.NONE))
                 .isEmpty();
     }
 
