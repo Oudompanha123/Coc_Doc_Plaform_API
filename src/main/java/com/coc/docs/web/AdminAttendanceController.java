@@ -1,10 +1,12 @@
 package com.coc.docs.web;
 
+import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.notify.HrmsNotificationService;
 import io.swagger.v3.oas.annotations.Operation;
 import java.time.LocalDate;
 import java.util.List;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -53,7 +55,14 @@ public class AdminAttendanceController {
                     + "Fetched from the mailbox on the request and never stored.")
     @GetMapping("/reports")
     List<ApiDtos.HrmsMailContentResponse> reportsForDate(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        return hrms.reportsForDate(date).stream().map(ApiDtos.HrmsMailContentResponse::of).toList();
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @AuthenticationPrincipal CurrentUser caller) {
+        // The caller, so a report read from their own inbox reaches this page
+        // (ADR-084). Without it the page shows only the shared mailbox's
+        // reports, which is nothing at all in a deployment that has no shared
+        // mailbox -- the configuration this feature is moving towards.
+        return hrms.reportsForDate(date, caller == null ? null : caller.id()).stream()
+                .map(ApiDtos.HrmsMailContentResponse::of)
+                .toList();
     }
 }

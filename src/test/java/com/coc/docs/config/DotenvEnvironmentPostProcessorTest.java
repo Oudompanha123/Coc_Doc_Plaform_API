@@ -53,9 +53,13 @@ class DotenvEnvironmentPostProcessorTest {
                 .bind("app.hrms", Bindable.of(HrmsMailProperties.class))
                 .orElseThrow(() -> new AssertionError("app.hrms bound nothing"));
 
-        // usable() is the exact thing that was false in production: enabled,
-        // and complete enough to open a connection with.
-        assertThat(bound.usable()).isTrue();
+        // sharedInboxUsable() is the exact thing that was false in production:
+        // enabled, and complete enough to open the shared connection with.
+        // (Named usable() until ADR-084 split "the feature is on" from "a
+        // shared mailbox is configured" -- this asserts the latter, which is
+        // what these four variables are.)
+        assertThat(bound.sharedInboxUsable()).isTrue();
+        assertThat(bound.active()).isTrue();
         assertThat(bound.sender()).isEqualTo("noreply-hrms@wecambodia.com");
         assertThat(bound.lookback().toDays()).isEqualTo(30);
         // Defaults still come from the record, not from the file.

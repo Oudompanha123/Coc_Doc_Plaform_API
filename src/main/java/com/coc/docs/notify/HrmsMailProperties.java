@@ -87,8 +87,27 @@ public record HrmsMailProperties(
      * failure modes differ: not enabled is a decision, enabled-but-incomplete
      * is a mistake worth a warning at startup.
      */
-    public boolean usable() {
-        return enabled && !username.isBlank() && !password.isBlank() && !sender.isBlank();
+    public boolean sharedInboxUsable() {
+        return active() && !username.isBlank() && !password.isBlank();
+    }
+
+    /**
+     * Whether the feature can do anything at all, with or without a shared
+     * mailbox (ADR-084).
+     *
+     * <p>Split from {@link #sharedInboxUsable} because the two stopped being
+     * the same question once accounts could supply their own credentials. A
+     * deployment that sets no {@code app.hrms.username} is no longer
+     * misconfigured — it is one where every mailbox read is somebody's own,
+     * which is the stronger arrangement and now the recommended one.
+     *
+     * <p>{@code sender} is required either way: it is the filter that keeps a
+     * poll to the HRMS mail and out of the rest of an inbox. Without it this
+     * would search every message in whatever mailbox it was given, so a blank
+     * sender disables the feature rather than widening it.
+     */
+    public boolean active() {
+        return enabled && !sender.isBlank();
     }
 
     /**

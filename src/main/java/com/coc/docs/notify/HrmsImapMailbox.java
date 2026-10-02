@@ -74,7 +74,7 @@ public class HrmsImapMailbox implements HrmsMailbox {
 
     @Override
     public List<Arrival> arrivalsSince(Instant since) {
-        if (!properties.usable()) {
+        if (!properties.sharedInboxUsable()) {
             // Not an error and not logged: the job checks this too and says so
             // once at startup rather than every thirty minutes.
             return List.of();
@@ -163,7 +163,7 @@ public class HrmsImapMailbox implements HrmsMailbox {
      */
     @Override
     public Optional<String> htmlBodyOf(String messageId) {
-        if (!properties.usable()) {
+        if (!properties.sharedInboxUsable()) {
             return Optional.empty();
         }
         return htmlBodyOf(messageId, configuredLogin());
@@ -304,16 +304,6 @@ public class HrmsImapMailbox implements HrmsMailbox {
     }
 
     /**
-     * Whether this login can be attempted at all.
-     *
-     * <p>{@code properties.usable()} still gates the host and the watched
-     * sender, which every login shares; this adds only the credential. A blank
-     * one is not logged: for a personal mailbox it means a stored credential
-     * failed to decrypt, which the repository has already reported, and
-     * repeating it every thirty minutes per account would bury the mailbox
-     * failures that matter.
-     */
-    /**
      * Names a mailbox in a log line without naming the person.
      *
      * <p>The configured one keeps {@code properties.describe()}, which already
@@ -336,8 +326,22 @@ public class HrmsImapMailbox implements HrmsMailbox {
         return "the mailbox of " + shown + (at < 0 ? "" : user.substring(at));
     }
 
+    /**
+     * Whether this login can be attempted at all.
+     *
+     * <p>{@code properties.active()} gates the feature and the watched sender,
+     * which every login shares; this adds only the credential. Deliberately
+     * <em>not</em> {@code sharedInboxUsable()} (ADR-084): a personal mailbox
+     * does not need a shared one to exist, and requiring it would mean nobody
+     * could read their own mail until somebody had configured a colleague's.
+     *
+     * <p>A blank credential is not logged. For a personal mailbox it means a
+     * stored credential failed to decrypt, which the repository has already
+     * reported, and repeating it every thirty minutes per account would bury
+     * the mailbox failures that matter.
+     */
     private boolean usable(Login login) {
-        return properties.usable()
+        return properties.active()
                 && login != null
                 && login.username() != null
                 && !login.username().isBlank()

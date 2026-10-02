@@ -521,7 +521,7 @@ class HrmsNotificationServiceTest {
         @Test
         @DisplayName("never opens a mailbox while disabled")
         void disabledFetchesNothing() {
-            when(repository.byReportDate(DAY)).thenReturn(List.of(notification(1, "<a@hrms>")));
+            when(repository.byReportDate(DAY, null)).thenReturn(List.of(notification(1, "<a@hrms>")));
 
             assertThat(serviceWith(properties(false, "someone@gmail.com", "hrms@example.com")).reportsForDate(DAY))
                     .isEmpty();
@@ -531,7 +531,7 @@ class HrmsNotificationServiceTest {
         @Test
         @DisplayName("fetches one body per arrival recorded for that date")
         void fetchesEveryArrival() {
-            when(repository.byReportDate(DAY)).thenReturn(List.of(notification(1, "<a@hrms>"), notification(2, "<b@hrms>")));
+            when(repository.byReportDate(DAY, null)).thenReturn(List.of(notification(1, "<a@hrms>"), notification(2, "<b@hrms>")));
             when(mailbox.htmlBodyOf("<a@hrms>")).thenReturn(Optional.of("<html><body>COOCON</body></html>"));
             when(mailbox.htmlBodyOf("<b@hrms>")).thenReturn(Optional.of("<html><body>Engineering</body></html>"));
 
@@ -547,7 +547,7 @@ class HrmsNotificationServiceTest {
         @Test
         @DisplayName("silently drops an arrival whose body is no longer available")
         void dropsUnavailableBody() {
-            when(repository.byReportDate(DAY)).thenReturn(List.of(notification(1, "<a@hrms>"), notification(2, "<b@hrms>")));
+            when(repository.byReportDate(DAY, null)).thenReturn(List.of(notification(1, "<a@hrms>"), notification(2, "<b@hrms>")));
             when(mailbox.htmlBodyOf("<a@hrms>")).thenReturn(Optional.of("<html><body>COOCON</body></html>"));
             when(mailbox.htmlBodyOf("<b@hrms>")).thenReturn(Optional.empty());
 
@@ -557,7 +557,7 @@ class HrmsNotificationServiceTest {
         @Test
         @DisplayName("no arrivals for the date is an empty list, not an error")
         void noArrivalsIsEmpty() {
-            when(repository.byReportDate(DAY)).thenReturn(List.of());
+            when(repository.byReportDate(DAY, null)).thenReturn(List.of());
 
             assertThat(serviceWith(configured()).reportsForDate(DAY)).isEmpty();
         }
@@ -699,6 +699,21 @@ class HrmsNotificationServiceTest {
             verify(repository).recent(5, null);
         }
 
+        /**
+         * The Attendance page. It asked for shared rows only until ADR-084,
+         * which was invisible while a shared mailbox was mandatory and an
+         * empty page the moment one stopped being configured.
+         */
+        @Test
+        @DisplayName("the attendance page asks for the dates this viewer may see")
+        void reportsForDatePassesViewer() {
+            when(repository.byReportDate(LocalDate.of(2026, 9, 8), VIEWER)).thenReturn(List.of());
+
+            serviceWith(configured()).reportsForDate(LocalDate.of(2026, 9, 8), VIEWER);
+
+            verify(repository).byReportDate(LocalDate.of(2026, 9, 8), VIEWER);
+        }
+
         @Test
         @DisplayName("opening one report asks for it as this viewer")
         void reportPassesViewer() {
@@ -707,6 +722,80 @@ class HrmsNotificationServiceTest {
             assertThat(serviceWith(configured()).report(42L, VIEWER)).isEmpty();
 
             verify(repository).findById(42L, VIEWER);
+        }
+    }
+
+    /**
+     * Running with no shared mailbox at all (ADR-084).
+     *
+     * <p>app.hrms.username and password are blank, which used to mean
+     * "misconfigured, do nothing" and now means "every inbox read is
+     * somebody's own". What these protect is that a blank shared credential
+     * must never be <em>used</em>: connecting with it would log a Google auth
+     * failure every thirty minutes and tell nobody anything.
+     */
+    @Nested
+    @DisplayName("no shared mailbox")
+    class NoSharedMailbox {
+
+        private static final java.util.UUID ANA = java.util.UUID.randomUUID();
+
+        /** enabled, a sender to filter on, and no shared credential. */
+        private HrmsMailProperties personalOnly() {
+            return properties(true, "", "noreply-hrms@wecambodia.com");
+        }
+
+        @Test
+        @DisplayName("is a valid configuration, not an incomplete one")
+        void isValidConfiguration() {
+            assertThat(personalOnly().active()).isTrue();
+            assertThat(personalOnly().sharedInboxUsable()).isFalse();
+        }
+
+        /**
+         * The regression this guards: poll() must not reach the shared
+         * arrivalsSince(Instant) with a blank username and password.
+         */
+        @Test
+        @DisplayName("never opens the shared mailbox with a blank credential")
+        void doesNotOpenSharedMailbox() {
+            when(accounts.activeMailTargets()).thenReturn(List.of());
+
+            assertThat(serviceWith(personalOnly()).poll()).isZero();
+
+            verify(mailbox, never()).arrivalsSince(any());
+        }
+
+        @Test
+        @DisplayName("still reads the inbox of an account that stored a credential")
+        void stillPollsPersonalInboxes() {
+            when(accounts.activeMailTargets())
+                    .thenReturn(List.of(new AccountRepository.MailTarget(ANA, "ana@example.com", null)));
+            when(mailCredentials.findFor(ANA))
+                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential("ana@gmail.com", "pw")));
+            when(mailbox.arrivalsSince(any(), any()))
+                    .thenReturn(List.of(arrival("<own@hrms>", "Attendance on 08-Sep-2026")));
+            when(repository.record(any(), any())).thenReturn(true);
+
+            assertThat(serviceWith(personalOnly()).poll()).isEqualTo(1);
+
+            verify(repository).record(any(), eq(ANA));
+            verify(mailbox, never()).arrivalsSince(any());
+        }
+
+        /**
+         * A blank sender is still fatal, and deliberately so: it is the filter
+         * that keeps the search to HRMS mail. Without it a poll would read
+         * every message in whatever mailbox it was handed.
+         */
+        @Test
+        @DisplayName("a blank sender switches the whole feature off")
+        void blankSenderIsStillFatal() {
+            HrmsMailProperties noSender = properties(true, "", "");
+
+            assertThat(noSender.active()).isFalse();
+            assertThat(serviceWith(noSender).poll()).isZero();
+            verifyNoInteractions(mailbox);
         }
     }
 }

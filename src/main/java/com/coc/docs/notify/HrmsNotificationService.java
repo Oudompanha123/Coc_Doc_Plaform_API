@@ -106,8 +106,19 @@ public class HrmsNotificationService {
      *     arrives once a day and this runs every half hour.
      */
     public int poll() {
-        if (!properties.usable()) {
+        if (!properties.active()) {
             return 0;
+        }
+
+        // The shared mailbox is now optional (ADR-084). A deployment that
+        // configures no app.hrms.username is not misconfigured: it is one
+        // where every inbox read belongs to the person whose inbox it is,
+        // which is the arrangement this feature is moving towards. Skipping
+        // the block entirely is what makes that possible -- arrivalsSince()
+        // would otherwise connect with a blank credential and log a failure
+        // every thirty minutes.
+        if (!properties.sharedInboxUsable()) {
+            return pollPersonalInboxes();
         }
 
         List<HrmsMailbox.Arrival> arrivals = mailbox.arrivalsSince(searchFrom());
@@ -358,11 +369,13 @@ public class HrmsNotificationService {
         // permanently unreadable. Needs the mailbox, hence the usable() check
         // here and not above -- a stored report is readable with HRMS
         // unconfigured, which it was not before.
-        if (!properties.usable()) {
+        if (!properties.active()) {
             return Optional.empty();
         }
-        Optional<HrmsMailContent> fetched = mailbox
-                .htmlBodyOf(notification.messageId())
+        // bodyFor picks the owner's own credential for an owned row and the
+        // shared one otherwise, so this path no longer needs a shared mailbox
+        // to exist (ADR-084).
+        Optional<HrmsMailContent> fetched = bodyFor(notification)
                 .map(html -> HrmsReportParser.parse(
                         notification.subject(), notification.reportDate(), html));
 
@@ -407,7 +420,24 @@ public class HrmsNotificationService {
      * one result.
      */
     public List<HrmsMailContent> reportsForDate(LocalDate date) {
-        return repository.byReportDate(date).stream().flatMap(n -> contentOf(n).stream()).toList();
+        return reportsForDate(date, null);
+    }
+
+    /**
+     * Every report for one date that this viewer is allowed: the shared
+     * mailbox's, plus the ones read from their own inbox (ADR-084).
+     *
+     * <p>Without the viewer this returns shared rows only, which was correct
+     * while the shared mailbox was mandatory and is a silent blank once it is
+     * not: an account whose reports all came from its own inbox would see an
+     * empty Attendance page and no reason why. The viewer is what makes
+     * "no shared mailbox" a working configuration rather than a working poll
+     * nobody can read the results of.
+     */
+    public List<HrmsMailContent> reportsForDate(LocalDate date, java.util.UUID viewer) {
+        return repository.byReportDate(date, viewer).stream()
+                .flatMap(n -> contentOf(n).stream())
+                .toList();
     }
 
     /**
@@ -422,12 +452,34 @@ public class HrmsNotificationService {
         if (stored.isPresent()) {
             return stored;
         }
-        if (!properties.usable()) {
-            return Optional.empty();
-        }
-        return mailbox
-                .htmlBodyOf(notification.messageId())
+        return bodyFor(notification)
                 .map(html -> HrmsReportParser.parse(notification.subject(), notification.reportDate(), html));
+    }
+
+    /**
+     * One report's body, from whichever mailbox actually holds it (ADR-084).
+     *
+     * <p>An owned row exists only in its owner's inbox, so it is fetched with
+     * that account's own credential. This is what lifts the limitation
+     * recorded in ADR-077 §4.2, where an owned report whose body failed to
+     * store at poll time could never be re-read: the shared mailbox was the
+     * only one the read path knew how to open, and it does not contain that
+     * message.
+     *
+     * <p>Empty rather than a fallback when the owner's credential is gone.
+     * Reading somebody's report with a different account's credential would
+     * either find nothing or find the wrong thing, and of those two the second
+     * is much worse.
+     */
+    private Optional<String> bodyFor(HrmsNotification notification) {
+        java.util.UUID owner = repository.ownerOf(notification.id()).orElse(null);
+        if (owner != null) {
+            return credentials
+                    .findFor(owner)
+                    .map(c -> new HrmsMailbox.Login(c.username(), c.appPassword()))
+                    .flatMap(login -> mailbox.htmlBodyOf(notification.messageId(), login));
+        }
+        return properties.sharedInboxUsable() ? mailbox.htmlBodyOf(notification.messageId()) : Optional.empty();
     }
 
     /**
