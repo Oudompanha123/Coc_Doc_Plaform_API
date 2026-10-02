@@ -483,6 +483,46 @@ public class HrmsNotificationService {
      * is much worse.
      */
     /**
+     * The newest report this account may see, scoped the way the screen would
+     * scope it (ADR-086).
+     *
+     * <p>Exists because the sign-in mailer has no {@code CurrentUser}: it runs
+     * off the request thread, after the transaction that created the session
+     * has committed. Rather than fabricate a principal, it passes the two
+     * facts the scoping rule actually uses — who is asking and whether they
+     * outrank a plain user — and this applies the same rule
+     * {@link #reportFor} applies.
+     *
+     * <p>Empty when there is no report, or none this viewer may open. Both are
+     * ordinary: a new account, a quiet weekend, or reports belonging to
+     * somebody else's mailbox.
+     *
+     * @param admin whether this account is {@code ADMIN} or above, and so sees
+     *     the whole report rather than only its own rows
+     * @return the newest report and its id, so the caller can record that it
+     *     was sent
+     */
+    public Optional<DatedReport> latestReportFor(
+            java.util.UUID accountId, String email, String hrmsName, boolean admin) {
+
+        for (HrmsNotification notification : recent(5, accountId)) {
+            Optional<HrmsMailContent> content = contentOf(notification);
+            if (content.isEmpty()) {
+                // Recorded but unreadable — no stored body and the mailbox
+                // cannot be reached. Try the one before it rather than giving
+                // up: an older readable report is worth more than nothing.
+                continue;
+            }
+            HrmsMailContent scoped = admin ? content.get() : content.get().onlyRowsFor(hrmsName, email);
+            return Optional.of(new DatedReport(notification.id(), scoped));
+        }
+        return Optional.empty();
+    }
+
+    /** A report with the id of the arrival it came from. */
+    public record DatedReport(long notificationId, HrmsMailContent content) {}
+
+    /**
      * How one account authenticates to its own mailbox (ADR-085).
      *
      * <p>The only place that decides between an App Password and an OAuth

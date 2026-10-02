@@ -115,6 +115,21 @@ public class AttendanceMailService {
         return sent;
     }
 
+    /**
+     * Mails one person one report, outside the poll (ADR-086).
+     *
+     * <p>The same send the poll uses, exposed for the sign-in mailer. Routed
+     * through the identical path on purpose: the choice of sender, the one
+     * address per message rule and the fallback all live in {@link #send}, and
+     * a second entry point that reimplemented any of them would drift from it.
+     *
+     * @return whether it was sent. False means the caller should not record it
+     *     as delivered.
+     */
+    public boolean sendReportTo(UUID accountId, String email, HrmsMailContent content) {
+        return send(accountId, email, content);
+    }
+
     private boolean send(UUID accountId, String email, HrmsMailContent mine) {
         ReportMail mail = build(mine);
         String subject = properties.brandName() + " — your attendance"
