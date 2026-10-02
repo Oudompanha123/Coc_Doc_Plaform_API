@@ -564,6 +564,131 @@ class HrmsNotificationServiceTest {
     }
 
     /**
+     * The caller's own row for one date, across whichever department actually
+     * names them (self-service, ADR-084). Backs {@code GET /api/v1/me/attendance}.
+     */
+    @Nested
+    @DisplayName("the caller's own attendance for a date")
+    class MyAttendance {
+
+        private static final LocalDate DAY = LocalDate.of(2026, 9, 7);
+
+        private static final String BEPLEPAY_HTML =
+                "<h3><span>BeplePay Department</span></h3><table>"
+                        + "<tr><th>Name</th><th>Yesterday Check-Out</th><th>Today Check-In</th></tr>"
+                        + "<tr><td>Nin Srey Nuth</td>"
+                        + "<td><span>17:00</span> -&gt; <span>17:44</span></td><td><div><span>Normal</span></div></td>"
+                        + "<td><span>08:00</span> -&gt; <span>08:01</span></td><td><div><span>Late Check-In</span></div></td></tr>"
+                        + "</table>";
+
+        private static final String COOCON_HTML =
+                "<h3><span>COOCON Department</span></h3><table>"
+                        + "<tr><th>Name</th><th>Yesterday Check-Out</th><th>Today Check-In</th></tr>"
+                        + "<tr><td>Ken Vantha</td>"
+                        + "<td><span>17:00</span> -&gt; <span>00:00</span></td><td><div><span>Missed Check-Out</span></div></td>"
+                        + "<td><span>08:00</span> -&gt; <span>00:00</span></td><td><div><span>Missed Check-In</span></div></td></tr>"
+                        + "</table>";
+
+        private static HrmsNotification notification(long id, String messageId) {
+            return new HrmsNotification(
+                    id, messageId, "Attendance on 07-Sep-2026", DAY, Instant.parse("2026-09-07T05:02:00Z"));
+        }
+
+        private com.coc.docs.auth.CurrentUser caller() {
+            return com.coc.docs.auth.TestCallers.user(com.coc.docs.account.AppRole.USER);
+        }
+
+        @Test
+        @DisplayName("returns the caller's own row from whichever department actually names them")
+        void findsTheirOwnRow() {
+            var user = caller();
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.of("Ken Vantha"));
+            when(repository.byReportDate(DAY, user.id()))
+                    .thenReturn(List.of(notification(1, "<a@hrms>"), notification(2, "<b@hrms>")));
+            when(mailbox.htmlBodyOf("<a@hrms>")).thenReturn(Optional.of(BEPLEPAY_HTML));
+            when(mailbox.htmlBodyOf("<b@hrms>")).thenReturn(Optional.of(COOCON_HTML));
+
+            var scoped = serviceWith(configured()).myAttendanceFor(DAY, user);
+
+            assertThat(scoped.content().department()).isEqualTo("COOCON Department");
+            assertThat(scoped.content().rows()).hasSize(1);
+            assertThat(scoped.content().rows().get(0).name()).isEqualTo("Ken Vantha");
+            assertThat(scoped.scopedToViewer()).isTrue();
+            assertThat(scoped.viewerLinked()).isTrue();
+        }
+
+        @Test
+        @DisplayName("matches by email when no hrms_name is set, same rule as a single report")
+        void matchesByEmailWhenNoExplicitName() {
+            var user = com.coc.docs.auth.TestCallers.user(com.coc.docs.account.AppRole.USER, "kenvantha@gmail.com");
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.empty());
+            when(repository.byReportDate(DAY, user.id())).thenReturn(List.of(notification(1, "<b@hrms>")));
+            when(mailbox.htmlBodyOf("<b@hrms>")).thenReturn(Optional.of(COOCON_HTML));
+
+            var scoped = serviceWith(configured()).myAttendanceFor(DAY, user);
+
+            assertThat(scoped.content().rows()).hasSize(1);
+            assertThat(scoped.viewerLinked()).isTrue();
+        }
+
+        @Test
+        @DisplayName("linked but absent from every report recorded for the date: empty rows, still linked")
+        void linkedButNothingRecordedToday() {
+            var user = caller();
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.of("Ken Vantha"));
+            when(repository.byReportDate(DAY, user.id())).thenReturn(List.of(notification(1, "<a@hrms>")));
+            when(mailbox.htmlBodyOf("<a@hrms>")).thenReturn(Optional.of(BEPLEPAY_HTML)); // no "Ken Vantha" row here
+
+            var scoped = serviceWith(configured()).myAttendanceFor(DAY, user);
+
+            assertThat(scoped.content().rows()).isEmpty();
+            assertThat(scoped.scopedToViewer()).isTrue();
+            assertThat(scoped.viewerLinked()).isTrue();
+        }
+
+        @Test
+        @DisplayName("no notification recorded for the date at all: empty rows, still linked if hrms_name is set")
+        void noNotificationForTheDate() {
+            var user = caller();
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.of("Ken Vantha"));
+            when(repository.byReportDate(DAY, user.id())).thenReturn(List.of());
+
+            var scoped = serviceWith(configured()).myAttendanceFor(DAY, user);
+
+            assertThat(scoped.content().rows()).isEmpty();
+            assertThat(scoped.content().reportDate()).isEqualTo(DAY);
+            assertThat(scoped.viewerLinked()).isTrue();
+        }
+
+        @Test
+        @DisplayName("an account with no hrms_name and an email matching nobody is reported as not linked")
+        void notLinkedAtAll() {
+            var user = com.coc.docs.auth.TestCallers.user(com.coc.docs.account.AppRole.USER, "nobody-here@gmail.com");
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.empty());
+            when(repository.byReportDate(DAY, user.id())).thenReturn(List.of(notification(1, "<a@hrms>")));
+            when(mailbox.htmlBodyOf("<a@hrms>")).thenReturn(Optional.of(BEPLEPAY_HTML));
+
+            var scoped = serviceWith(configured()).myAttendanceFor(DAY, user);
+
+            assertThat(scoped.content().rows()).isEmpty();
+            assertThat(scoped.viewerLinked()).isFalse();
+        }
+
+        @Test
+        @DisplayName("looks up only the notifications this caller may see (ADR-077), never the shared-mailbox-only overload")
+        void scopesTheLookupToTheCaller() {
+            var user = caller();
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.empty());
+            when(repository.byReportDate(DAY, user.id())).thenReturn(List.of());
+
+            serviceWith(configured()).myAttendanceFor(DAY, user);
+
+            verify(repository).byReportDate(DAY, user.id());
+            verify(repository, never()).byReportDate(DAY);
+        }
+    }
+
+    /**
      * Reading an account's own inbox (ADR-077).
      *
      * <p>The thing under test is not "does IMAP work" — it is <em>whose</em>

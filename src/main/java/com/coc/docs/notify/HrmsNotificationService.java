@@ -487,6 +487,60 @@ public class HrmsNotificationService {
     }
 
     /**
+     * The caller's own attendance row for one calendar date, from whichever
+     * department's report actually names them (self-service, ADR-084).
+     *
+     * <p>Unlike {@link #reportsForDate} — which is unscoped and exists only
+     * for the admin page already floored at {@code admin} — this always
+     * narrows to the caller, the same way {@link #reportFor} narrows one
+     * report by id. Every notification {@code caller} may see for the date
+     * (the shared mailbox's, plus their own inbox's, ADR-077 via {@link
+     * HrmsNotificationRepository#byReportDate(LocalDate, java.util.UUID)}) is
+     * resolved and matched against {@code account.hrms_name} or email; one
+     * employee belongs to one department, so the first report that actually
+     * names them is the answer.
+     *
+     * <p>Always returns, never refuses: a caller with nothing recorded for the
+     * date is not an error, and a caller with no link at all is not either —
+     * both are ordinary outcomes the screen must tell apart, via {@code
+     * viewerLinked} and an empty {@code rows()}, not via absence of a result.
+     * {@code null} is reported as not linked and not found, the shape a caller
+     * with no session (which cannot reach this route anyway, per {@code
+     * SecurityConfig}) would get if it somehow did.
+     *
+     * <p>Scope comes from the session and only from the session; there is no
+     * parameter on the route for a caller to widen (TM-025), same as {@link
+     * #reportFor}.
+     *
+     * <p>// req: FR-OPS-001, NFR-SEC-PII, ADR-084
+     */
+    public ScopedReport myAttendanceFor(LocalDate date, CurrentUser caller) {
+        String explicitName = caller == null ? null : accounts.hrmsNameOf(caller.id()).orElse(null);
+        String email = caller == null ? null : caller.email();
+
+        if (caller != null) {
+            for (HrmsNotification notification : repository.byReportDate(date, caller.id())) {
+                Optional<HrmsMailContent> content = contentOf(notification);
+                if (content.isEmpty()) {
+                    continue;
+                }
+                HrmsMailContent mine = content.get().onlyRowsFor(explicitName, email);
+                if (!mine.rows().isEmpty()) {
+                    return new ScopedReport(mine, true, true);
+                }
+            }
+        }
+
+        // Nothing recorded for the date named this caller. Still honest about
+        // which of the two reasons that is -- an explicit hrms_name is taken
+        // as linked even though today's silence cannot re-confirm it from a
+        // row, the same reading reportFor already gives that field.
+        boolean linked = explicitName != null && !explicitName.isBlank();
+        HrmsMailContent empty = new HrmsMailContent(null, date, null, List.of(), List.of(), null);
+        return new ScopedReport(empty, true, linked);
+    }
+
+    /**
      * A report plus the two facts the screen needs to describe it honestly.
      *
      * <p>Both flags exist because zero rows has three different causes and they

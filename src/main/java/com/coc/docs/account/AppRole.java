@@ -12,34 +12,28 @@ import java.util.Optional;
  * rather than as a set of role names repeated at each call site
  * (FR-AUTH-005).
  *
- * <p>{@code DEVELOPER}, {@code REVIEWER} and {@code LEAD} (ADR-039) sit
+ * <p>{@code DEVELOPER}, {@code REVIEWER} and {@code LEAD} (ADR-040) sit
  * strictly between {@code USER} and {@code ADMIN} — real, assignable roles.
- * {@code DEVELOPER} retires the old rank-independent {@code developer}
- * capability (ADR-037/038, revised by ADR-039): every account that held that
- * capability now holds this role instead (migrated once, {@code V31}).
+ * {@code DEVELOPER} retired the old rank-independent {@code developer}
+ * capability (migrated once, {@code V31}).
  *
- * <p>{@code DEVELOPER} is the one role here checked by <b>exact membership</b>
- * ({@link #exactAuthority()}), not rank — {@code SecurityConfig}'s AX Renewal
- * confirm/reopen/start-implementation gate must keep admitting a plain
- * account that specifically holds {@code DEVELOPER} while still refusing an
- * {@code ADMIN} (or {@code LEAD}/{@code REVIEWER}) who does not additionally
- * hold it, exactly as the retired capability did. {@link #isAtLeast} cannot
- * express that — an {@code ADMIN} is always "at least developer" by rank —
- * so that one route deliberately does not use {@link #authority()}.
- *
- * <p>{@code REVIEWER} and {@code LEAD} carry no {@code role_permission} grant
- * beyond {@code content.read} yet, and every {@code /api/v1/admin/**} route
- * still floors at {@code ADMIN} (unchanged) — so today they exist as real,
- * orderable roles without yet unlocking any action a plain {@code USER}
- * could not already do. What (if anything) beyond that they should unlock is
- * left for a future decision once a concrete feature needs it, the same
- * deferral ADR-037 already made once for capability-to-permission mapping.
+ * <p><b>None of the three unlock anything in the admin app</b> (ADR-084,
+ * superseding ADR-040 §confirm-floor, ADR-068 and ADR-071): a PM decision on
+ * 2026-09-29 retired Developer's AX Renewal confirm/reopen/start-implementation
+ * carve-out and Reviewer/Lead's Overview/Settings/AX-Renewal-read-and-comment
+ * one. {@code SecurityConfig} now gates every admin-app route with {@link
+ * #ADMIN_APP_ROLE_NAMES} (an allow-list, not a rank floor — {@link #isAtLeast}
+ * cannot express "refuse everyone between {@code USER} and {@code ADMIN}",
+ * since that is precisely the band these three roles occupy). {@link
+ * #exactAuthority()} is kept as infrastructure ({@code
+ * SessionAuthenticationFilter} still grants it) even though no current route
+ * reads it, the same as any other capability the next feature might need.
  *
  * <p>A role is always resolved server-side from the {@code account} row on
  * every request. It is never read from a client header, cookie or JWT claim,
  * which is what closes TM-003 across the new frontend/backend boundary.
  *
- * <p>// req: FR-AUTH-005, FR-AUTH-006, ADR-011, ADR-012, ADR-039
+ * <p>// req: FR-AUTH-005, FR-AUTH-006, ADR-011, ADR-012, ADR-084
  */
 public enum AppRole {
     GUEST,
@@ -49,6 +43,21 @@ public enum AppRole {
     LEAD,
     ADMIN,
     SUPER_ADMIN;
+
+    /**
+     * The only roles that may use the admin app at all (2026-09-29 PM
+     * decision, ADR-084, superseding ADR-040/ADR-068/ADR-071's Developer/
+     * Reviewer/Lead carve-outs). An allow-list rather than a rank floor,
+     * because {@code isAtLeast} can no longer express this: {@code
+     * DEVELOPER}, {@code REVIEWER} and {@code LEAD} all sit between {@code
+     * USER} and {@code ADMIN} in rank, and every one of them is now meant to
+     * be refused, not merely out-ranked.
+     *
+     * <p>Spring Security's {@code hasAnyRole} wants bare names (no {@code
+     * ROLE_} prefix) — this is already in that form, so callers pass it
+     * straight through, e.g. {@code .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)}.
+     */
+    public static final String[] ADMIN_APP_ROLE_NAMES = {ADMIN.name(), SUPER_ADMIN.name()};
 
     /** The wire and database form: lower case. */
     public String wire() {
@@ -96,7 +105,8 @@ public enum AppRole {
      * {@code role.exact.developer} — true only for an account that literally
      * holds this role, regardless of rank. Use this instead of {@link
      * #authority()} for a check that must not be satisfied merely by
-     * out-ranking the role (see {@link #DEVELOPER}'s own note above).
+     * out-ranking the role (see this class's own Javadoc for why no current
+     * route needs that distinction).
      */
     public String exactAuthority() {
         return "role.exact." + wire();
