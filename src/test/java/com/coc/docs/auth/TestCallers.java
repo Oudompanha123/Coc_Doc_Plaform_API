@@ -53,9 +53,19 @@ public final class TestCallers {
      * above {@code DEVELOPER} must not automatically pass.
      */
     public static CurrentUser user(Set<AppRole> roles, boolean mustChangePassword, boolean hasPassword) {
+        return user(roles, roles.iterator().next().wire() + "@example.com", mustChangePassword, hasPassword);
+    }
+
+    /**
+     * As {@link #user(Set, boolean, boolean)}, with a specific email instead
+     * of the auto-generated one — for a test of the HRMS-row-by-email rule
+     * ({@code HrmsMailContent#onlyRowsFor}), where the email itself is what
+     * is under test, not the role.
+     */
+    public static CurrentUser user(Set<AppRole> roles, String email, boolean mustChangePassword, boolean hasPassword) {
         Account account = new Account(
                 UUID.randomUUID(),
-                roles.iterator().next().wire() + "@example.com",
+                email,
                 "Test " + roles,
                 EnumSet.copyOf(roles),
                 null,
@@ -68,6 +78,11 @@ public final class TestCallers {
                 mustChangePassword,
                 hasPassword);
         return new CurrentUser(account, com.coc.docs.account.TestPermissions.of(roles), new byte[] {1, 2, 3});
+    }
+
+    /** As {@link #user(AppRole)}, with a specific email instead of the auto-generated one. */
+    public static CurrentUser user(AppRole role, String email) {
+        return user(EnumSet.of(role), email, false, true);
     }
 
     /** As {@link #user(Set, boolean, boolean)}, active and with a password. */
