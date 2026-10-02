@@ -1,8 +1,8 @@
 package com.coc.docs.auth.dto;
 
+import com.coc.docs.auth.ValidEmail;
 import com.coc.docs.auth.StrongPassword;
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 
 /**
@@ -16,7 +16,7 @@ import jakarta.validation.constraints.NotBlank;
  * POST /api/v1/auth/register/verify}.
  */
 public record RegisterRequest(
-        @NotBlank @Email @Schema(description = "The applicant's email address.") String email,
+        @NotBlank @ValidEmail @Schema(description = "The applicant's email address.") String email,
         @NotBlank @Schema(description = "Display name shown immediately in the new account.") String displayName,
         @NotBlank
                 @StrongPassword

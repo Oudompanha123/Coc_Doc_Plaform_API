@@ -48,7 +48,7 @@ public class MailCredentialController {
      *     than letting the relay reject a wrong one
      */
     public record SaveRequest(
-            @NotBlank @Email String smtpUsername,
+            @NotBlank @com.coc.docs.auth.ValidEmail String smtpUsername,
             @NotBlank @Size(min = 16, max = 64) String appPassword) {}
 
     /**

@@ -1,6 +1,6 @@
 package com.coc.docs.auth.dto;
 
-import jakarta.validation.constraints.Email;
+import com.coc.docs.auth.ValidEmail;
 import jakarta.validation.constraints.NotBlank;
 
 /**
@@ -8,4 +8,4 @@ import jakarta.validation.constraints.NotBlank;
  * and nothing else. There is no {@code password} field here: this request
  * only starts the reset, it does not perform one (ADR-018).
  */
-public record ForgotPasswordRequest(@NotBlank @Email String email) {}
+public record ForgotPasswordRequest(@NotBlank @ValidEmail String email) {}

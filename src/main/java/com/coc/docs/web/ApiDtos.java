@@ -547,7 +547,7 @@ public final class ApiDtos {
     public record ApproveRequest(String role) {}
 
     public record CreateAccountRequest(
-            @NotBlank @Email String email, @NotBlank String role) {}
+            @NotBlank @com.coc.docs.auth.ValidEmail String email, @NotBlank String role) {}
 
     // -----------------------------------------------------------------------
     // Nav structure
@@ -1292,7 +1292,7 @@ public final class ApiDtos {
     }
 
     public record InviteClaudeUsageMemberRequest(
-            @NotBlank @Email String email, String displayName, String teamRole) {}
+            @NotBlank @com.coc.docs.auth.ValidEmail String email, String displayName, String teamRole) {}
 
     public record UpdateClaudeUsageMemberRoleRequest(@NotBlank String teamRole) {}
 
