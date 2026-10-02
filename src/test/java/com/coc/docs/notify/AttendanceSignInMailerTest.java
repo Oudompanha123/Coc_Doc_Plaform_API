@@ -21,14 +21,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Mailing the attendance report on sign-in (ADR-086).
+ * Mailing the attendance report on sign-in (ADR-089).
  *
  * <p>Most of these assert that a mail is <em>not</em> sent. That is the shape
  * of the risk: signing in is frequent, so the ways this goes wrong are all
  * "sent again" or "sent when there was nothing to say", and both teach people
  * to ignore the sender.
  *
- * <p>// req: FR-OPS-001, ADR-086
+ * <p>// req: FR-OPS-001, ADR-089
  */
 class AttendanceSignInMailerTest {
 

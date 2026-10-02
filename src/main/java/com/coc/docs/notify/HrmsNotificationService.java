@@ -484,7 +484,7 @@ public class HrmsNotificationService {
      */
     /**
      * The newest report this account may see, scoped the way the screen would
-     * scope it (ADR-086).
+     * scope it (ADR-089).
      *
      * <p>Exists because the sign-in mailer has no {@code CurrentUser}: it runs
      * off the request thread, after the transaction that created the session

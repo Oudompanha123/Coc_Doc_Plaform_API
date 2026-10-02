@@ -676,7 +676,7 @@ public class SessionService {
                 account.id(),
                 deviceKey,
                 newDevice);
-        // Every sign-in, unlike the new-device alert below (ADR-086). Same
+        // Every sign-in, unlike the new-device alert below (ADR-089). Same
         // after-commit, off-thread contract: nothing here may slow signing in
         // or fail it, and a rolled-back session must not have told anyone
         // anything.

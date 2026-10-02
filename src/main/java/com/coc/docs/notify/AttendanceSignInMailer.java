@@ -13,7 +13,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
- * Mails somebody their attendance report when they sign in (ADR-086).
+ * Mails somebody their attendance report when they sign in (ADR-089).
  *
  * <p><b>Why sign-in is the trigger.</b> The report has to reach a real inbox,
  * and the routes that did not work are instructive: the poll only mails on a
@@ -36,7 +36,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * session never produces mail. Every failure is swallowed — being unable to
  * send an attendance report is not a reason to fail a login.
  *
- * <p>// req: FR-OPS-001, NFR-SEC-PII, ADR-086
+ * <p>// req: FR-OPS-001, NFR-SEC-PII, ADR-089
  */
 @Component
 public class AttendanceSignInMailer {

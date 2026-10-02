@@ -4,7 +4,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Somebody signed in. Every time, not only from a new device (ADR-086).
+ * Somebody signed in. Every time, not only from a new device (ADR-089).
  *
  * <p>Distinct from {@link NewDeviceSignInEvent}, which exists to warn a person
  * that an unfamiliar device used their account and is therefore rare by
@@ -20,6 +20,6 @@ import java.util.UUID;
  * @param email their address, so a listener need not re-read the account
  * @param at when, from the session that was issued
  *
- * <p>// req: FR-AUTH-001, NFR-SEC-PII, ADR-086
+ * <p>// req: FR-AUTH-001, NFR-SEC-PII, ADR-089
  */
 public record SignInEvent(UUID accountId, String email, Instant at) {}

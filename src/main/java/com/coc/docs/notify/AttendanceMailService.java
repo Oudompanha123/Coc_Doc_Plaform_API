@@ -116,7 +116,7 @@ public class AttendanceMailService {
     }
 
     /**
-     * Mails one person one report, outside the poll (ADR-086).
+     * Mails one person one report, outside the poll (ADR-089).
      *
      * <p>The same send the poll uses, exposed for the sign-in mailer. Routed
      * through the identical path on purpose: the choice of sender, the one

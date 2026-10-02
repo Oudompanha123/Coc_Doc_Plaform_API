@@ -6,7 +6,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * Remembers which attendance report has already been mailed to whom (V63,
- * ADR-086).
+ * ADR-089).
  *
  * <p>One method does the whole job, and it does it as a write rather than a
  * read: {@link #claim} inserts and reports whether this caller was the one
@@ -15,7 +15,7 @@ import org.springframework.stereotype.Repository;
  * that window is widest exactly when it matters — somebody opening the app on
  * a phone and a laptop at the same time.
  *
- * <p>// req: FR-OPS-001, ADR-086
+ * <p>// req: FR-OPS-001, ADR-089
  */
 @Repository
 public class AttendanceReportSentRepository {
