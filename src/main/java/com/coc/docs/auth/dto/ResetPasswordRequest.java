@@ -1,8 +1,8 @@
 package com.coc.docs.auth.dto;
 
+import com.coc.docs.auth.StrongPassword;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
 
 /**
  * The token proves which account; nothing else in this request does — there
@@ -12,6 +12,6 @@ import jakarta.validation.constraints.Size;
 public record ResetPasswordRequest(
         @NotBlank @Schema(description = "The opaque token from the emailed reset link.") String token,
         @NotBlank
-                @Size(min = 8, max = 200, message = "Password must be at least 8 characters.")
+                @StrongPassword
                 @Schema(description = "Plaintext in transit only — hashed (bcrypt) before it ever reaches the database.")
                 String newPassword) {}

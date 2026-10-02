@@ -1,9 +1,9 @@
 package com.coc.docs.auth.dto;
 
+import com.coc.docs.auth.StrongPassword;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
 
 /**
  * Narrow, hand-declared per ADR-011 §2.5's mass-assignment defence — there is
@@ -19,6 +19,6 @@ public record RegisterRequest(
         @NotBlank @Email @Schema(description = "The applicant's email address.") String email,
         @NotBlank @Schema(description = "Display name shown immediately in the new account.") String displayName,
         @NotBlank
-                @Size(min = 8, max = 200, message = "Password must be at least 8 characters.")
+                @StrongPassword
                 @Schema(description = "Plaintext in transit only — hashed (bcrypt) before it ever reaches the database.")
                 String password) {}
