@@ -308,7 +308,12 @@ public class SecurityConfig {
                         // administrator could set their own, which is the opposite of
                         // what a self-service credential is for.
                         // // req: NFR-SEC-PII, NFR-SEC-CHANNEL, ADR-063
-                        .requestMatchers("/api/v1/me/mail-credential").hasRole(AppRole.USER.name())
+                        // "/**" and not the bare path: the OAuth exchange lives
+                        // at /mail-credential/google (ADR-085), and an exact
+                        // matcher would drop it through to anyRequest() and
+                        // super_admin -- so only an administrator could connect
+                        // their own Gmail, which is the opposite of self-service.
+                        .requestMatchers("/api/v1/me/mail-credential/**").hasRole(AppRole.USER.name())
 
                         // The personal "My Claude Usage" screen (ADR-052):
                         // every signed-in account's own read of its own

@@ -100,7 +100,7 @@ public class HrmsImapMailbox implements HrmsMailbox {
         Store store = null;
         Folder folder = null;
         try {
-            store = Session.getInstance(sessionProperties()).getStore("imaps");
+            store = Session.getInstance(sessionProperties(login)).getStore("imaps");
             store.connect(properties.host(), properties.port(), login.username(), login.password());
 
             folder = store.getFolder(properties.folder());
@@ -179,7 +179,7 @@ public class HrmsImapMailbox implements HrmsMailbox {
         Store store = null;
         Folder folder = null;
         try {
-            store = Session.getInstance(sessionProperties()).getStore("imaps");
+            store = Session.getInstance(sessionProperties(login)).getStore("imaps");
             store.connect(properties.host(), properties.port(), login.username(), login.password());
 
             folder = store.getFolder(properties.folder());
@@ -300,7 +300,7 @@ public class HrmsImapMailbox implements HrmsMailbox {
      * the one that drifts is the one nobody is watching.
      */
     private Login configuredLogin() {
-        return new Login(properties.username(), properties.password());
+        return Login.password(properties.username(), properties.password());
     }
 
     /**
@@ -349,7 +349,7 @@ public class HrmsImapMailbox implements HrmsMailbox {
                 && !login.password().isBlank();
     }
 
-    private Properties sessionProperties() {
+    private Properties sessionProperties(Login login) {
         Properties props = new Properties();
         props.put("mail.store.protocol", "imaps");
         props.put("mail.imaps.host", properties.host());
@@ -361,6 +361,13 @@ public class HrmsImapMailbox implements HrmsMailbox {
         props.put("mail.imaps.connectiontimeout", TIMEOUT_MS);
         props.put("mail.imaps.timeout", TIMEOUT_MS);
         props.put("mail.imaps.writetimeout", TIMEOUT_MS);
+        if (login != null && login.xoauth2()) {
+            // Gmail offers PLAIN alongside XOAUTH2, and a client that picks
+            // PLAIN sends the access token as a password -- which Google
+            // refuses with an error that reads like a bad credential rather
+            // than a wrong mechanism (ADR-085). Naming it removes the guess.
+            props.put("mail.imaps.auth.mechanisms", "XOAUTH2");
+        }
         return props;
     }
 

@@ -72,9 +72,12 @@ class HrmsNotificationServiceTest {
      */
     private final AccountMailCredentialRepository mailCredentials = mock(AccountMailCredentialRepository.class);
 
+    /** Unstubbed: App Password credentials never reach it (ADR-085). */
+    private final GoogleMailOAuthService oauth = mock(GoogleMailOAuthService.class);
+
     private HrmsNotificationService serviceWith(HrmsMailProperties props) {
         return new HrmsNotificationService(
-                mailbox, repository, props, accounts, contents, attendanceMail, mailCredentials);
+                mailbox, repository, props, accounts, contents, attendanceMail, mailCredentials, oauth);
     }
 
     private static HrmsMailbox.Arrival arrival(String id, String subject) {
@@ -606,7 +609,7 @@ class HrmsNotificationServiceTest {
             when(mailbox.arrivalsSince(any())).thenReturn(List.of());
             when(accounts.activeMailTargets()).thenReturn(List.of(target(ANA, "ana@example.com")));
             when(mailCredentials.findFor(ANA))
-                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential("ana@gmail.com", "pw")));
+                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential(ANA, "ana@gmail.com", "pw", null)));
             when(mailbox.arrivalsSince(any(), any()))
                     .thenReturn(List.of(arrival("<own@hrms>", "Attendance on 08-Sep-2026")));
             when(repository.record(any(), any())).thenReturn(true);
@@ -634,9 +637,9 @@ class HrmsNotificationServiceTest {
             when(accounts.activeMailTargets())
                     .thenReturn(List.of(target(ANA, "ana@example.com"), target(BOREY, "borey@example.com")));
             when(mailCredentials.findFor(ANA))
-                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential("ana@gmail.com", "pw")));
+                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential(ANA, "ana@gmail.com", "pw", null)));
             when(mailCredentials.findFor(BOREY))
-                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential("borey@gmail.com", "pw")));
+                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential(BOREY, "borey@gmail.com", "pw", null)));
 
             when(mailbox.arrivalsSince(any(), argThat(l -> l != null && l.username().startsWith("ana"))))
                     .thenThrow(new IllegalStateException("boom"));
@@ -772,7 +775,7 @@ class HrmsNotificationServiceTest {
             when(accounts.activeMailTargets())
                     .thenReturn(List.of(new AccountRepository.MailTarget(ANA, "ana@example.com", null)));
             when(mailCredentials.findFor(ANA))
-                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential("ana@gmail.com", "pw")));
+                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential(ANA, "ana@gmail.com", "pw", null)));
             when(mailbox.arrivalsSince(any(), any()))
                     .thenReturn(List.of(arrival("<own@hrms>", "Attendance on 08-Sep-2026")));
             when(repository.record(any(), any())).thenReturn(true);

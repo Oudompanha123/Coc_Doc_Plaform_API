@@ -99,6 +99,10 @@ class SecurityRulesTest {
     // filter chain admits, not what storing a credential does.
     @MockitoBean com.coc.docs.notify.AccountMailCredentialRepository accountMailCredentialRepository;
 
+    // MailCredentialController's second collaborator since ADR-085, behind
+    // POST /me/mail-credential/google.
+    @MockitoBean com.coc.docs.notify.GoogleMailOAuthService googleMailOAuthService;
+
     // AdminAuditController is in this slice too, same reasoning.
     @MockitoBean com.coc.docs.audit.AuditRepository auditRepository;
 
@@ -182,6 +186,7 @@ class SecurityRulesTest {
                     "http://localhost:3000",
                     false,
                     "",
+                    "test-client-secret",
                     new AppProperties.Storage("", "test", "us-east-1", "", ""));
         }
 

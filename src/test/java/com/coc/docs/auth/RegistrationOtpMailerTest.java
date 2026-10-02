@@ -52,6 +52,7 @@ class RegistrationOtpMailerTest {
                 "https://docs.example.com",
                 true,
                 "",
+                    "test-client-secret",
                 new AppProperties.Storage("", "", "", "", "")));
     }
 

@@ -53,7 +53,24 @@ public interface HrmsMailbox {
      * of one poll. Do not log one, store one, or put one in an exception
      * message.
      */
-    record Login(String username, String password) {}
+    record Login(String username, String password, boolean xoauth2) {
+
+        /** An App Password login (ADR-063). */
+        public static Login password(String username, String password) {
+            return new Login(username, password, false);
+        }
+
+        /**
+         * An OAuth login (ADR-085): {@code secret} is a short-lived access
+         * token, not a stored password. IMAP carries it in the same field as a
+         * password and distinguishes the two by the advertised mechanism, so
+         * the flag travels with the value rather than being inferred from it —
+         * an access token and an App Password are both just opaque strings.
+         */
+        public static Login oauth(String username, String accessToken) {
+            return new Login(username, accessToken, true);
+        }
+    }
 
     /**
      * Envelopes from the configured sender sent at or after {@code since},

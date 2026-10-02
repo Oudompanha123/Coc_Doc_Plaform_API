@@ -122,6 +122,7 @@ class AuthControllerTest {
                     "http://localhost:3000",
                     false,
                     "test-client-id",
+                    "test-client-secret",
                     new AppProperties.Storage("", "test", "us-east-1", "", ""));
         }
 

@@ -40,17 +40,52 @@ public class PersonalMailSenderFactory {
         return host != null && !host.isBlank();
     }
 
+    /**
+     * A sender authenticating as this credential's owner.
+     *
+     * <p>Returns empty for an OAuth credential whose access token could not be
+     * minted — a revoked or expired grant (ADR-085 §4.2). The caller falls
+     * back to the shared sender rather than dropping the mail, which is the
+     * same contract a stale App Password has.
+     */
+    public java.util.Optional<JavaMailSender> senderOrEmpty(
+            AccountMailCredentialRepository.Credential credential, GoogleMailOAuthService oauth) {
+        if (!credential.isOauth()) {
+            return java.util.Optional.of(senderFor(credential));
+        }
+        return oauth.accessTokenFor(credential.accountId(), credential.oauthRefreshToken())
+                .map(token -> build(credential.username(), token, true));
+    }
+
     public JavaMailSender senderFor(AccountMailCredentialRepository.Credential credential) {
+        return build(credential.username(), credential.appPassword(), false);
+    }
+
+    /**
+     * @param secret an App Password, or an OAuth access token when
+     *     {@code xoauth2} is set. Jakarta Mail carries both in the same slot:
+     *     with {@code mail.smtp.auth.mechanisms=XOAUTH2} the "password" is sent
+     *     as the bearer token instead of in a PLAIN exchange, so the only
+     *     difference between the two paths is which mechanism is advertised.
+     */
+    private JavaMailSender build(String username, String secret, boolean xoauth2) {
         JavaMailSenderImpl sender = new JavaMailSenderImpl();
         sender.setHost(host);
         sender.setPort(port);
-        sender.setUsername(credential.username());
-        sender.setPassword(credential.appPassword());
+        sender.setUsername(username);
+        sender.setPassword(secret);
         sender.setDefaultEncoding("UTF-8");
 
         Properties props = sender.getJavaMailProperties();
         props.put("mail.transport.protocol", "smtp");
         props.put("mail.smtp.auth", "true");
+        if (xoauth2) {
+            // Named explicitly rather than left to negotiation: Gmail offers
+            // PLAIN as well, and a client that picks it sends the access token
+            // as if it were a password, which Google refuses. The failure then
+            // reads as a bad credential rather than a wrong mechanism.
+            props.put("mail.smtp.auth.mechanisms", "XOAUTH2");
+        }
         // STARTTLS on 587, which is what Gmail expects and what the shared
         // configuration already uses. Explicit rather than inherited so that a
         // relay change cannot quietly downgrade this path alone.

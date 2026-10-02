@@ -25,7 +25,7 @@ class EmailLayoutTest {
     private static final String ORIGIN = "https://docs.example.com";
 
     private final EmailLayout layout = new EmailLayout(new AppProperties(
-            Duration.ofDays(1), ORIGIN, true, "", new AppProperties.Storage("", "", "", "", "")));
+            Duration.ofDays(1), ORIGIN, true, "", "", new AppProperties.Storage("", "", "", "", "")));
 
     @Test
     @DisplayName("the brand mark is the real logo, served from the configured frontend origin")

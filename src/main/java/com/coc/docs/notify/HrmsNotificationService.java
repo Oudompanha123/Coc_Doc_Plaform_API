@@ -82,6 +82,9 @@ public class HrmsNotificationService {
     /** Whose inboxes may be read, and with what (ADR-077). */
     private final AccountMailCredentialRepository credentials;
 
+    /** Mints the access token an OAuth credential authenticates with (ADR-085). */
+    private final GoogleMailOAuthService oauth;
+
     public HrmsNotificationService(
             HrmsMailbox mailbox,
             HrmsNotificationRepository repository,
@@ -89,8 +92,10 @@ public class HrmsNotificationService {
             AccountRepository accounts,
             HrmsReportContentRepository contents,
             AttendanceMailService attendanceMail,
-            AccountMailCredentialRepository credentials) {
+            AccountMailCredentialRepository credentials,
+            GoogleMailOAuthService oauth) {
         this.credentials = credentials;
+        this.oauth = oauth;
         this.mailbox = mailbox;
         this.repository = repository;
         this.properties = properties;
@@ -158,12 +163,18 @@ public class HrmsNotificationService {
             if (stored.isEmpty()) {
                 continue;
             }
-            HrmsMailbox.Login login =
-                    new HrmsMailbox.Login(stored.get().username(), stored.get().appPassword());
+            Optional<HrmsMailbox.Login> login = loginFor(stored.get());
+            if (login.isEmpty()) {
+                // An OAuth grant that will not mint an access token: revoked,
+                // expired, or the consent screen changed under it (ADR-085
+                // §4.2). Skipped rather than retried with something else --
+                // there is nothing else that would be theirs.
+                continue;
+            }
             try {
                 polled++;
-                for (HrmsMailbox.Arrival arrival : mailbox.arrivalsSince(searchFrom(target.accountId()), login)) {
-                    if (record(arrival, target.accountId(), login)) {
+                for (HrmsMailbox.Arrival arrival : mailbox.arrivalsSince(searchFrom(target.accountId()), login.get())) {
+                    if (record(arrival, target.accountId(), login.get())) {
                         recorded++;
                     }
                 }
@@ -471,12 +482,33 @@ public class HrmsNotificationService {
      * either find nothing or find the wrong thing, and of those two the second
      * is much worse.
      */
+    /**
+     * How one account authenticates to its own mailbox (ADR-085).
+     *
+     * <p>The only place that decides between an App Password and an OAuth
+     * access token, so adding a third kind later changes one method rather
+     * than every caller.
+     *
+     * <p>Empty for an OAuth grant Google will not honour — revoked, six months
+     * unused, or invalidated by a password change. Empty and not "try the App
+     * Password instead": a row holds one kind or the other (V62), so there is
+     * no second credential of theirs to fall back to, and falling back to
+     * somebody else's would be the serious mistake.
+     */
+    private Optional<HrmsMailbox.Login> loginFor(AccountMailCredentialRepository.Credential credential) {
+        if (!credential.isOauth()) {
+            return Optional.of(HrmsMailbox.Login.password(credential.username(), credential.appPassword()));
+        }
+        return oauth.accessTokenFor(credential.accountId(), credential.oauthRefreshToken())
+                .map(token -> HrmsMailbox.Login.oauth(credential.username(), token));
+    }
+
     private Optional<String> bodyFor(HrmsNotification notification) {
         java.util.UUID owner = repository.ownerOf(notification.id()).orElse(null);
         if (owner != null) {
             return credentials
                     .findFor(owner)
-                    .map(c -> new HrmsMailbox.Login(c.username(), c.appPassword()))
+                    .flatMap(this::loginFor)
                     .flatMap(login -> mailbox.htmlBodyOf(notification.messageId(), login));
         }
         return properties.sharedInboxUsable() ? mailbox.htmlBodyOf(notification.messageId()) : Optional.empty();

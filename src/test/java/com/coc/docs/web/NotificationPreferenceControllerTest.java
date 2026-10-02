@@ -69,6 +69,7 @@ class NotificationPreferenceControllerTest {
                     "http://localhost:3000",
                     false,
                     "",
+                    "test-client-secret",
                     new AppProperties.Storage("", "test", "us-east-1", "", ""));
         }
 
