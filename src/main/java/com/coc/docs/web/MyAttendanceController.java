@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * The landing page's own personal Attendance surface — one calendar date,
- * narrowed to the caller's own row only (ADR-084).
+ * narrowed to the caller's own row only (ADR-086).
  *
  * <p>Distinct from {@link AdminAttendanceController}'s {@code
  * /admin/attendance/reports}, which is the opposite shape on purpose (every
@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
  * per-caller scoping but keyed by a specific report id already named in the
  * caller's own activity feed, not by a date they pick freely. This route
  * exists so {@code user} and {@code developer} — blocked from the admin app
- * entirely as of ADR-084 — still have somewhere to check their own clock-in.
+ * entirely as of ADR-086 — still have somewhere to check their own clock-in.
  *
  * <p>Floored at {@code USER} in {@code SecurityConfig}, above the generic
  * {@code /api/v1/admin/**} rule, the same pattern {@code

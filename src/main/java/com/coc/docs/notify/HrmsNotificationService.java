@@ -572,7 +572,7 @@ public class HrmsNotificationService {
 
     /**
      * The caller's own attendance row for one calendar date, from whichever
-     * department's report actually names them (self-service, ADR-084).
+     * department's report actually names them (self-service, ADR-086).
      *
      * <p>Unlike {@link #reportsForDate} — which is unscoped and exists only
      * for the admin page already floored at {@code admin} — this always
@@ -596,7 +596,7 @@ public class HrmsNotificationService {
      * parameter on the route for a caller to widen (TM-025), same as {@link
      * #reportFor}.
      *
-     * <p>// req: FR-OPS-001, NFR-SEC-PII, ADR-084
+     * <p>// req: FR-OPS-001, NFR-SEC-PII, ADR-086
      */
     public ScopedReport myAttendanceFor(LocalDate date, CurrentUser caller) {
         String explicitName = caller == null ? null : accounts.hrmsNameOf(caller.id()).orElse(null);

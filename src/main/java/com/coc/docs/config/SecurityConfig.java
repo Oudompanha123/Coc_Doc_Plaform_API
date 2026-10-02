@@ -390,11 +390,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/tasks")
                         .hasRole(AppRole.USER.name())
 
-                        // --- AX Renewal (ADR-084, superseding ADR-040/ADR-068's --
+                        // --- AX Renewal (ADR-086, superseding ADR-040/ADR-068's --
                         // Developer/Reviewer/Lead carve-outs) -------------------
                         // Its own prefix, not under /api/v1/admin/** — not
                         // because anyone below admin reaches it (nobody does,
-                        // as of ADR-084), but so the generic admin floor below
+                        // as of ADR-086), but so the generic admin floor below
                         // is not the only line a reader has to find to know
                         // who this whole feature admits.
                         .requestMatchers(HttpMethod.GET, "/api/v1/ax-renewal/**")
@@ -457,7 +457,7 @@ public class SecurityConfig {
                         // (AppRole.exactAuthority()), deliberately not
                         // "admin-or-above" — an Admin who did not also hold
                         // Developer could draft a plan but not sign off on or
-                        // trigger it (ADR-040). ADR-084 retired that carve-out:
+                        // trigger it (ADR-040). ADR-086 retired that carve-out:
                         // every admin app route, this one included, now admits
                         // the same allow-list.
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/plan/*/confirm")
@@ -531,11 +531,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/claude-usage")
                         .hasRole(AppRole.USER.name())
 
-                        // --- My Attendance, read side (ADR-084) --------------
+                        // --- My Attendance, read side (ADR-086) --------------
                         // Its own prefix rather than /api/v1/admin/**, same
                         // reason as Claude Usage just above: `user` and
                         // `developer` are blocked from the admin app entirely
-                        // now (ADR-084), so this is the one place either can
+                        // now (ADR-086), so this is the one place either can
                         // still check their own clock-in.
                         //
                         // Not a hole in that floor. The response is scoped

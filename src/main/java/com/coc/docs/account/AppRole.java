@@ -17,7 +17,7 @@ import java.util.Optional;
  * {@code DEVELOPER} retired the old rank-independent {@code developer}
  * capability (migrated once, {@code V31}).
  *
- * <p><b>None of the three unlock anything in the admin app</b> (ADR-084,
+ * <p><b>None of the three unlock anything in the admin app</b> (ADR-086,
  * superseding ADR-040 §confirm-floor, ADR-068 and ADR-071): a PM decision on
  * 2026-09-29 retired Developer's AX Renewal confirm/reopen/start-implementation
  * carve-out and Reviewer/Lead's Overview/Settings/AX-Renewal-read-and-comment
@@ -33,7 +33,7 @@ import java.util.Optional;
  * every request. It is never read from a client header, cookie or JWT claim,
  * which is what closes TM-003 across the new frontend/backend boundary.
  *
- * <p>// req: FR-AUTH-005, FR-AUTH-006, ADR-011, ADR-012, ADR-084
+ * <p>// req: FR-AUTH-005, FR-AUTH-006, ADR-011, ADR-012, ADR-086
  */
 public enum AppRole {
     GUEST,
@@ -46,7 +46,7 @@ public enum AppRole {
 
     /**
      * The only roles that may use the admin app at all (2026-09-29 PM
-     * decision, ADR-084, superseding ADR-040/ADR-068/ADR-071's Developer/
+     * decision, ADR-086, superseding ADR-040/ADR-068/ADR-071's Developer/
      * Reviewer/Lead carve-outs). An allow-list rather than a rank floor,
      * because {@code isAtLeast} can no longer express this: {@code
      * DEVELOPER}, {@code REVIEWER} and {@code LEAD} all sit between {@code

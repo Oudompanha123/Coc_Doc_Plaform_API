@@ -568,7 +568,7 @@ class HrmsNotificationServiceTest {
 
     /**
      * The caller's own row for one date, across whichever department actually
-     * names them (self-service, ADR-084). Backs {@code GET /api/v1/me/attendance}.
+     * names them (self-service, ADR-086). Backs {@code GET /api/v1/me/attendance}.
      */
     @Nested
     @DisplayName("the caller's own attendance for a date")
