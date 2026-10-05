@@ -34,7 +34,9 @@ public class AxRenewalCommentRepository {
      *
      * <p>{@code authorName} is joined from {@code account.display_name} at
      * read time — not a stored column, so a later name change shows up here
-     * rather than being frozen at comment time.
+     * rather than being frozen at comment time. A left join: an author whose
+     * account was since deleted (V64, {@code author_id} null) keeps their
+     * comment in the thread, shown as "Deleted account" (ADR-091).
      *
      * <p>Deleted rows are filtered out here, once, rather than returned with
      * a flag every caller has to remember to check (ADR-045). Nothing outside
@@ -43,9 +45,10 @@ public class AxRenewalCommentRepository {
      */
     public List<AxRenewalComment> listForProject(UUID projectId) {
         return jdbc.sql("""
-                        select c.id, c.project_id, c.author_id, a.display_name as author_name, c.body, c.created_at
+                        select c.id, c.project_id, c.author_id, coalesce(a.display_name, 'Deleted account') as author_name,
+                               c.body, c.created_at
                         from ax_renewal_comment c
-                        join account a on a.id = c.author_id
+                        left join account a on a.id = c.author_id
                         where c.project_id = ? and c.deleted_at is null
                         order by c.created_at
                         """)
@@ -57,9 +60,10 @@ public class AxRenewalCommentRepository {
     /** One live comment, for the authorship check a delete has to make first. */
     public Optional<AxRenewalComment> findLive(UUID projectId, UUID commentId) {
         return jdbc.sql("""
-                        select c.id, c.project_id, c.author_id, a.display_name as author_name, c.body, c.created_at
+                        select c.id, c.project_id, c.author_id, coalesce(a.display_name, 'Deleted account') as author_name,
+                               c.body, c.created_at
                         from ax_renewal_comment c
-                        join account a on a.id = c.author_id
+                        left join account a on a.id = c.author_id
                         where c.id = ? and c.project_id = ? and c.deleted_at is null
                         """)
                 .params(commentId, projectId)

@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.EnumSet;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -381,6 +382,12 @@ public class AccountService {
      * all by cascade. A deleted account cannot finish a request it had already
      * started.
      *
+     * <p>Work they did elsewhere stays, with their name taken off it: every
+     * other "who did this" column on {@code account} is {@code ON DELETE SET
+     * NULL} (V10, V64 — ADR-091). Should a later table forget to say, the
+     * database's refusal comes back as a 409 that names deactivation as the
+     * way out — not as the bare "an unexpected error occurred" it used to.
+     *
      * <p>Audited <b>before</b> the delete, and the entry carries the subject's
      * email and roles inline. Afterwards there is no row to join to, so an
      * entry naming only a UUID would be a record of nothing.
@@ -422,7 +429,14 @@ public class AccountService {
                         .put("status", account.status().wire())
                         .put("roles", account.roles().stream().map(AppRole::wire).sorted().toList().toString()));
 
-        accounts.delete(account.id());
+        try {
+            accounts.delete(account.id());
+        } catch (DataIntegrityViolationException e) {
+            // Rolls back the audit entry above with it: nothing was deleted.
+            throw ApiException.conflict(
+                    account.email() + " is still referenced by other records and cannot be deleted; "
+                            + "deactivate the account instead");
+        }
     }
 
     // -----------------------------------------------------------------------
