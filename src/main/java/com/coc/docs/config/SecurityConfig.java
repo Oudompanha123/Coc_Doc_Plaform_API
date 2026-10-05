@@ -549,6 +549,15 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/me/attendance")
                         .hasRole(AppRole.USER.name())
 
+                        // --- My Security, read side (ADR-090) ----------------
+                        // Same shape as My Attendance just above: own prefix,
+                        // USER floor, scoped from the session inside
+                        // SessionService.recentSignIns -- no parameter here
+                        // widens it.
+                        // // req: FR-OPS-001, NFR-SEC-PII, ADR-090
+                        .requestMatchers(HttpMethod.GET, "/api/v1/me/security")
+                        .hasRole(AppRole.USER.name())
+
                         // --- editorial writes and admin reads ----------------
                         .requestMatchers("/api/v1/admin/**").hasRole(AppRole.ADMIN.name())
 

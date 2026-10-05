@@ -1026,6 +1026,43 @@ class SecurityRulesTest {
     }
 
     @Nested
+    @DisplayName("My Security (ADR-090)")
+    class MySecurityPath {
+
+        @ParameterizedTest
+        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER", "ADMIN", "SUPER_ADMIN"})
+        void admits_every_signed_in_role(AppRole role) throws Exception {
+            // Same shape as My Attendance above: own prefix, USER floor,
+            // reachable by every signed-in role including the two ADR-086
+            // blocks from the admin app entirely.
+            org.mockito.Mockito.when(sessionService.recentSignIns(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
+                    .thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/me/security").with(as(role))).andExpect(status().isOk());
+        }
+
+        @Test
+        void refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(get("/api/v1/me/security")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void passes_the_caller_through_to_the_service_rather_than_a_request_parameter() throws Exception {
+            // TM-025: there is no parameter on this route at all — scope comes
+            // from the session alone.
+            org.mockito.Mockito.when(sessionService.recentSignIns(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
+                    .thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/me/security")
+                            .param("accountId", "11111111-1111-1111-1111-111111111111")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    @Nested
     @DisplayName("default deny")
     class DefaultDeny {
 
