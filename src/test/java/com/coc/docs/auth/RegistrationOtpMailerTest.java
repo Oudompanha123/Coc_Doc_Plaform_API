@@ -1,5 +1,6 @@
 package com.coc.docs.auth;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
@@ -9,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.coc.docs.config.AppProperties;
 import com.coc.docs.mail.EmailLayout;
+import com.coc.docs.mail.MailParts;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import java.time.Duration;
@@ -45,7 +47,7 @@ class RegistrationOtpMailerTest {
     private final RegistrationOtpMailer mailer =
             new RegistrationOtpMailer(provider, layout(), "Coc Docs Platform <noreply@example.com>");
 
-    /** The layout only needs a frontend origin, to build the logo URL from. */
+    /** The layout only needs a frontend origin, for the link around the logo. */
     private static EmailLayout layout() {
         return new EmailLayout(new AppProperties(
                 Duration.ofDays(1),
@@ -95,5 +97,19 @@ class RegistrationOtpMailerTest {
         mailer.sendCode("someone@example.com", "123456", Duration.ofMinutes(10));
 
         verify(sender).send(any(MimeMessage.class));
+    }
+
+    @Test
+    @DisplayName("the email carries its logo inside it, so it shows wherever the site runs (ADR-092)")
+    void theLogoIsEmbedded() throws Exception {
+        when(provider.getIfAvailable()).thenReturn(sender);
+        MimeMessage message = newMessage();
+        when(sender.createMimeMessage()).thenReturn(message);
+
+        mailer.sendCode("someone@example.com", "123456", Duration.ofMinutes(10));
+        message.saveChanges();
+
+        assertThat(MailParts.html(message)).contains("src=\"cid:" + EmailLayout.LOGO_CID + "\"");
+        assertThat(MailParts.logo(message)).isNotNull();
     }
 }
