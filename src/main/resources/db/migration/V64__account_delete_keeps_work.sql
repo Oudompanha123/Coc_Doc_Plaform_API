@@ -1,6 +1,6 @@
 -- Coc Docs Platform — make an account deletable again, whatever it worked on
 -- Revises ADR-023's schema half, the way V10 did once before.
---                                        // req: FR-AUTH-003, FR-AUTH-008, ADR-023, ADR-091
+--                                        // req: FR-AUTH-003, FR-AUTH-008, ADR-023, ADR-094
 --
 -- Deleting an account from Users & Roles failed with "an unexpected error
 -- occurred" for anyone who had ever done work here. Fifteen references to

@@ -1865,4 +1865,16 @@ public final class ApiDtos {
                     detail.members().stream().map(AxRenewalMemberResponse::of).toList());
         }
     }
+
+    /**
+     * The Security card's own view of this account (ADR-093): Google is the
+     * only sign-in method this app has ever had, so that half is static; the
+     * other half is this account's own recent sign-in/sign-out history, with
+     * no IP address at all — the audit row behind it never captured one, so
+     * there is nothing to mask.
+     */
+    public record MySecurityResponse(String signInMethod, String email, List<SignInEventResponse> recentSignIns) {
+
+        public record SignInEventResponse(String action, Instant occurredAt, String device) {}
+    }
 }

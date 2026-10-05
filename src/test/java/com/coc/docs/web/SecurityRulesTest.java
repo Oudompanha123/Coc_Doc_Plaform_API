@@ -1026,6 +1026,43 @@ class SecurityRulesTest {
     }
 
     @Nested
+    @DisplayName("My Security (ADR-093)")
+    class MySecurityPath {
+
+        @ParameterizedTest
+        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER", "ADMIN", "SUPER_ADMIN"})
+        void admits_every_signed_in_role(AppRole role) throws Exception {
+            // Same shape as My Attendance above: own prefix, USER floor,
+            // reachable by every signed-in role including the two ADR-086
+            // blocks from the admin app entirely.
+            org.mockito.Mockito.when(sessionService.recentSignIns(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
+                    .thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/me/security").with(as(role))).andExpect(status().isOk());
+        }
+
+        @Test
+        void refuses_a_caller_with_no_session() throws Exception {
+            mvc.perform(get("/api/v1/me/security")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void passes_the_caller_through_to_the_service_rather_than_a_request_parameter() throws Exception {
+            // TM-025: there is no parameter on this route at all — scope comes
+            // from the session alone.
+            org.mockito.Mockito.when(sessionService.recentSignIns(
+                            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
+                    .thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/me/security")
+                            .param("accountId", "11111111-1111-1111-1111-111111111111")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    @Nested
     @DisplayName("default deny")
     class DefaultDeny {
 
@@ -1205,7 +1242,7 @@ class SecurityRulesTest {
     }
 
     @Nested
-    @DisplayName("AX Renewal (ADR-086, revised for this feature by ADR-090)")
+    @DisplayName("AX Renewal (ADR-086, revised for this feature by ADR-093)")
     class AxRenewalPath {
 
         /** Reached rather than refused at the security layer — whatever the stubbed service then answers. */
@@ -1218,7 +1255,7 @@ class SecurityRulesTest {
         @ParameterizedTest
         @EnumSource(value = AppRole.class, names = {"GUEST", "USER"})
         void the_read_side_refuses_user_and_guest(AppRole role) throws Exception {
-            // ADR-090: the floor is DEVELOPER by rank — a plain user is still
+            // ADR-093: the floor is DEVELOPER by rank — a plain user is still
             // refused, as under ADR-086.
             mvc.perform(get("/api/v1/ax-renewal/projects").with(as(role))).andExpect(status().isForbidden());
         }
@@ -1226,7 +1263,7 @@ class SecurityRulesTest {
         @ParameterizedTest
         @EnumSource(value = AppRole.class, names = {"DEVELOPER", "REVIEWER", "LEAD"})
         void the_read_side_admits_developer_reviewer_and_lead(AppRole role) throws Exception {
-            // ADR-090 restores ADR-068's workspace access for these three;
+            // ADR-093 restores ADR-068's workspace access for these three;
             // which projects each sees is membership (ADR-070).
             org.mockito.Mockito.when(axRenewalService.list(org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
 
@@ -1380,7 +1417,7 @@ class SecurityRulesTest {
 
         @Test
         void removing_a_comment_refuses_a_plain_user() throws Exception {
-            // The comment routes share the read side's DEVELOPER floor (ADR-090).
+            // The comment routes share the read side's DEVELOPER floor (ADR-093).
             mvc.perform(delete("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/comments/"
                                     + UUID.randomUUID())
                             .with(as(AppRole.USER)))
@@ -1462,7 +1499,7 @@ class SecurityRulesTest {
 
         @Test
         void confirming_a_section_admits_a_caller_holding_only_the_developer_role() throws Exception {
-            // ADR-090 restores ADR-040's carve-out: holding Developer
+            // ADR-093 restores ADR-040's carve-out: holding Developer
             // *exactly* admits the write actions, with no Admin rank.
             org.mockito.Mockito.doThrow(ApiException.notFound("project"))
                     .when(axRenewalService)
@@ -1497,7 +1534,7 @@ class SecurityRulesTest {
             "/run-locally/stop"
         })
         void a_developer_reaches_every_write_action(String route) throws Exception {
-            // Exact Developer (ADR-090) — the same twelve routes ADR-086 had
+            // Exact Developer (ADR-093) — the same twelve routes ADR-086 had
             // closed. Whatever the stubbed service answers, it is not a 401/403.
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID()
                                     + route.replace("RUN", UUID.randomUUID().toString()))
@@ -1533,7 +1570,7 @@ class SecurityRulesTest {
 
         @Test
         void confirming_a_section_now_admits_a_plain_admin_too() throws Exception {
-            // ADR-086 widened the write actions to a plain Admin; ADR-090
+            // ADR-086 widened the write actions to a plain Admin; ADR-093
             // keeps that alongside exact Developer.
             org.mockito.Mockito.doThrow(ApiException.notFound("project"))
                     .when(axRenewalService)
@@ -1608,7 +1645,7 @@ class SecurityRulesTest {
                     .andExpect(status().isBadRequest());
         }
 
-        // --- Reviewer and Lead (ADR-090 restores ADR-068) -----------------
+        // --- Reviewer and Lead (ADR-093 restores ADR-068) -----------------
         // In the workspace to read and comment, and nothing else: reading and
         // commenting are covered above; drafting stays at the ADMIN floor and
         // signing off/building at Admin-or-exactly-Developer, neither of which
@@ -1647,7 +1684,7 @@ class SecurityRulesTest {
         @ParameterizedTest
         @EnumSource(value = AppRole.class, names = {"REVIEWER", "LEAD"})
         void reviewer_and_lead_may_not_sign_off_or_build(AppRole role) throws Exception {
-            // Admin or exactly Developer (ADR-090): out-ranking Developer is
+            // Admin or exactly Developer (ADR-093): out-ranking Developer is
             // not holding it.
             UUID projectId = UUID.randomUUID();
             UUID runId = UUID.randomUUID();
@@ -1710,7 +1747,7 @@ class SecurityRulesTest {
         @ParameterizedTest
         @EnumSource(value = AppRole.class, names = {"USER", "REVIEWER", "LEAD"})
         void starting_implementation_refuses_user_reviewer_and_lead(AppRole role) throws Exception {
-            // Admin or exactly Developer (ADR-090); Developer's own admission
+            // Admin or exactly Developer (ADR-093); Developer's own admission
             // is a_developer_reaches_every_write_action.
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/start")
                             .with(as(role)))
@@ -1744,7 +1781,7 @@ class SecurityRulesTest {
 
         @Test
         void a_local_run_s_status_refuses_a_plain_user() throws Exception {
-            // The generic AX Renewal read matcher: DEVELOPER by rank (ADR-090).
+            // The generic AX Renewal read matcher: DEVELOPER by rank (ADR-093).
             mvc.perform(get("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/run-locally/status")
                             .with(as(AppRole.USER)))
                     .andExpect(status().isForbidden());
@@ -1763,7 +1800,7 @@ class SecurityRulesTest {
         }
 
         // --- Run history (ADR-078): a plain read, falling under the generic
-        // AX Renewal GET matcher — DEVELOPER by rank (ADR-090). Which projects
+        // AX Renewal GET matcher — DEVELOPER by rank (ADR-093). Which projects
         // a caller may read beyond that is the service's membership check.
 
         @Test
@@ -1861,7 +1898,7 @@ class SecurityRulesTest {
         // --- AI Error Assistant / UI Customization, Phase 2 (ADR-062) ---
         // Same floor as start/approve/reject/cancel above (they all execute
         // real code on the backend's own machine or write to the real
-        // destination): Admin or exactly Developer (ADR-090). Developer's
+        // destination): Admin or exactly Developer (ADR-093). Developer's
         // admission is a_developer_reaches_every_write_action; these show
         // the refusal side.
 
@@ -1902,7 +1939,7 @@ class SecurityRulesTest {
         @Test
         void confirming_a_section_refuses_a_plain_user() throws Exception {
             // Pins the baseline floor down explicitly alongside the
-            // Developer-specific case above (ADR-090).
+            // Developer-specific case above (ADR-093).
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/plan/stack_move/confirm")
                             .with(as(AppRole.USER)))
                     .andExpect(status().isForbidden());
