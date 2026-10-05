@@ -390,24 +390,26 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/tasks")
                         .hasRole(AppRole.USER.name())
 
-                        // --- AX Renewal (ADR-086, superseding ADR-040/ADR-068's --
-                        // Developer/Reviewer/Lead carve-outs) -------------------
-                        // Its own prefix, not under /api/v1/admin/** — not
-                        // because anyone below admin reaches it (nobody does,
-                        // as of ADR-086), but so the generic admin floor below
-                        // is not the only line a reader has to find to know
-                        // who this whole feature admits.
+                        // --- AX Renewal (ADR-090, revising ADR-086 for this --
+                        // one feature) ------------------------------------------
+                        // Its own prefix, not under /api/v1/admin/**: Developer,
+                        // Reviewer and Lead reach this surface (ADR-090) while
+                        // the rest of the admin app stays [admin, super_admin]
+                        // only (ADR-086). Reading and commenting floor at
+                        // DEVELOPER by rank — Developer, Reviewer, Lead, Admin,
+                        // Super Admin; never user or guest. Which projects a
+                        // caller sees is still membership (ADR-070).
                         .requestMatchers(HttpMethod.GET, "/api/v1/ax-renewal/**")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasRole(AppRole.DEVELOPER.name())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/comments")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasRole(AppRole.DEVELOPER.name())
                         // Removing one stays at the same floor as writing one:
                         // whether this particular caller may remove this
                         // particular comment depends on who wrote it, which is
                         // row data no matcher can see. AxRenewalService makes
                         // that call — author, or super_admin (ADR-045).
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/ax-renewal/projects/*/comments/*")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasRole(AppRole.DEVELOPER.name())
 
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects").hasRole(AppRole.ADMIN.name())
                         // Deleting a project is the symmetric lifecycle action
@@ -452,34 +454,33 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/v1/ax-renewal/projects/*/destination")
                         .hasRole(AppRole.ADMIN.name())
 
-                        // Confirming a section and starting implementation used
-                        // to admit Super Admin or exactly Developer
-                        // (AppRole.exactAuthority()), deliberately not
-                        // "admin-or-above" — an Admin who did not also hold
-                        // Developer could draft a plan but not sign off on or
-                        // trigger it (ADR-040). ADR-086 retired that carve-out:
-                        // every admin app route, this one included, now admits
-                        // the same allow-list.
+                        // Confirming a section, starting implementation, and
+                        // every action below that writes or runs code: Admin or
+                        // above (ADR-086 widened these to a plain Admin), or an
+                        // account that holds Developer *exactly*
+                        // (AppRole.exactAuthority(), ADR-090 restoring ADR-040's
+                        // carve-out). Exact, not rank: Reviewer and Lead
+                        // out-rank Developer but stay read-and-comment only.
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/plan/*/confirm")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasAnyAuthority(AppRole.ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/plan/*/reopen")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasAnyAuthority(AppRole.ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/start")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasAnyAuthority(AppRole.ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         // Approve/reject a Generate run's proposed changes (ADR-044) —
                         // Approve is the one action in this whole feature that writes
                         // outside this application's own database, so it gets exactly
                         // the same floor as starting implementation in the first place,
                         // not a lower one.
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/approve")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasAnyAuthority(AppRole.ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/reject")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasAnyAuthority(AppRole.ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         // Cancel a still-generating run (ADR-049) — kills a
                         // real process on the backend's own machine, the
                         // same class of action as the three routes above.
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/cancel")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasAnyAuthority(AppRole.ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         // AI Error Assistant / UI Customization, Phase 2
                         // (ADR-062) — starting either kind of Generate run
                         // and running tests all execute real code on the
@@ -487,15 +488,15 @@ public class SecurityConfig {
                         // start/approve/reject/cancel above, so they share
                         // that exact floor.
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/error-fix/start")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasAnyAuthority(AppRole.ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/ui-change/start")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasAnyAuthority(AppRole.ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/run-tests")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasAnyAuthority(AppRole.ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         // Revert writes to the real destination, exactly the
                         // class of action Approve is (ADR-044) — same floor.
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/implementation/*/revert")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasAnyAuthority(AppRole.ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         // Run Locally start/stop (ADR-048) — this executes the
                         // destination's own npm scripts on the backend's
                         // machine, the same class of action as starting/
@@ -503,9 +504,9 @@ public class SecurityConfig {
                         // gets the same floor, not a lower one. Status is a
                         // plain read and falls through to the GET rule above.
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/run-locally/start")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasAnyAuthority(AppRole.ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/run-locally/stop")
-                        .hasAnyRole(AppRole.ADMIN_APP_ROLE_NAMES)
+                        .hasAnyAuthority(AppRole.ADMIN.authority(), AppRole.DEVELOPER.exactAuthority())
                         // AI Error Assistant, phase 1 (ADR-062) — read-only,
                         // same reasoning and same floor as assistant/chat
                         // above: it can point a local model at the

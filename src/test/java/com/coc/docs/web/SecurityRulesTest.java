@@ -1205,15 +1205,32 @@ class SecurityRulesTest {
     }
 
     @Nested
-    @DisplayName("AX Renewal (ADR-086)")
+    @DisplayName("AX Renewal (ADR-086, revised for this feature by ADR-090)")
     class AxRenewalPath {
 
+        /** Reached rather than refused at the security layer — whatever the stubbed service then answers. */
+        private org.springframework.test.web.servlet.ResultMatcher reached() {
+            return result -> org.assertj.core.api.Assertions.assertThat(result.getResponse().getStatus())
+                    .as("refused at the security layer")
+                    .isNotIn(401, 403);
+        }
+
         @ParameterizedTest
-        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER", "REVIEWER", "LEAD"})
-        void the_read_side_refuses_every_role_below_admin(AppRole role) throws Exception {
-            // ADR-086: AX Renewal is now admin-app-only, full stop — no more
-            // carve-out for Developer (ADR-040) or Reviewer/Lead (ADR-068).
+        @EnumSource(value = AppRole.class, names = {"GUEST", "USER"})
+        void the_read_side_refuses_user_and_guest(AppRole role) throws Exception {
+            // ADR-090: the floor is DEVELOPER by rank — a plain user is still
+            // refused, as under ADR-086.
             mvc.perform(get("/api/v1/ax-renewal/projects").with(as(role))).andExpect(status().isForbidden());
+        }
+
+        @ParameterizedTest
+        @EnumSource(value = AppRole.class, names = {"DEVELOPER", "REVIEWER", "LEAD"})
+        void the_read_side_admits_developer_reviewer_and_lead(AppRole role) throws Exception {
+            // ADR-090 restores ADR-068's workspace access for these three;
+            // which projects each sees is membership (ADR-070).
+            org.mockito.Mockito.when(axRenewalService.list(org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/ax-renewal/projects").with(as(role))).andExpect(status().isOk());
         }
 
         @Test
@@ -1344,10 +1361,26 @@ class SecurityRulesTest {
                     .andExpect(status().isNotFound());
         }
 
+        @ParameterizedTest
+        @EnumSource(value = AppRole.class, names = {"DEVELOPER", "REVIEWER", "LEAD"})
+        void adding_a_comment_admits_developer_reviewer_and_lead(AppRole role) throws Exception {
+            org.mockito.Mockito.doThrow(ApiException.notFound("project"))
+                    .when(axRenewalService)
+                    .addComment(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any());
+
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/comments")
+                            .with(as(role))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"body\":\"looks right to me\"}"))
+                    .andExpect(status().isNotFound());
+        }
+
         @Test
         void removing_a_comment_refuses_a_plain_user() throws Exception {
-            // ADR-086: the comment routes shared AX Renewal's old USER floor
-            // and are tightened the same way.
+            // The comment routes share the read side's DEVELOPER floor (ADR-090).
             mvc.perform(delete("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/comments/"
                                     + UUID.randomUUID())
                             .with(as(AppRole.USER)))
@@ -1428,15 +1461,50 @@ class SecurityRulesTest {
         }
 
         @Test
-        void confirming_a_section_refuses_a_caller_holding_only_the_developer_role() throws Exception {
-            // ADR-086 retired the old Super-Admin-or-exactly-Developer floor
-            // (ADR-040): a plain Developer, with no Admin/Super Admin rank,
-            // is refused like any other non-admin-app role now.
+        void confirming_a_section_admits_a_caller_holding_only_the_developer_role() throws Exception {
+            // ADR-090 restores ADR-040's carve-out: holding Developer
+            // *exactly* admits the write actions, with no Admin rank.
+            org.mockito.Mockito.doThrow(ApiException.notFound("project"))
+                    .when(axRenewalService)
+                    .confirmSection(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.anyInt(),
+                            org.mockito.ArgumentMatchers.any());
+
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/plan/stack_move/confirm")
                             .with(SecurityMockMvcRequestPostProcessors.authentication(
                                     com.coc.docs.auth.TestCallers.authentication(
-                                            java.util.Set.of(AppRole.DEVELOPER)))))
-                    .andExpect(status().isForbidden());
+                                            java.util.Set.of(AppRole.DEVELOPER))))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"revision\":0}"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "/plan/pages/confirm",
+            "/plan/pages/reopen",
+            "/implementation/start",
+            "/implementation/RUN/approve",
+            "/implementation/RUN/reject",
+            "/implementation/RUN/cancel",
+            "/implementation/error-fix/start",
+            "/implementation/ui-change/start",
+            "/implementation/RUN/run-tests",
+            "/implementation/RUN/revert",
+            "/run-locally/start",
+            "/run-locally/stop"
+        })
+        void a_developer_reaches_every_write_action(String route) throws Exception {
+            // Exact Developer (ADR-090) — the same twelve routes ADR-086 had
+            // closed. Whatever the stubbed service answers, it is not a 401/403.
+            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID()
+                                    + route.replace("RUN", UUID.randomUUID().toString()))
+                            .with(as(AppRole.DEVELOPER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"revision\":0}"))
+                    .andExpect(reached());
         }
 
         @Test
@@ -1465,10 +1533,8 @@ class SecurityRulesTest {
 
         @Test
         void confirming_a_section_now_admits_a_plain_admin_too() throws Exception {
-            // ADR-086: the Developer-exact carve-out this used to refuse an
-            // Admin-without-Developer under (ADR-040) is retired — every
-            // admin app route, this one included, admits the same allow-list
-            // now, so a plain Admin reaches it directly.
+            // ADR-086 widened the write actions to a plain Admin; ADR-090
+            // keeps that alongside exact Developer.
             org.mockito.Mockito.doThrow(ApiException.notFound("project"))
                     .when(axRenewalService)
                     .confirmSection(
@@ -1542,23 +1608,11 @@ class SecurityRulesTest {
                     .andExpect(status().isBadRequest());
         }
 
-        // --- Reviewer and Lead (ADR-086 retires ADR-068's carve-out) ------
-        // Used to be admitted to the workspace to read and comment, and
-        // nothing else (ADR-068). ADR-086 removed that too: the read side and
-        // the comment routes now share AX Renewal's admin-app allow-list, the
-        // same as every other route in this feature, so both roles are
-        // refused everywhere here, not just on the routes that already
-        // floored at ADMIN.
-
-        @ParameterizedTest
-        @EnumSource(value = AppRole.class, names = {"REVIEWER", "LEAD"})
-        void reviewer_and_lead_may_not_comment(AppRole role) throws Exception {
-            mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/comments")
-                            .with(as(role))
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"body\":\"looks right to me\"}"))
-                    .andExpect(status().isForbidden());
-        }
+        // --- Reviewer and Lead (ADR-090 restores ADR-068) -----------------
+        // In the workspace to read and comment, and nothing else: reading and
+        // commenting are covered above; drafting stays at the ADMIN floor and
+        // signing off/building at Admin-or-exactly-Developer, neither of which
+        // out-ranking Developer satisfies.
 
         @ParameterizedTest
         @EnumSource(value = AppRole.class, names = {"REVIEWER", "LEAD"})
@@ -1593,10 +1647,8 @@ class SecurityRulesTest {
         @ParameterizedTest
         @EnumSource(value = AppRole.class, names = {"REVIEWER", "LEAD"})
         void reviewer_and_lead_may_not_sign_off_or_build(AppRole role) throws Exception {
-            // Both now refused by the admin-app allow-list (ADR-086) — before
-            // it, this floor was Super Admin or exactly Developer
-            // (exactAuthority()), which neither role satisfied either, just
-            // for a different reason (out-ranking Developer isn't holding it).
+            // Admin or exactly Developer (ADR-090): out-ranking Developer is
+            // not holding it.
             UUID projectId = UUID.randomUUID();
             UUID runId = UUID.randomUUID();
             mvc.perform(post("/api/v1/ax-renewal/projects/" + projectId + "/plan/pages/confirm")
@@ -1656,26 +1708,26 @@ class SecurityRulesTest {
         }
 
         @ParameterizedTest
-        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER"})
-        void starting_implementation_refuses_user_and_developer(AppRole role) throws Exception {
-            // ADR-086: Developer's old exactAuthority() carve-out is gone, so
-            // it is refused here the same as a plain User now.
+        @EnumSource(value = AppRole.class, names = {"USER", "REVIEWER", "LEAD"})
+        void starting_implementation_refuses_user_reviewer_and_lead(AppRole role) throws Exception {
+            // Admin or exactly Developer (ADR-090); Developer's own admission
+            // is a_developer_reaches_every_write_action.
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/start")
                             .with(as(role)))
                     .andExpect(status().isForbidden());
         }
 
         @ParameterizedTest
-        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER"})
-        void starting_a_local_run_refuses_user_and_developer(AppRole role) throws Exception {
+        @EnumSource(value = AppRole.class, names = {"USER", "REVIEWER", "LEAD"})
+        void starting_a_local_run_refuses_user_reviewer_and_lead(AppRole role) throws Exception {
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/run-locally/start")
                             .with(as(role)))
                     .andExpect(status().isForbidden());
         }
 
         @ParameterizedTest
-        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER"})
-        void cancelling_a_generate_run_refuses_user_and_developer(AppRole role) throws Exception {
+        @EnumSource(value = AppRole.class, names = {"USER", "REVIEWER", "LEAD"})
+        void cancelling_a_generate_run_refuses_user_reviewer_and_lead(AppRole role) throws Exception {
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/"
                             + UUID.randomUUID() + "/cancel")
                             .with(as(role)))
@@ -1683,45 +1735,53 @@ class SecurityRulesTest {
         }
 
         @ParameterizedTest
-        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER"})
-        void stopping_a_local_run_refuses_user_and_developer(AppRole role) throws Exception {
+        @EnumSource(value = AppRole.class, names = {"USER", "REVIEWER", "LEAD"})
+        void stopping_a_local_run_refuses_user_reviewer_and_lead(AppRole role) throws Exception {
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/run-locally/stop")
                             .with(as(role)))
                     .andExpect(status().isForbidden());
         }
 
+        @Test
+        void a_local_run_s_status_refuses_a_plain_user() throws Exception {
+            // The generic AX Renewal read matcher: DEVELOPER by rank (ADR-090).
+            mvc.perform(get("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/run-locally/status")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
         @ParameterizedTest
-        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER"})
-        void a_local_run_s_status_refuses_user_and_developer(AppRole role) throws Exception {
-            // ADR-086: this GET falls under the generic AX Renewal read
-            // matcher, which is no longer floored at USER.
+        @EnumSource(value = AppRole.class, names = {"DEVELOPER", "REVIEWER", "LEAD"})
+        void a_local_run_s_status_admits_developer_reviewer_and_lead(AppRole role) throws Exception {
+            org.mockito.Mockito.when(axRenewalService.runLocallyStatus(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(new com.coc.docs.axrenewal.AxRenewalLocalRunner.Status(
+                            com.coc.docs.axrenewal.AxRenewalLocalRunner.Status.STATE_STOPPED, List.of(), null, null));
+
             mvc.perform(get("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/run-locally/status")
                             .with(as(role)))
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isOk());
         }
 
         // --- Run history (ADR-078): a plain read, falling under the generic
-        // AX Renewal GET matcher, which ADR-086 floors at the admin-app
-        // allow-list, not USER — same as every other AX Renewal read in this
-        // class. Which projects a caller may read beyond that is the
-        // service's membership check.
+        // AX Renewal GET matcher — DEVELOPER by rank (ADR-090). Which projects
+        // a caller may read beyond that is the service's membership check.
 
-        @ParameterizedTest
-        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER", "REVIEWER", "LEAD"})
-        void run_history_refuses_every_role_below_admin(AppRole role) throws Exception {
+        @Test
+        void run_history_refuses_a_plain_user() throws Exception {
             mvc.perform(get("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/runs")
-                            .with(as(role)))
+                            .with(as(AppRole.USER)))
                     .andExpect(status().isForbidden());
         }
 
-        @Test
-        void run_history_admits_an_admin() throws Exception {
+        @ParameterizedTest
+        @EnumSource(value = AppRole.class, names = {"DEVELOPER", "REVIEWER", "LEAD", "ADMIN"})
+        void run_history_admits_developer_reviewer_lead_and_admin(AppRole role) throws Exception {
             org.mockito.Mockito.when(axRenewalService.listRuns(
                             org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
                     .thenReturn(List.of());
 
             mvc.perform(get("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/runs")
-                            .with(as(AppRole.ADMIN)))
+                            .with(as(role)))
                     .andExpect(status().isOk());
         }
 
@@ -1731,20 +1791,20 @@ class SecurityRulesTest {
                     .andExpect(status().isUnauthorized());
         }
 
-        // --- Live generation progress (ADR-082): same ADR-086 floor as run
-        // history just above — membership is the service's check.
+        // --- Live generation progress (ADR-082): same floor as run history
+        // just above — membership is the service's check.
 
-        @ParameterizedTest
-        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER", "REVIEWER", "LEAD"})
-        void generation_progress_refuses_every_role_below_admin(AppRole role) throws Exception {
+        @Test
+        void generation_progress_refuses_a_plain_user() throws Exception {
             mvc.perform(get("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/"
                                     + UUID.randomUUID() + "/progress")
-                            .with(as(role)))
+                            .with(as(AppRole.USER)))
                     .andExpect(status().isForbidden());
         }
 
-        @Test
-        void generation_progress_admits_an_admin() throws Exception {
+        @ParameterizedTest
+        @EnumSource(value = AppRole.class, names = {"DEVELOPER", "REVIEWER", "LEAD", "ADMIN"})
+        void generation_progress_admits_developer_reviewer_lead_and_admin(AppRole role) throws Exception {
             org.mockito.Mockito.when(axRenewalService.implementationProgress(
                             org.mockito.ArgumentMatchers.any(),
                             org.mockito.ArgumentMatchers.any(),
@@ -1753,7 +1813,7 @@ class SecurityRulesTest {
 
             mvc.perform(get("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/"
                                     + UUID.randomUUID() + "/progress")
-                            .with(as(AppRole.ADMIN)))
+                            .with(as(role)))
                     .andExpect(status().isOk());
         }
 
@@ -1799,32 +1859,31 @@ class SecurityRulesTest {
         }
 
         // --- AI Error Assistant / UI Customization, Phase 2 (ADR-062) ---
-        // Same admin-app allow-list as start/approve/reject/cancel above
-        // (they all execute real code on the backend's own machine or write
-        // to the real destination) — the Developer-exact carve-out these
-        // used to have (ADR-040) was already retired and proven both ways at
-        // confirm/reopen above, so each of these only needs the refusal case
-        // to show the same matcher is in place.
+        // Same floor as start/approve/reject/cancel above (they all execute
+        // real code on the backend's own machine or write to the real
+        // destination): Admin or exactly Developer (ADR-090). Developer's
+        // admission is a_developer_reaches_every_write_action; these show
+        // the refusal side.
 
         @ParameterizedTest
-        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER"})
-        void starting_an_error_fix_refuses_user_and_developer(AppRole role) throws Exception {
+        @EnumSource(value = AppRole.class, names = {"USER", "REVIEWER", "LEAD"})
+        void starting_an_error_fix_refuses_user_reviewer_and_lead(AppRole role) throws Exception {
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/error-fix/start")
                             .with(as(role)))
                     .andExpect(status().isForbidden());
         }
 
         @ParameterizedTest
-        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER"})
-        void starting_a_ui_change_refuses_user_and_developer(AppRole role) throws Exception {
+        @EnumSource(value = AppRole.class, names = {"USER", "REVIEWER", "LEAD"})
+        void starting_a_ui_change_refuses_user_reviewer_and_lead(AppRole role) throws Exception {
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/ui-change/start")
                             .with(as(role)))
                     .andExpect(status().isForbidden());
         }
 
         @ParameterizedTest
-        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER"})
-        void running_tests_against_a_generate_run_refuses_user_and_developer(AppRole role) throws Exception {
+        @EnumSource(value = AppRole.class, names = {"USER", "REVIEWER", "LEAD"})
+        void running_tests_against_a_generate_run_refuses_user_reviewer_and_lead(AppRole role) throws Exception {
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/"
                             + UUID.randomUUID() + "/run-tests")
                             .with(as(role)))
@@ -1832,8 +1891,8 @@ class SecurityRulesTest {
         }
 
         @ParameterizedTest
-        @EnumSource(value = AppRole.class, names = {"USER", "DEVELOPER"})
-        void reverting_an_applied_run_refuses_user_and_developer(AppRole role) throws Exception {
+        @EnumSource(value = AppRole.class, names = {"USER", "REVIEWER", "LEAD"})
+        void reverting_an_applied_run_refuses_user_reviewer_and_lead(AppRole role) throws Exception {
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/implementation/"
                             + UUID.randomUUID() + "/revert")
                             .with(as(role)))
@@ -1843,8 +1902,7 @@ class SecurityRulesTest {
         @Test
         void confirming_a_section_refuses_a_plain_user() throws Exception {
             // Pins the baseline floor down explicitly alongside the
-            // Developer-specific case above, now that both are refused for
-            // the same reason (ADR-086) rather than two different ones.
+            // Developer-specific case above (ADR-090).
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/plan/stack_move/confirm")
                             .with(as(AppRole.USER)))
                     .andExpect(status().isForbidden());

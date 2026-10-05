@@ -17,23 +17,22 @@ import java.util.Optional;
  * {@code DEVELOPER} retired the old rank-independent {@code developer}
  * capability (migrated once, {@code V31}).
  *
- * <p><b>None of the three unlock anything in the admin app</b> (ADR-086,
- * superseding ADR-040 §confirm-floor, ADR-068 and ADR-071): a PM decision on
- * 2026-09-29 retired Developer's AX Renewal confirm/reopen/start-implementation
- * carve-out and Reviewer/Lead's Overview/Settings/AX-Renewal-read-and-comment
- * one. {@code SecurityConfig} now gates every admin-app route with {@link
- * #ADMIN_APP_ROLE_NAMES} (an allow-list, not a rank floor — {@link #isAtLeast}
- * cannot express "refuse everyone between {@code USER} and {@code ADMIN}",
- * since that is precisely the band these three roles occupy). {@link
- * #exactAuthority()} is kept as infrastructure ({@code
- * SessionAuthenticationFilter} still grants it) even though no current route
- * reads it, the same as any other capability the next feature might need.
+ * <p><b>The admin app is [admin, super_admin] only</b> (ADR-086), with one
+ * exception: <b>AX Renewal</b> (ADR-090, revising ADR-086 for that feature).
+ * All three may open it and read and comment on the projects they are
+ * members of — {@code SecurityConfig} floors those routes at {@code
+ * DEVELOPER} by rank — and holding {@code DEVELOPER} <i>exactly</i> ({@link
+ * #exactAuthority()}) also admits its write actions (confirm, build,
+ * approve, Run Locally), as ADR-040 first had it. Exact, not rank:
+ * {@code REVIEWER} and {@code LEAD} out-rank {@code DEVELOPER} but stay
+ * read-and-comment only. Everything else in the admin app stays behind
+ * {@link #ADMIN_APP_ROLE_NAMES}.
  *
  * <p>A role is always resolved server-side from the {@code account} row on
  * every request. It is never read from a client header, cookie or JWT claim,
  * which is what closes TM-003 across the new frontend/backend boundary.
  *
- * <p>// req: FR-AUTH-005, FR-AUTH-006, ADR-011, ADR-012, ADR-086
+ * <p>// req: FR-AUTH-005, FR-AUTH-006, ADR-011, ADR-012, ADR-086, ADR-090
  */
 public enum AppRole {
     GUEST,
