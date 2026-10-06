@@ -544,11 +544,20 @@ public class SessionService {
     /**
      * Exchanges an email and password for a session.
      *
-     * <p><b>Every failure returns the same exception with the same message.</b>
-     * Unknown address, wrong password, pending approval and rejected all look
-     * identical to the caller. Telling them apart turns this endpoint into an
-     * oracle for which colleagues have accounts, and — because a pending
-     * registration is a real person's application — for who has applied.
+     * <p><b>Every failure without the right password returns the same
+     * exception with the same message.</b> Unknown address, wrong password,
+     * and — with the wrong password — a pending or rejected registration all
+     * look identical to the caller. Telling them apart would turn this
+     * endpoint into an oracle for which colleagues have accounts, and for who
+     * has applied.
+     *
+     * <p><b>One exception (ADR-095): the right password on a registration
+     * still awaiting approval</b> is refused with a 403, "this registration is
+     * awaiting approval" — exactly what Google sign-in already answers once
+     * Google has proved who the caller is (above). Knowing the password proves
+     * ownership just as well, so this tells the applicant what is happening
+     * without telling anyone else anything. Rejected and deactivated accounts
+     * keep the uniform refusal even with the right password.
      *
      * <p>The password is compared even when the account cannot sign in, and a
      * dummy comparison runs when the address is unknown. Skipping the hash on
@@ -566,7 +575,7 @@ public class SessionService {
      */
     // Same reason as signIn: the refusal is audited and then thrown, and a
     // rollback would erase the record of it. Nothing else here writes.
-    @Transactional(noRollbackFor = GoogleIdTokenVerifier.AuthenticationFailure.class)
+    @Transactional(noRollbackFor = {GoogleIdTokenVerifier.AuthenticationFailure.class, ApiException.class})
     public PasswordSignInResult signInWithPassword(
             String email, String rawPassword, String userAgent, String ipAddress) {
 
@@ -583,13 +592,21 @@ public class SessionService {
         }
 
         if (!passwordMatches || !found.get().account().canSignIn()) {
+            // Only with the right password: the applicant learns their
+            // registration is waiting; nobody else learns it exists (ADR-095).
+            boolean pendingOwner = passwordMatches && found.get().account().status() == AccountStatus.PENDING;
             audit.append(
                     null,
                     "unauthenticated",
                     AuditAction.AUTH_REJECTED,
                     AuditAction.TARGET_SESSION,
                     null,
-                    json.createObjectNode().put("reason", "password_sign_in_refused").put("email", email));
+                    json.createObjectNode()
+                            .put("reason", pendingOwner ? "password_sign_in_pending_approval" : "password_sign_in_refused")
+                            .put("email", email));
+            if (pendingOwner) {
+                throw ApiException.forbidden("this registration is awaiting approval");
+            }
             throw new GoogleIdTokenVerifier.AuthenticationFailure("email or password not accepted");
         }
 
