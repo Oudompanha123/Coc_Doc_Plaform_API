@@ -48,7 +48,13 @@ class SecretBoxTest {
     @DisplayName("a tampered value fails rather than decrypting to rubbish -- GCM's tag, not a guess")
     void tamperingFails() {
         char[] c = box.encrypt("xoqrdatgsiysekwv").toCharArray();
-        c[c.length - 2] = c[c.length - 2] == 'A' ? 'B' : 'A';
+        // Flip a character in the middle, not near the end. base64's last
+        // character before any padding carries bits the decoder discards, so
+        // changing it sometimes decodes to the very same bytes — no tamper at
+        // all, and this test then had nothing to catch. That is why it went
+        // red at random rather than never: it depended on the nonce.
+        int middle = c.length / 2;
+        c[middle] = c[middle] == 'A' ? 'B' : 'A';
 
         assertThatThrownBy(() -> box.decrypt(new String(c))).isInstanceOf(IllegalStateException.class);
     }
