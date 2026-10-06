@@ -3,6 +3,7 @@ package com.coc.docs.auth;
 import com.coc.docs.account.Account;
 import com.coc.docs.account.AccountRepository;
 import com.coc.docs.account.AccountService;
+import com.coc.docs.account.AccountStatus;
 import com.coc.docs.audit.AuditAction;
 import com.coc.docs.audit.AuditRepository;
 import com.coc.docs.web.ApiException;
@@ -84,7 +85,10 @@ public class RegistrationOtpService {
      */
     @Transactional
     public RegistrationChallenge start(String email, String displayName, String passwordHash) {
-        if (accountRepository.findByEmail(email).isPresent()) {
+        // A rejected application may be made again with the same address
+        // (ADR-096); verify() then reopens that row. Any other account still
+        // owns the address.
+        if (accountRepository.findByEmail(email).filter(a -> a.status() != AccountStatus.REJECTED).isPresent()) {
             throw ApiException.conflict("that email address is already registered");
         }
 

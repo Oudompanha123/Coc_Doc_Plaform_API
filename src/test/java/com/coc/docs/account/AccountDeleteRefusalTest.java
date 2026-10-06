@@ -39,7 +39,8 @@ class AccountDeleteRefusalTest {
                 mock(AuditRepository.class),
                 new ObjectMapper(),
                 mock(PasswordEncoder.class),
-                mock(AccountInviteMailer.class));
+                mock(AccountInviteMailer.class),
+                event -> {});
         Account victim = TestCallers.user(AppRole.USER).account();
         CurrentUser admin = TestCallers.user(AppRole.SUPER_ADMIN);
         when(accounts.findById(victim.id())).thenReturn(Optional.of(victim));

@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.EnumSet;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -43,6 +44,8 @@ public class AccountService {
     private final ObjectMapper json;
     private final PasswordEncoder passwordEncoder;
     private final AccountInviteMailer inviteMailer;
+    /** Where a registration decision is announced, for its email (ADR-096). */
+    private final ApplicationEventPublisher events;
     private final SecureRandom random = new SecureRandom();
 
     public AccountService(
@@ -51,13 +54,15 @@ public class AccountService {
             AuditRepository audit,
             ObjectMapper json,
             PasswordEncoder passwordEncoder,
-            AccountInviteMailer inviteMailer) {
+            AccountInviteMailer inviteMailer,
+            ApplicationEventPublisher events) {
         this.accounts = accounts;
         this.sessions = sessions;
         this.audit = audit;
         this.json = json;
         this.passwordEncoder = passwordEncoder;
         this.inviteMailer = inviteMailer;
+        this.events = events;
     }
 
     /**
@@ -474,8 +479,26 @@ public class AccountService {
     public Account register(String email, String displayName, String passwordHash) {
         // Checked here as well as by the unique index, so the API can answer
         // 409 with an explanation instead of a raised constraint becoming a 500.
-        if (accounts.findByEmail(email).isPresent()) {
+        // A rejected application is the one exception: its owner may apply
+        // again with the same address (ADR-096), reopening that same row.
+        java.util.Optional<Account> existing = accounts.findByEmail(email);
+        if (existing.isPresent() && existing.get().status() != AccountStatus.REJECTED) {
             throw ApiException.conflict("that email address is already registered");
+        }
+        if (existing.isPresent()) {
+            Account reopened = accounts.reopenApplication(existing.get().id(), displayName, passwordHash)
+                    .orElseThrow(() -> ApiException.conflict("that email address is already registered"));
+            audit.append(
+                    null,
+                    email,
+                    AuditAction.ACCOUNT_REGISTER,
+                    AuditAction.TARGET_ACCOUNT,
+                    reopened.id(),
+                    json.createObjectNode()
+                            .put("subject", email)
+                            .put("status", reopened.status().wire())
+                            .put("reapplication", true));
+            return reopened;
         }
 
         // Pending, at role guest (ADR-017). Between 2026-09-11 and this change
@@ -605,7 +628,10 @@ public class AccountService {
                     "guest grants nothing; approve at user or above, or reject the application");
         }
         Account approved = decide(accountId, AccountStatus.ACTIVE, AuditAction.ACCOUNT_APPROVE, actor);
-        return setRoles(approved.id(), EnumSet.of(role), actor);
+        Account result = setRoles(approved.id(), EnumSet.of(role), actor);
+        // Emailed after commit (ADR-096): "your account has been approved".
+        events.publishEvent(new RegistrationDecidedEvent(result.id(), result.email(), result.displayName(), true, role));
+        return result;
     }
 
     /**
@@ -614,10 +640,16 @@ public class AccountService {
      * <p>Rejected rather than deleted, for the same reason accounts are
      * deactivated rather than deleted: the audit trail has to be able to answer
      * "who applied, and who turned them down" a year later (NFR-OPS-AUDIT).
+     *
+     * <p>Not a permanent block on the address: its owner is emailed that the
+     * registration was not approved, and may register again with the same
+     * address, which reopens this row as a new application (ADR-096).
      */
     @Transactional
     public Account reject(UUID accountId, CurrentUser actor) {
-        return decide(accountId, AccountStatus.REJECTED, AuditAction.ACCOUNT_REJECT, actor);
+        Account rejected = decide(accountId, AccountStatus.REJECTED, AuditAction.ACCOUNT_REJECT, actor);
+        events.publishEvent(new RegistrationDecidedEvent(rejected.id(), rejected.email(), rejected.displayName(), false, null));
+        return rejected;
     }
 
     private Account decide(UUID accountId, AccountStatus target, String action, CurrentUser actor) {

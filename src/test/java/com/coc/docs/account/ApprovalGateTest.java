@@ -214,4 +214,46 @@ class ApprovalGateTest extends PostgresTestBase {
                 .single();
         assertThat(rejected).isEqualTo(1);
     }
+
+    /**
+     * A refused applicant may register again with the same address (ADR-096):
+     * the rejected row is reopened, not duplicated, so the first application,
+     * its refusal and the new one stay joined in the trail.
+     */
+    @Test
+    @DisplayName("registering again after a refusal reopens the same row as a fresh pending application")
+    void refusedApplicantMayRegisterAgain() {
+        CurrentUser actor = superAdmin();
+        Account first = accountService.register("again@example.com", "First Name", "hash-1");
+        accountService.reject(first.id(), actor);
+
+        Account again = accountService.register("again@example.com", "Second Name", "hash-2");
+
+        assertThat(again.id()).isEqualTo(first.id());
+        assertThat(again.status()).isEqualTo(AccountStatus.PENDING);
+        assertThat(again.displayName()).isEqualTo("Second Name");
+        assertThat(again.roles()).containsExactly(AppRole.GUEST);
+        assertThat(again.canSignIn()).isFalse();
+        assertThat(jdbc.sql("select password_hash from account where id = ?")
+                        .param(first.id())
+                        .query(String.class)
+                        .single())
+                .isEqualTo("hash-2");
+        assertThat(accounts.findByStatus(AccountStatus.PENDING))
+                .extracting(Account::email)
+                .containsExactly("again@example.com");
+    }
+
+    @Test
+    @DisplayName("only a refused application is reopened: a pending or active address is still taken")
+    void onlyARefusalFreesTheAddress() {
+        accountService.register("taken@example.com", "Taken", "hash");
+
+        assertThatThrownBy(() -> accountService.register("taken@example.com", "Someone Else", "hash"))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("that email address is already registered");
+        assertThat(accounts.reopenApplication(
+                        accounts.findByEmail("taken@example.com").orElseThrow().id(), "X", "y"))
+                .isEmpty();
+    }
 }

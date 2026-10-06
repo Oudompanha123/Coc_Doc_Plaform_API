@@ -383,6 +383,47 @@ public class AccountRepository {
     }
 
     /**
+     * Turns a rejected application back into a pending one, for someone who
+     * registers again with the same address (ADR-096).
+     *
+     * <p>The same row, not a second one: the address is unique, and keeping
+     * the row keeps the history joined — the first application, its
+     * rejection and this one all point at one account in the audit trail.
+     * Takes the newly entered name and password, drops back to the {@code
+     * guest} role an applicant holds, and clears anything a rejected row could
+     * still carry over.
+     *
+     * <p>Announced exactly like {@link #insertApplication}, so the people who
+     * approve registrations hear about it the same way.
+     *
+     * @return the reopened application, or empty if the row is not rejected
+     *     (already reopened by a concurrent request, or never rejected)
+     */
+    public Optional<Account> reopenApplication(UUID id, String displayName, String passwordHash) {
+        int updated = jdbc.sql("""
+                        update account
+                           set status = 'pending'::account_status,
+                               display_name = ?,
+                               password_hash = ?,
+                               must_change_password = false,
+                               deactivated_at = null,
+                               deactivation_scheduled_for = null,
+                               updated_at = now()
+                         where id = ? and status = 'rejected'::account_status
+                        """)
+                .params(displayName, passwordHash, id)
+                .update();
+        if (updated == 0) {
+            return Optional.empty();
+        }
+        replaceRoles(id, Set.of(AppRole.GUEST), null);
+        Account reopened = findById(id).orElseThrow();
+        events.publishEvent(
+                new AccountRegisteredEvent(reopened.id(), reopened.email(), reopened.avatarUrl()));
+        return Optional.of(reopened);
+    }
+
+    /**
      * Sets a new password hash — the reset path (ADR-018), the self-service
      * change path (revision of ADR-017), and, since ADR-030, the same
      * self-service path also giving a Google-only account its first password
