@@ -118,6 +118,32 @@ public class AuditRepository {
                 .list();
     }
 
+    /**
+     * This one account's own sign-in/sign-out history — the Security card's
+     * "Recent sign-ins" (ADR-093). A dedicated filtered query rather than
+     * taking a larger slice of {@link #recentForActor} and filtering client
+     * or service side: this account's other activity (content saves, AX
+     * Renewal actions, ...) sits in the same table and would otherwise push
+     * genuine sign-in events outside a fixed-size window.
+     *
+     * <p>// req: FR-OPS-001, NFR-SEC-PII, ADR-093
+     */
+    public List<AuditEntry> recentSignInsForActor(UUID actorId, int limit) {
+        return jdbc.sql("""
+                        select l.id, l.actor_id, l.actor_email, a.avatar_url as actor_avatar_url,
+                               l.action, l.target_type, l.target_id,
+                               l.detail::text as detail, l.occurred_at
+                        from audit_log l
+                        left join account a on a.id = l.actor_id
+                        where l.actor_id = ? and l.action in (?, ?)
+                        order by l.occurred_at desc, l.id desc
+                        limit ?
+                        """)
+                .params(actorId, AuditAction.AUTH_SIGN_IN, AuditAction.AUTH_SIGN_OUT, limit)
+                .query(this::map)
+                .list();
+    }
+
     public List<AuditEntry> forTarget(String targetType, UUID targetId, int limit) {
         return jdbc.sql("""
                         select l.id, l.actor_id, l.actor_email, a.avatar_url as actor_avatar_url,

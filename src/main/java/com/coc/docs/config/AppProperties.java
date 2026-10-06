@@ -27,6 +27,11 @@ import org.springframework.validation.annotation.Validated;
  *     nothing at all.
  * @param googleClientId the Google OAuth client id that ID tokens must be
  *     addressed to. Blank is allowed -- see {@link #googleSignInConfigured()}.
+ * @param googleClientSecret the same client's secret, needed <em>only</em> to
+ *     exchange an authorization code for a Gmail refresh token (ADR-085).
+ *     Sign-in does not use it and never will: verifying an ID token is done
+ *     with Google's public keys, so a deployment that wants sign-in and not
+ *     Gmail access leaves this blank and loses nothing.
  * @param storage object storage behind the S3 API
  *
  * <p>// req: CONST-TECH-08, NFR-SEC-SESSION, NFR-SEC-CHANNEL, ADR-011, ADR-012
@@ -38,6 +43,7 @@ public record AppProperties(
         @NotBlank String frontendOrigin,
         boolean cookieSecure,
         String googleClientId,
+        String googleClientSecret,
         @NotNull Storage storage) {
 
     /**

@@ -1,6 +1,9 @@
 package com.coc.docs.mail;
 
 import com.coc.docs.config.AppProperties;
+import jakarta.mail.MessagingException;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Component;
 
 /**
@@ -17,27 +20,22 @@ import org.springframework.stereotype.Component;
  * that was decided; it accumulated. A recipient who gets an invite and then
  * a reset sees two different products.
  *
- * <h2>The brand mark is now the real logo</h2>
+ * <h2>The brand mark is the real logo, embedded in the email</h2>
  *
- * <p>Each mailer previously drew a gradient tile with the letters "CD" in
- * it, and each said why in its own Javadoc: <em>"there is no asset host to
- * point an {@code <img>} at"</em>. That is no longer true — the frontend
- * serves {@code /logo-coc-docs-platform.png} at {@link
- * AppProperties#frontendOrigin()}, which is a public HTTPS origin in any
- * real deployment, so the emails now use the same logo the application
- * header does.
+ * <p>Each mailer once drew a gradient tile with the letters "CD" in it. They
+ * then linked the frontend's {@code /logo-coc-docs-platform.png} at {@link
+ * AppProperties#frontendOrigin()} — which only rendered where that origin was
+ * reachable from the recipient's mail client. Gmail fetches every image
+ * through Google's own proxy, which cannot reach {@code
+ * http://localhost:3000}, so in development every email showed a broken
+ * image and its alt text.
  *
- * <p>The consequence to know about: <b>the logo only renders where {@code
- * app.frontend-origin} is reachable from the recipient's mail client.</b>
- * Against a local {@code http://localhost:3000} it silently falls back to
- * its alt text, which is the correct outcome and needs no special case —
- * but it is the same misconfiguration that makes every emailed link
- * unclickable, so a missing logo in a real inbox is a useful early symptom
- * of it rather than a styling bug.
- *
- * <p>Gmail fetches images through its own proxy and caches them, so the
- * file must be publicly readable with no session — it is, being served from
- * the Next.js {@code public/} directory ahead of any auth check.
+ * <p>The logo now travels inside the email (ADR-092): a 2x copy sized for
+ * email ships in the backend jar ({@link #LOGO_RESOURCE}), the {@code <img>}
+ * points at {@code cid:}{@link #LOGO_CID}, and every mailer attaches it with
+ * {@link #embedLogo}. It renders wherever the site runs, and without the
+ * mail client having to load remote images. The link around it still goes
+ * to the frontend origin.
  *
  * <h2>Typography</h2>
  *
@@ -156,11 +154,37 @@ public class EmailLayout {
                 + "</div>";
     }
 
-    /** The application's own logo, linked back to the site. */
+    /**
+     * The logo's Content-ID: {@link #page} points the {@code <img>} at {@code
+     * cid:} + this, and {@link #embedLogo} attaches the image under it.
+     */
+    public static final String LOGO_CID = "coc-docs-platform-logo";
+
+    /** The logo inside the backend jar — a 2x copy of {@code frontend/public/logo-coc-docs-platform.png}, sized for email. */
+    static final String LOGO_RESOURCE = "mail/logo-coc-docs-platform.png";
+
+    /**
+     * Attaches the logo to {@code helper}'s message as an inline image, so it
+     * travels inside the email itself (ADR-092). Every email built with {@link
+     * #page} must call this — after {@code setText}, which is when {@code
+     * MimeMessageHelper} accepts inline parts — and the helper must be
+     * multipart.
+     *
+     * <p>Embedded rather than linked because a linked logo only loads where
+     * the recipient's mail client can reach {@code app.frontend-origin}:
+     * Gmail fetches every image through Google's own proxy, which cannot reach
+     * {@code http://localhost:3000}, so in development every email showed a
+     * broken image and its alt text.
+     */
+    public static void embedLogo(MimeMessageHelper helper) throws MessagingException {
+        helper.addInline(LOGO_CID, new ClassPathResource(LOGO_RESOURCE), "image/png");
+    }
+
+    /** The application's own logo, linked back to the site. The image itself is embedded — see {@link #embedLogo}. */
     private String logo() {
         String origin = properties.frontendOrigin();
         return "<a href=\"" + origin + "\" style=\"display:inline-block;text-decoration:none;\">"
-                + "<img src=\"" + origin + "/logo-coc-docs-platform.png\" "
+                + "<img src=\"cid:" + LOGO_CID + "\" "
                 + "width=\"" + LOGO_WIDTH + "\" height=\"" + LOGO_HEIGHT + "\" "
                 + "alt=\"Coc Docs Platform\" "
                 // border:0 for Outlook, which otherwise draws a link border

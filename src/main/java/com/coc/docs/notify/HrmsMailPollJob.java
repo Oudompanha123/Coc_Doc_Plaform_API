@@ -51,10 +51,25 @@ public class HrmsMailPollJob {
             log.info("HRMS: mailbox polling is off (app.hrms.enabled is false). No mailbox is read.");
             return;
         }
-        if (!properties.usable()) {
+        if (!properties.active()) {
             log.warn(
-                    "HRMS: polling is enabled but incomplete — app.hrms.username, password and sender "
-                            + "must all be set. Nothing will be polled until they are.");
+                    "HRMS: polling is enabled but incomplete — app.hrms.sender must be set. It is the "
+                            + "filter that keeps a poll to the HRMS mail and out of the rest of a mailbox, "
+                            + "so nothing is polled without it.");
+            return;
+        }
+        if (!properties.sharedInboxUsable()) {
+            // Not a warning (ADR-084). No shared mailbox is now a legitimate
+            // and in fact preferable configuration: every inbox read is then
+            // somebody's own, under a credential they supplied themselves.
+            // Said out loud anyway, because "the bell never lights up" and
+            // "nobody has stored a credential yet" look identical from
+            // outside, and they have different fixes.
+            log.info(
+                    "HRMS: no shared mailbox configured (app.hrms.username/password are blank). Only the "
+                            + "inboxes of accounts that stored their own credential are read, watching for "
+                            + "mail from {}.",
+                    properties.sender());
             return;
         }
         log.info("HRMS: polling {}", properties.describe());
@@ -70,7 +85,9 @@ public class HrmsMailPollJob {
      */
     @Scheduled(cron = HrmsMailProperties.POLL_CRON, zone = HrmsMailProperties.POLL_ZONE)
     public void poll() {
-        if (!properties.usable()) {
+        // active(), not sharedInboxUsable(): with no shared mailbox there is
+        // still every stored personal credential to read (ADR-084).
+        if (!properties.active()) {
             return;
         }
         try {

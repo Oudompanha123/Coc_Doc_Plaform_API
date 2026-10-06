@@ -90,6 +90,8 @@ public class AccountInviteMailer {
             helper.setTo(toEmail);
             helper.setSubject("Your Account Has Been Created");
             helper.setText(plainTextBody(toEmail, temporaryPassword, loginUrl), htmlBody(toEmail, temporaryPassword, loginUrl));
+            // Inside the email, so it shows wherever the site runs (ADR-092).
+            EmailLayout.embedLogo(helper);
             sender.send(message);
         } catch (MessagingException e) {
             // A malformed address or similar — not a caller-facing concern, the

@@ -74,7 +74,7 @@ public class HrmsImapMailbox implements HrmsMailbox {
 
     @Override
     public List<Arrival> arrivalsSince(Instant since) {
-        if (!properties.usable()) {
+        if (!properties.sharedInboxUsable()) {
             // Not an error and not logged: the job checks this too and says so
             // once at startup rather than every thirty minutes.
             return List.of();
@@ -100,7 +100,7 @@ public class HrmsImapMailbox implements HrmsMailbox {
         Store store = null;
         Folder folder = null;
         try {
-            store = Session.getInstance(sessionProperties()).getStore("imaps");
+            store = Session.getInstance(sessionProperties(login)).getStore("imaps");
             store.connect(properties.host(), properties.port(), login.username(), login.password());
 
             folder = store.getFolder(properties.folder());
@@ -163,7 +163,7 @@ public class HrmsImapMailbox implements HrmsMailbox {
      */
     @Override
     public Optional<String> htmlBodyOf(String messageId) {
-        if (!properties.usable()) {
+        if (!properties.sharedInboxUsable()) {
             return Optional.empty();
         }
         return htmlBodyOf(messageId, configuredLogin());
@@ -179,7 +179,7 @@ public class HrmsImapMailbox implements HrmsMailbox {
         Store store = null;
         Folder folder = null;
         try {
-            store = Session.getInstance(sessionProperties()).getStore("imaps");
+            store = Session.getInstance(sessionProperties(login)).getStore("imaps");
             store.connect(properties.host(), properties.port(), login.username(), login.password());
 
             folder = store.getFolder(properties.folder());
@@ -300,19 +300,9 @@ public class HrmsImapMailbox implements HrmsMailbox {
      * the one that drifts is the one nobody is watching.
      */
     private Login configuredLogin() {
-        return new Login(properties.username(), properties.password());
+        return Login.password(properties.username(), properties.password());
     }
 
-    /**
-     * Whether this login can be attempted at all.
-     *
-     * <p>{@code properties.usable()} still gates the host and the watched
-     * sender, which every login shares; this adds only the credential. A blank
-     * one is not logged: for a personal mailbox it means a stored credential
-     * failed to decrypt, which the repository has already reported, and
-     * repeating it every thirty minutes per account would bury the mailbox
-     * failures that matter.
-     */
     /**
      * Names a mailbox in a log line without naming the person.
      *
@@ -336,8 +326,22 @@ public class HrmsImapMailbox implements HrmsMailbox {
         return "the mailbox of " + shown + (at < 0 ? "" : user.substring(at));
     }
 
+    /**
+     * Whether this login can be attempted at all.
+     *
+     * <p>{@code properties.active()} gates the feature and the watched sender,
+     * which every login shares; this adds only the credential. Deliberately
+     * <em>not</em> {@code sharedInboxUsable()} (ADR-084): a personal mailbox
+     * does not need a shared one to exist, and requiring it would mean nobody
+     * could read their own mail until somebody had configured a colleague's.
+     *
+     * <p>A blank credential is not logged. For a personal mailbox it means a
+     * stored credential failed to decrypt, which the repository has already
+     * reported, and repeating it every thirty minutes per account would bury
+     * the mailbox failures that matter.
+     */
     private boolean usable(Login login) {
-        return properties.usable()
+        return properties.active()
                 && login != null
                 && login.username() != null
                 && !login.username().isBlank()
@@ -345,7 +349,7 @@ public class HrmsImapMailbox implements HrmsMailbox {
                 && !login.password().isBlank();
     }
 
-    private Properties sessionProperties() {
+    private Properties sessionProperties(Login login) {
         Properties props = new Properties();
         props.put("mail.store.protocol", "imaps");
         props.put("mail.imaps.host", properties.host());
@@ -357,6 +361,13 @@ public class HrmsImapMailbox implements HrmsMailbox {
         props.put("mail.imaps.connectiontimeout", TIMEOUT_MS);
         props.put("mail.imaps.timeout", TIMEOUT_MS);
         props.put("mail.imaps.writetimeout", TIMEOUT_MS);
+        if (login != null && login.xoauth2()) {
+            // Gmail offers PLAIN alongside XOAUTH2, and a client that picks
+            // PLAIN sends the access token as a password -- which Google
+            // refuses with an error that reads like a bad credential rather
+            // than a wrong mechanism (ADR-085). Naming it removes the guess.
+            props.put("mail.imaps.auth.mechanisms", "XOAUTH2");
+        }
         return props;
     }
 

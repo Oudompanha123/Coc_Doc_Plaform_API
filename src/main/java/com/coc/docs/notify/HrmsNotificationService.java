@@ -82,6 +82,9 @@ public class HrmsNotificationService {
     /** Whose inboxes may be read, and with what (ADR-077). */
     private final AccountMailCredentialRepository credentials;
 
+    /** Mints the access token an OAuth credential authenticates with (ADR-085). */
+    private final GoogleMailOAuthService oauth;
+
     public HrmsNotificationService(
             HrmsMailbox mailbox,
             HrmsNotificationRepository repository,
@@ -89,8 +92,10 @@ public class HrmsNotificationService {
             AccountRepository accounts,
             HrmsReportContentRepository contents,
             AttendanceMailService attendanceMail,
-            AccountMailCredentialRepository credentials) {
+            AccountMailCredentialRepository credentials,
+            GoogleMailOAuthService oauth) {
         this.credentials = credentials;
+        this.oauth = oauth;
         this.mailbox = mailbox;
         this.repository = repository;
         this.properties = properties;
@@ -106,8 +111,19 @@ public class HrmsNotificationService {
      *     arrives once a day and this runs every half hour.
      */
     public int poll() {
-        if (!properties.usable()) {
+        if (!properties.active()) {
             return 0;
+        }
+
+        // The shared mailbox is now optional (ADR-084). A deployment that
+        // configures no app.hrms.username is not misconfigured: it is one
+        // where every inbox read belongs to the person whose inbox it is,
+        // which is the arrangement this feature is moving towards. Skipping
+        // the block entirely is what makes that possible -- arrivalsSince()
+        // would otherwise connect with a blank credential and log a failure
+        // every thirty minutes.
+        if (!properties.sharedInboxUsable()) {
+            return pollPersonalInboxes();
         }
 
         List<HrmsMailbox.Arrival> arrivals = mailbox.arrivalsSince(searchFrom());
@@ -147,12 +163,18 @@ public class HrmsNotificationService {
             if (stored.isEmpty()) {
                 continue;
             }
-            HrmsMailbox.Login login =
-                    new HrmsMailbox.Login(stored.get().username(), stored.get().appPassword());
+            Optional<HrmsMailbox.Login> login = loginFor(stored.get());
+            if (login.isEmpty()) {
+                // An OAuth grant that will not mint an access token: revoked,
+                // expired, or the consent screen changed under it (ADR-085
+                // §4.2). Skipped rather than retried with something else --
+                // there is nothing else that would be theirs.
+                continue;
+            }
             try {
                 polled++;
-                for (HrmsMailbox.Arrival arrival : mailbox.arrivalsSince(searchFrom(target.accountId()), login)) {
-                    if (record(arrival, target.accountId(), login)) {
+                for (HrmsMailbox.Arrival arrival : mailbox.arrivalsSince(searchFrom(target.accountId()), login.get())) {
+                    if (record(arrival, target.accountId(), login.get())) {
                         recorded++;
                     }
                 }
@@ -358,11 +380,13 @@ public class HrmsNotificationService {
         // permanently unreadable. Needs the mailbox, hence the usable() check
         // here and not above -- a stored report is readable with HRMS
         // unconfigured, which it was not before.
-        if (!properties.usable()) {
+        if (!properties.active()) {
             return Optional.empty();
         }
-        Optional<HrmsMailContent> fetched = mailbox
-                .htmlBodyOf(notification.messageId())
+        // bodyFor picks the owner's own credential for an owned row and the
+        // shared one otherwise, so this path no longer needs a shared mailbox
+        // to exist (ADR-084).
+        Optional<HrmsMailContent> fetched = bodyFor(notification)
                 .map(html -> HrmsReportParser.parse(
                         notification.subject(), notification.reportDate(), html));
 
@@ -407,7 +431,24 @@ public class HrmsNotificationService {
      * one result.
      */
     public List<HrmsMailContent> reportsForDate(LocalDate date) {
-        return repository.byReportDate(date).stream().flatMap(n -> contentOf(n).stream()).toList();
+        return reportsForDate(date, null);
+    }
+
+    /**
+     * Every report for one date that this viewer is allowed: the shared
+     * mailbox's, plus the ones read from their own inbox (ADR-084).
+     *
+     * <p>Without the viewer this returns shared rows only, which was correct
+     * while the shared mailbox was mandatory and is a silent blank once it is
+     * not: an account whose reports all came from its own inbox would see an
+     * empty Attendance page and no reason why. The viewer is what makes
+     * "no shared mailbox" a working configuration rather than a working poll
+     * nobody can read the results of.
+     */
+    public List<HrmsMailContent> reportsForDate(LocalDate date, java.util.UUID viewer) {
+        return repository.byReportDate(date, viewer).stream()
+                .flatMap(n -> contentOf(n).stream())
+                .toList();
     }
 
     /**
@@ -422,12 +463,95 @@ public class HrmsNotificationService {
         if (stored.isPresent()) {
             return stored;
         }
-        if (!properties.usable()) {
-            return Optional.empty();
-        }
-        return mailbox
-                .htmlBodyOf(notification.messageId())
+        return bodyFor(notification)
                 .map(html -> HrmsReportParser.parse(notification.subject(), notification.reportDate(), html));
+    }
+
+    /**
+     * One report's body, from whichever mailbox actually holds it (ADR-084).
+     *
+     * <p>An owned row exists only in its owner's inbox, so it is fetched with
+     * that account's own credential. This is what lifts the limitation
+     * recorded in ADR-077 §4.2, where an owned report whose body failed to
+     * store at poll time could never be re-read: the shared mailbox was the
+     * only one the read path knew how to open, and it does not contain that
+     * message.
+     *
+     * <p>Empty rather than a fallback when the owner's credential is gone.
+     * Reading somebody's report with a different account's credential would
+     * either find nothing or find the wrong thing, and of those two the second
+     * is much worse.
+     */
+    /**
+     * The newest report this account may see, scoped the way the screen would
+     * scope it (ADR-089).
+     *
+     * <p>Exists because the sign-in mailer has no {@code CurrentUser}: it runs
+     * off the request thread, after the transaction that created the session
+     * has committed. Rather than fabricate a principal, it passes the two
+     * facts the scoping rule actually uses — who is asking and whether they
+     * outrank a plain user — and this applies the same rule
+     * {@link #reportFor} applies.
+     *
+     * <p>Empty when there is no report, or none this viewer may open. Both are
+     * ordinary: a new account, a quiet weekend, or reports belonging to
+     * somebody else's mailbox.
+     *
+     * @param admin whether this account is {@code ADMIN} or above, and so sees
+     *     the whole report rather than only its own rows
+     * @return the newest report and its id, so the caller can record that it
+     *     was sent
+     */
+    public Optional<DatedReport> latestReportFor(
+            java.util.UUID accountId, String email, String hrmsName, boolean admin) {
+
+        for (HrmsNotification notification : recent(5, accountId)) {
+            Optional<HrmsMailContent> content = contentOf(notification);
+            if (content.isEmpty()) {
+                // Recorded but unreadable — no stored body and the mailbox
+                // cannot be reached. Try the one before it rather than giving
+                // up: an older readable report is worth more than nothing.
+                continue;
+            }
+            HrmsMailContent scoped = admin ? content.get() : content.get().onlyRowsFor(hrmsName, email);
+            return Optional.of(new DatedReport(notification.id(), scoped));
+        }
+        return Optional.empty();
+    }
+
+    /** A report with the id of the arrival it came from. */
+    public record DatedReport(long notificationId, HrmsMailContent content) {}
+
+    /**
+     * How one account authenticates to its own mailbox (ADR-085).
+     *
+     * <p>The only place that decides between an App Password and an OAuth
+     * access token, so adding a third kind later changes one method rather
+     * than every caller.
+     *
+     * <p>Empty for an OAuth grant Google will not honour — revoked, six months
+     * unused, or invalidated by a password change. Empty and not "try the App
+     * Password instead": a row holds one kind or the other (V62), so there is
+     * no second credential of theirs to fall back to, and falling back to
+     * somebody else's would be the serious mistake.
+     */
+    private Optional<HrmsMailbox.Login> loginFor(AccountMailCredentialRepository.Credential credential) {
+        if (!credential.isOauth()) {
+            return Optional.of(HrmsMailbox.Login.password(credential.username(), credential.appPassword()));
+        }
+        return oauth.accessTokenFor(credential.accountId(), credential.oauthRefreshToken())
+                .map(token -> HrmsMailbox.Login.oauth(credential.username(), token));
+    }
+
+    private Optional<String> bodyFor(HrmsNotification notification) {
+        java.util.UUID owner = repository.ownerOf(notification.id()).orElse(null);
+        if (owner != null) {
+            return credentials
+                    .findFor(owner)
+                    .flatMap(this::loginFor)
+                    .flatMap(login -> mailbox.htmlBodyOf(notification.messageId(), login));
+        }
+        return properties.sharedInboxUsable() ? mailbox.htmlBodyOf(notification.messageId()) : Optional.empty();
     }
 
     /**
@@ -484,6 +608,60 @@ public class HrmsNotificationService {
             boolean linked = (explicitName != null && !explicitName.isBlank()) || !mine.rows().isEmpty();
             return new ScopedReport(mine, true, linked);
         });
+    }
+
+    /**
+     * The caller's own attendance row for one calendar date, from whichever
+     * department's report actually names them (self-service, ADR-086).
+     *
+     * <p>Unlike {@link #reportsForDate} — which is unscoped and exists only
+     * for the admin page already floored at {@code admin} — this always
+     * narrows to the caller, the same way {@link #reportFor} narrows one
+     * report by id. Every notification {@code caller} may see for the date
+     * (the shared mailbox's, plus their own inbox's, ADR-077 via {@link
+     * HrmsNotificationRepository#byReportDate(LocalDate, java.util.UUID)}) is
+     * resolved and matched against {@code account.hrms_name} or email; one
+     * employee belongs to one department, so the first report that actually
+     * names them is the answer.
+     *
+     * <p>Always returns, never refuses: a caller with nothing recorded for the
+     * date is not an error, and a caller with no link at all is not either —
+     * both are ordinary outcomes the screen must tell apart, via {@code
+     * viewerLinked} and an empty {@code rows()}, not via absence of a result.
+     * {@code null} is reported as not linked and not found, the shape a caller
+     * with no session (which cannot reach this route anyway, per {@code
+     * SecurityConfig}) would get if it somehow did.
+     *
+     * <p>Scope comes from the session and only from the session; there is no
+     * parameter on the route for a caller to widen (TM-025), same as {@link
+     * #reportFor}.
+     *
+     * <p>// req: FR-OPS-001, NFR-SEC-PII, ADR-086
+     */
+    public ScopedReport myAttendanceFor(LocalDate date, CurrentUser caller) {
+        String explicitName = caller == null ? null : accounts.hrmsNameOf(caller.id()).orElse(null);
+        String email = caller == null ? null : caller.email();
+
+        if (caller != null) {
+            for (HrmsNotification notification : repository.byReportDate(date, caller.id())) {
+                Optional<HrmsMailContent> content = contentOf(notification);
+                if (content.isEmpty()) {
+                    continue;
+                }
+                HrmsMailContent mine = content.get().onlyRowsFor(explicitName, email);
+                if (!mine.rows().isEmpty()) {
+                    return new ScopedReport(mine, true, true);
+                }
+            }
+        }
+
+        // Nothing recorded for the date named this caller. Still honest about
+        // which of the two reasons that is -- an explicit hrms_name is taken
+        // as linked even though today's silence cannot re-confirm it from a
+        // row, the same reading reportFor already gives that field.
+        boolean linked = explicitName != null && !explicitName.isBlank();
+        HrmsMailContent empty = new HrmsMailContent(null, date, null, List.of(), List.of(), null);
+        return new ScopedReport(empty, true, linked);
     }
 
     /**

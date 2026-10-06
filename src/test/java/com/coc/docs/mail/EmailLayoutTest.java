@@ -3,9 +3,14 @@ package com.coc.docs.mail;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.coc.docs.config.AppProperties;
+import jakarta.mail.BodyPart;
+import jakarta.mail.Session;
+import jakarta.mail.internet.MimeMessage;
 import java.time.Duration;
+import java.util.Properties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.mail.javamail.MimeMessageHelper;
 
 /**
  * The shared email chrome. Plain unit test — no Spring context, no database,
@@ -15,8 +20,8 @@ import org.junit.jupiter.api.Test;
  * string comparison is how a template becomes untouchable, so nothing below
  * asserts a colour, a radius or a font size; restyling an email must not
  * fail a test. What is pinned is only what breaks silently and in somebody
- * else's inbox: the logo filename matching a real file in the frontend's
- * {@code public/} directory, the origin it is built from, and the escaping.
+ * else's inbox: the logo being embedded (and actually attached), and the
+ * escaping.
  *
  * <p>// req: ADR-018, ADR-021
  */
@@ -25,29 +30,44 @@ class EmailLayoutTest {
     private static final String ORIGIN = "https://docs.example.com";
 
     private final EmailLayout layout = new EmailLayout(new AppProperties(
-            Duration.ofDays(1), ORIGIN, true, "", new AppProperties.Storage("", "", "", "", "")));
+            Duration.ofDays(1), ORIGIN, true, "", "", new AppProperties.Storage("", "", "", "", "")));
 
     @Test
-    @DisplayName("the brand mark is the real logo, served from the configured frontend origin")
-    void logoComesFromTheFrontendOrigin() {
+    @DisplayName("the brand mark is the embedded logo, not a link a mail client has to fetch (ADR-092)")
+    void logoIsEmbeddedNotLinked() {
         String html = layout.page("preview", EmailLayout.heading("Hello"));
 
-        // frontend/public/logo-coc-docs-platform.png -- if that file is ever
-        // renamed, every email quietly falls back to alt text and nobody
-        // finds out from the application itself.
-        assertThat(html).contains("src=\"" + ORIGIN + "/logo-coc-docs-platform.png\"");
+        // A linked logo only loads where the mail client can reach the
+        // frontend origin — Gmail's image proxy cannot reach localhost.
+        assertThat(html).contains("src=\"cid:" + EmailLayout.LOGO_CID + "\"");
+        assertThat(html).doesNotContain("src=\"" + ORIGIN);
+        assertThat(html).doesNotContain("src=\"/logo");
         // Both dimensions, or Outlook reserves no space and the card jumps
         // as the image loads.
         assertThat(html).contains("width=\"168\"").contains("height=\"80\"");
         assertThat(html).contains("alt=\"Coc Docs Platform\"");
+        // The link around it still goes to the site.
+        assertThat(html).contains("href=\"" + ORIGIN + "\"");
     }
 
     @Test
-    @DisplayName("a relative logo path is never emitted — a mail client has no base URL to resolve one against")
-    void logoIsAlwaysAbsolute() {
-        String html = layout.page("preview", "");
+    @DisplayName("embedLogo attaches the logo as an inline image under the Content-ID the page points at")
+    void embedLogoAttachesTheInlineImage() throws Exception {
+        MimeMessage message = new MimeMessage(Session.getInstance(new Properties()));
+        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+        helper.setText("plain", layout.page("preview", ""));
 
-        assertThat(html).doesNotContain("src=\"/logo");
+        EmailLayout.embedLogo(helper);
+        message.saveChanges();
+
+        BodyPart logo = MailParts.logo(message);
+        assertThat(logo).as("inline part with Content-ID <%s>", EmailLayout.LOGO_CID).isNotNull();
+        assertThat(logo.getContentType()).startsWith("image/png");
+        assertThat(logo.getDisposition()).isEqualTo(BodyPart.INLINE);
+        // A real PNG, not an empty part: the resource must exist in the jar.
+        byte[] bytes = logo.getInputStream().readAllBytes();
+        assertThat(bytes).hasSizeGreaterThan(1000);
+        assertThat(java.util.Arrays.copyOf(bytes, 4)).containsExactly(0x89, 'P', 'N', 'G');
     }
 
     @Test

@@ -1,8 +1,8 @@
 package com.coc.docs.auth.dto;
 
+import com.coc.docs.auth.StrongPassword;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
 
 /**
  * Self-service password write (revision of ADR-017, current-password check
@@ -32,7 +32,7 @@ public record ChangePasswordRequest(
         @Schema(description = "The account's current password — the temporary password for the forced first-login completion, the existing password for a voluntary change, or omitted entirely when the account has no password yet. Verified against the stored hash when one exists. ADR-022, ADR-024, ADR-030.")
                 String currentPassword,
         @NotBlank
-                @Size(min = 8, max = 200, message = "Password must be at least 8 characters.")
+                @StrongPassword
                 @Schema(description = "Plaintext in transit only — hashed (bcrypt) before it ever reaches the database.")
                 String newPassword,
         @NotBlank @Schema(description = "Must match newPassword exactly.") String confirmPassword) {}

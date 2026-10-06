@@ -23,7 +23,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * and which would have refused the delete outright. A mocked repository can
  * only confirm that a method was called.
  *
- * <p>// req: FR-AUTH-003, FR-AUTH-008, ADR-023
+ * <p>// req: FR-AUTH-003, FR-AUTH-008, ADR-023, ADR-091
  */
 class AccountDeletionTest extends PostgresTestBase {
 
@@ -31,6 +31,7 @@ class AccountDeletionTest extends PostgresTestBase {
     @Autowired AccountRepository accounts;
     @Autowired SessionRepository sessions;
     @Autowired JdbcClient jdbc;
+    @Autowired com.coc.docs.axrenewal.AxRenewalCommentRepository commentRepository;
 
     private Account boss;
     private CurrentUser actor;
@@ -179,6 +180,75 @@ class AccountDeletionTest extends PostgresTestBase {
                 .hasMessageContaining("only active super admin");
 
         assertThat(accounts.findById(other.id())).isPresent();
+    }
+
+    @Test
+    @DisplayName("someone who worked on AX Renewal and the docs can be deleted; the work stays, unattributed (ADR-091)")
+    void deletingSomeoneWhoDidWorkKeepsTheWork() {
+        Account worker = member("worker@example.com");
+        UUID project = UUID.randomUUID();
+        // The references V64 changed from NO ACTION, one of each kind.
+        jdbc.sql("insert into ax_renewal_project (id, name, created_by) values (?, 'Legacy Portal', ?)")
+                .params(project, worker.id())
+                .update();
+        jdbc.sql("insert into ax_renewal_comment (project_id, author_id, body) values (?, ?, 'looks right')")
+                .params(project, worker.id())
+                .update();
+        jdbc.sql("insert into ax_renewal_confirmation (project_id, section, confirmed_by, confirmed_via) "
+                        + "values (?, 'pages', ?, 'developer_role')")
+                .params(project, worker.id())
+                .update();
+        jdbc.sql("insert into ax_renewal_implementation_run (project_id, status, started_by) values (?, 'applied', ?)")
+                .params(project, worker.id())
+                .update();
+        jdbc.sql("insert into docs_content (product_key, slug, kind, body, updated_by) "
+                        + "values ('jex3-0', '', 'hero', '{}'::jsonb, ?)")
+                .param(worker.id())
+                .update();
+
+        accountService.delete(worker.id(), actor);
+
+        assertThat(accounts.findById(worker.id())).isEmpty();
+        assertThat(jdbc.sql("select created_by from ax_renewal_project where id = ?").param(project)
+                        .query(UUID.class).optional())
+                .isEmpty();
+        assertThat(jdbc.sql("select count(*) from ax_renewal_project where id = ?").param(project)
+                        .query(Long.class).single())
+                .isEqualTo(1L);
+        assertThat(jdbc.sql("select count(*) from ax_renewal_implementation_run where project_id = ? and started_by is null")
+                        .param(project).query(Long.class).single())
+                .isEqualTo(1L);
+        assertThat(jdbc.sql("select count(*) from docs_content where updated_by is null").query(Long.class).single())
+                .isEqualTo(1L);
+        // Still in the thread, under a name that says what happened.
+        assertThat(commentRepository.listForProject(project))
+                .singleElement()
+                .satisfies(c -> {
+                    assertThat(c.authorId()).isNull();
+                    assertThat(c.authorName()).isEqualTo("Deleted account");
+                    assertThat(c.body()).isEqualTo("looks right");
+                });
+    }
+
+    @Test
+    @DisplayName("no reference to account can refuse a delete — every one says cascade or set null (ADR-091)")
+    void everyReferenceToAccountSaysWhatHappensOnDelete() {
+        // The guard V10 and V64 both needed and did not have: a table added
+        // later with a bare "references account" makes every account that
+        // touched it undeletable again, and nothing failed until someone tried.
+        java.util.List<String> blocking = jdbc.sql("""
+                        select c.conrelid::regclass::text || '.' || a.attname
+                        from pg_constraint c
+                        join pg_attribute a on a.attrelid = c.conrelid and a.attnum = c.conkey[1]
+                        where c.contype = 'f'
+                          and c.confrelid = 'account'::regclass
+                          and c.confdeltype in ('a', 'r')
+                        order by 1
+                        """)
+                .query(String.class)
+                .list();
+
+        assertThat(blocking).as("foreign keys to account with no ON DELETE action").isEmpty();
     }
 
     @Test

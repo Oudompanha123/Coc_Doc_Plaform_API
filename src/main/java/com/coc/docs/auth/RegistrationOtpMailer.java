@@ -82,6 +82,8 @@ public class RegistrationOtpMailer {
             helper.setTo(toEmail);
             helper.setSubject("Verify your email — Coc Docs Platform");
             helper.setText(plainTextBody(code, ttl), htmlBody(code, ttl));
+            // Inside the email, so it shows wherever the site runs (ADR-092).
+            EmailLayout.embedLogo(helper);
             sender.send(message);
         } catch (MessagingException e) {
             // A malformed address or similar — not a caller-facing concern

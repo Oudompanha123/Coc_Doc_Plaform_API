@@ -99,6 +99,8 @@ public class PasswordResetMailer {
                     ? "Reset your Coc Docs Platform password"
                     : "Set your Coc Docs Platform password");
             helper.setText(plainTextBody(resetUrl, hadExistingPassword), htmlBody(resetUrl, hadExistingPassword));
+            // Inside the email, so it shows wherever the site runs (ADR-092).
+            EmailLayout.embedLogo(helper);
             sender.send(message);
         } catch (MessagingException e) {
             // A malformed address or similar — not a caller-facing concern (ADR-018

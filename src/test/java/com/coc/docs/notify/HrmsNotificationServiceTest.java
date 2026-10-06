@@ -72,9 +72,12 @@ class HrmsNotificationServiceTest {
      */
     private final AccountMailCredentialRepository mailCredentials = mock(AccountMailCredentialRepository.class);
 
+    /** Unstubbed: App Password credentials never reach it (ADR-085). */
+    private final GoogleMailOAuthService oauth = mock(GoogleMailOAuthService.class);
+
     private HrmsNotificationService serviceWith(HrmsMailProperties props) {
         return new HrmsNotificationService(
-                mailbox, repository, props, accounts, contents, attendanceMail, mailCredentials);
+                mailbox, repository, props, accounts, contents, attendanceMail, mailCredentials, oauth);
     }
 
     private static HrmsMailbox.Arrival arrival(String id, String subject) {
@@ -521,7 +524,7 @@ class HrmsNotificationServiceTest {
         @Test
         @DisplayName("never opens a mailbox while disabled")
         void disabledFetchesNothing() {
-            when(repository.byReportDate(DAY)).thenReturn(List.of(notification(1, "<a@hrms>")));
+            when(repository.byReportDate(DAY, null)).thenReturn(List.of(notification(1, "<a@hrms>")));
 
             assertThat(serviceWith(properties(false, "someone@gmail.com", "hrms@example.com")).reportsForDate(DAY))
                     .isEmpty();
@@ -531,7 +534,7 @@ class HrmsNotificationServiceTest {
         @Test
         @DisplayName("fetches one body per arrival recorded for that date")
         void fetchesEveryArrival() {
-            when(repository.byReportDate(DAY)).thenReturn(List.of(notification(1, "<a@hrms>"), notification(2, "<b@hrms>")));
+            when(repository.byReportDate(DAY, null)).thenReturn(List.of(notification(1, "<a@hrms>"), notification(2, "<b@hrms>")));
             when(mailbox.htmlBodyOf("<a@hrms>")).thenReturn(Optional.of("<html><body>COOCON</body></html>"));
             when(mailbox.htmlBodyOf("<b@hrms>")).thenReturn(Optional.of("<html><body>Engineering</body></html>"));
 
@@ -547,7 +550,7 @@ class HrmsNotificationServiceTest {
         @Test
         @DisplayName("silently drops an arrival whose body is no longer available")
         void dropsUnavailableBody() {
-            when(repository.byReportDate(DAY)).thenReturn(List.of(notification(1, "<a@hrms>"), notification(2, "<b@hrms>")));
+            when(repository.byReportDate(DAY, null)).thenReturn(List.of(notification(1, "<a@hrms>"), notification(2, "<b@hrms>")));
             when(mailbox.htmlBodyOf("<a@hrms>")).thenReturn(Optional.of("<html><body>COOCON</body></html>"));
             when(mailbox.htmlBodyOf("<b@hrms>")).thenReturn(Optional.empty());
 
@@ -557,9 +560,134 @@ class HrmsNotificationServiceTest {
         @Test
         @DisplayName("no arrivals for the date is an empty list, not an error")
         void noArrivalsIsEmpty() {
-            when(repository.byReportDate(DAY)).thenReturn(List.of());
+            when(repository.byReportDate(DAY, null)).thenReturn(List.of());
 
             assertThat(serviceWith(configured()).reportsForDate(DAY)).isEmpty();
+        }
+    }
+
+    /**
+     * The caller's own row for one date, across whichever department actually
+     * names them (self-service, ADR-086). Backs {@code GET /api/v1/me/attendance}.
+     */
+    @Nested
+    @DisplayName("the caller's own attendance for a date")
+    class MyAttendance {
+
+        private static final LocalDate DAY = LocalDate.of(2026, 9, 7);
+
+        private static final String BEPLEPAY_HTML =
+                "<h3><span>BeplePay Department</span></h3><table>"
+                        + "<tr><th>Name</th><th>Yesterday Check-Out</th><th>Today Check-In</th></tr>"
+                        + "<tr><td>Nin Srey Nuth</td>"
+                        + "<td><span>17:00</span> -&gt; <span>17:44</span></td><td><div><span>Normal</span></div></td>"
+                        + "<td><span>08:00</span> -&gt; <span>08:01</span></td><td><div><span>Late Check-In</span></div></td></tr>"
+                        + "</table>";
+
+        private static final String COOCON_HTML =
+                "<h3><span>COOCON Department</span></h3><table>"
+                        + "<tr><th>Name</th><th>Yesterday Check-Out</th><th>Today Check-In</th></tr>"
+                        + "<tr><td>Ken Vantha</td>"
+                        + "<td><span>17:00</span> -&gt; <span>00:00</span></td><td><div><span>Missed Check-Out</span></div></td>"
+                        + "<td><span>08:00</span> -&gt; <span>00:00</span></td><td><div><span>Missed Check-In</span></div></td></tr>"
+                        + "</table>";
+
+        private static HrmsNotification notification(long id, String messageId) {
+            return new HrmsNotification(
+                    id, messageId, "Attendance on 07-Sep-2026", DAY, Instant.parse("2026-09-07T05:02:00Z"));
+        }
+
+        private com.coc.docs.auth.CurrentUser caller() {
+            return com.coc.docs.auth.TestCallers.user(com.coc.docs.account.AppRole.USER);
+        }
+
+        @Test
+        @DisplayName("returns the caller's own row from whichever department actually names them")
+        void findsTheirOwnRow() {
+            var user = caller();
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.of("Ken Vantha"));
+            when(repository.byReportDate(DAY, user.id()))
+                    .thenReturn(List.of(notification(1, "<a@hrms>"), notification(2, "<b@hrms>")));
+            when(mailbox.htmlBodyOf("<a@hrms>")).thenReturn(Optional.of(BEPLEPAY_HTML));
+            when(mailbox.htmlBodyOf("<b@hrms>")).thenReturn(Optional.of(COOCON_HTML));
+
+            var scoped = serviceWith(configured()).myAttendanceFor(DAY, user);
+
+            assertThat(scoped.content().department()).isEqualTo("COOCON Department");
+            assertThat(scoped.content().rows()).hasSize(1);
+            assertThat(scoped.content().rows().get(0).name()).isEqualTo("Ken Vantha");
+            assertThat(scoped.scopedToViewer()).isTrue();
+            assertThat(scoped.viewerLinked()).isTrue();
+        }
+
+        @Test
+        @DisplayName("matches by email when no hrms_name is set, same rule as a single report")
+        void matchesByEmailWhenNoExplicitName() {
+            var user = com.coc.docs.auth.TestCallers.user(com.coc.docs.account.AppRole.USER, "kenvantha@gmail.com");
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.empty());
+            when(repository.byReportDate(DAY, user.id())).thenReturn(List.of(notification(1, "<b@hrms>")));
+            when(mailbox.htmlBodyOf("<b@hrms>")).thenReturn(Optional.of(COOCON_HTML));
+
+            var scoped = serviceWith(configured()).myAttendanceFor(DAY, user);
+
+            assertThat(scoped.content().rows()).hasSize(1);
+            assertThat(scoped.viewerLinked()).isTrue();
+        }
+
+        @Test
+        @DisplayName("linked but absent from every report recorded for the date: empty rows, still linked")
+        void linkedButNothingRecordedToday() {
+            var user = caller();
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.of("Ken Vantha"));
+            when(repository.byReportDate(DAY, user.id())).thenReturn(List.of(notification(1, "<a@hrms>")));
+            when(mailbox.htmlBodyOf("<a@hrms>")).thenReturn(Optional.of(BEPLEPAY_HTML)); // no "Ken Vantha" row here
+
+            var scoped = serviceWith(configured()).myAttendanceFor(DAY, user);
+
+            assertThat(scoped.content().rows()).isEmpty();
+            assertThat(scoped.scopedToViewer()).isTrue();
+            assertThat(scoped.viewerLinked()).isTrue();
+        }
+
+        @Test
+        @DisplayName("no notification recorded for the date at all: empty rows, still linked if hrms_name is set")
+        void noNotificationForTheDate() {
+            var user = caller();
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.of("Ken Vantha"));
+            when(repository.byReportDate(DAY, user.id())).thenReturn(List.of());
+
+            var scoped = serviceWith(configured()).myAttendanceFor(DAY, user);
+
+            assertThat(scoped.content().rows()).isEmpty();
+            assertThat(scoped.content().reportDate()).isEqualTo(DAY);
+            assertThat(scoped.viewerLinked()).isTrue();
+        }
+
+        @Test
+        @DisplayName("an account with no hrms_name and an email matching nobody is reported as not linked")
+        void notLinkedAtAll() {
+            var user = com.coc.docs.auth.TestCallers.user(com.coc.docs.account.AppRole.USER, "nobody-here@gmail.com");
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.empty());
+            when(repository.byReportDate(DAY, user.id())).thenReturn(List.of(notification(1, "<a@hrms>")));
+            when(mailbox.htmlBodyOf("<a@hrms>")).thenReturn(Optional.of(BEPLEPAY_HTML));
+
+            var scoped = serviceWith(configured()).myAttendanceFor(DAY, user);
+
+            assertThat(scoped.content().rows()).isEmpty();
+            assertThat(scoped.viewerLinked()).isFalse();
+        }
+
+        @Test
+        @DisplayName("looks up only the notifications this caller may see (ADR-077), never the shared-mailbox-only overload")
+        void scopesTheLookupToTheCaller() {
+            var user = caller();
+            when(accounts.hrmsNameOf(user.id())).thenReturn(Optional.empty());
+            when(repository.byReportDate(DAY, user.id())).thenReturn(List.of());
+
+            serviceWith(configured()).myAttendanceFor(DAY, user);
+
+            verify(repository).byReportDate(DAY, user.id());
+            verify(repository, never()).byReportDate(DAY);
         }
     }
 
@@ -606,7 +734,7 @@ class HrmsNotificationServiceTest {
             when(mailbox.arrivalsSince(any())).thenReturn(List.of());
             when(accounts.activeMailTargets()).thenReturn(List.of(target(ANA, "ana@example.com")));
             when(mailCredentials.findFor(ANA))
-                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential("ana@gmail.com", "pw")));
+                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential(ANA, "ana@gmail.com", "pw", null)));
             when(mailbox.arrivalsSince(any(), any()))
                     .thenReturn(List.of(arrival("<own@hrms>", "Attendance on 08-Sep-2026")));
             when(repository.record(any(), any())).thenReturn(true);
@@ -634,9 +762,9 @@ class HrmsNotificationServiceTest {
             when(accounts.activeMailTargets())
                     .thenReturn(List.of(target(ANA, "ana@example.com"), target(BOREY, "borey@example.com")));
             when(mailCredentials.findFor(ANA))
-                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential("ana@gmail.com", "pw")));
+                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential(ANA, "ana@gmail.com", "pw", null)));
             when(mailCredentials.findFor(BOREY))
-                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential("borey@gmail.com", "pw")));
+                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential(BOREY, "borey@gmail.com", "pw", null)));
 
             when(mailbox.arrivalsSince(any(), argThat(l -> l != null && l.username().startsWith("ana"))))
                     .thenThrow(new IllegalStateException("boom"));
@@ -699,6 +827,21 @@ class HrmsNotificationServiceTest {
             verify(repository).recent(5, null);
         }
 
+        /**
+         * The Attendance page. It asked for shared rows only until ADR-084,
+         * which was invisible while a shared mailbox was mandatory and an
+         * empty page the moment one stopped being configured.
+         */
+        @Test
+        @DisplayName("the attendance page asks for the dates this viewer may see")
+        void reportsForDatePassesViewer() {
+            when(repository.byReportDate(LocalDate.of(2026, 9, 8), VIEWER)).thenReturn(List.of());
+
+            serviceWith(configured()).reportsForDate(LocalDate.of(2026, 9, 8), VIEWER);
+
+            verify(repository).byReportDate(LocalDate.of(2026, 9, 8), VIEWER);
+        }
+
         @Test
         @DisplayName("opening one report asks for it as this viewer")
         void reportPassesViewer() {
@@ -707,6 +850,80 @@ class HrmsNotificationServiceTest {
             assertThat(serviceWith(configured()).report(42L, VIEWER)).isEmpty();
 
             verify(repository).findById(42L, VIEWER);
+        }
+    }
+
+    /**
+     * Running with no shared mailbox at all (ADR-084).
+     *
+     * <p>app.hrms.username and password are blank, which used to mean
+     * "misconfigured, do nothing" and now means "every inbox read is
+     * somebody's own". What these protect is that a blank shared credential
+     * must never be <em>used</em>: connecting with it would log a Google auth
+     * failure every thirty minutes and tell nobody anything.
+     */
+    @Nested
+    @DisplayName("no shared mailbox")
+    class NoSharedMailbox {
+
+        private static final java.util.UUID ANA = java.util.UUID.randomUUID();
+
+        /** enabled, a sender to filter on, and no shared credential. */
+        private HrmsMailProperties personalOnly() {
+            return properties(true, "", "noreply-hrms@wecambodia.com");
+        }
+
+        @Test
+        @DisplayName("is a valid configuration, not an incomplete one")
+        void isValidConfiguration() {
+            assertThat(personalOnly().active()).isTrue();
+            assertThat(personalOnly().sharedInboxUsable()).isFalse();
+        }
+
+        /**
+         * The regression this guards: poll() must not reach the shared
+         * arrivalsSince(Instant) with a blank username and password.
+         */
+        @Test
+        @DisplayName("never opens the shared mailbox with a blank credential")
+        void doesNotOpenSharedMailbox() {
+            when(accounts.activeMailTargets()).thenReturn(List.of());
+
+            assertThat(serviceWith(personalOnly()).poll()).isZero();
+
+            verify(mailbox, never()).arrivalsSince(any());
+        }
+
+        @Test
+        @DisplayName("still reads the inbox of an account that stored a credential")
+        void stillPollsPersonalInboxes() {
+            when(accounts.activeMailTargets())
+                    .thenReturn(List.of(new AccountRepository.MailTarget(ANA, "ana@example.com", null)));
+            when(mailCredentials.findFor(ANA))
+                    .thenReturn(Optional.of(new AccountMailCredentialRepository.Credential(ANA, "ana@gmail.com", "pw", null)));
+            when(mailbox.arrivalsSince(any(), any()))
+                    .thenReturn(List.of(arrival("<own@hrms>", "Attendance on 08-Sep-2026")));
+            when(repository.record(any(), any())).thenReturn(true);
+
+            assertThat(serviceWith(personalOnly()).poll()).isEqualTo(1);
+
+            verify(repository).record(any(), eq(ANA));
+            verify(mailbox, never()).arrivalsSince(any());
+        }
+
+        /**
+         * A blank sender is still fatal, and deliberately so: it is the filter
+         * that keeps the search to HRMS mail. Without it a poll would read
+         * every message in whatever mailbox it was handed.
+         */
+        @Test
+        @DisplayName("a blank sender switches the whole feature off")
+        void blankSenderIsStillFatal() {
+            HrmsMailProperties noSender = properties(true, "", "");
+
+            assertThat(noSender.active()).isFalse();
+            assertThat(serviceWith(noSender).poll()).isZero();
+            verifyNoInteractions(mailbox);
         }
     }
 }

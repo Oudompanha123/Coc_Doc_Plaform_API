@@ -36,8 +36,11 @@ class AttendanceMailServiceTest {
     private final AccountMailCredentialRepository credentials = mock(AccountMailCredentialRepository.class);
     private final PersonalMailSenderFactory personalSenders = mock(PersonalMailSenderFactory.class);
 
+    /** Unstubbed: every credential here is an App Password, which never reaches it (ADR-085). */
+    private final GoogleMailOAuthService oauth = mock(GoogleMailOAuthService.class);
+
     private final AttendanceMailService service = new AttendanceMailService(
-            accounts, mailService, renderer, properties, credentials, personalSenders);
+            accounts, mailService, renderer, properties, credentials, personalSenders, oauth);
 
     private static HrmsMailContent.Entry entry(String scheduled, String actual, String status) {
         return new HrmsMailContent.Entry(scheduled, actual, status);

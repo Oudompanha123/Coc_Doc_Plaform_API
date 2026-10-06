@@ -676,6 +676,12 @@ public class SessionService {
                 account.id(),
                 deviceKey,
                 newDevice);
+        // Every sign-in, unlike the new-device alert below (ADR-089). Same
+        // after-commit, off-thread contract: nothing here may slow signing in
+        // or fail it, and a rolled-back session must not have told anyone
+        // anything.
+        events.publishEvent(new SignInEvent(account.id(), account.email(), issuedAt));
+
         if (newDevice) {
             // Published, not sent. The listener runs after this transaction
             // commits and off the request thread, so nobody is warned about a
@@ -773,6 +779,34 @@ public class SessionService {
                     json.createObjectNode().put("via", "settings").put("session", sessionId.toString()));
         }
         return revoked;
+    }
+
+    /**
+     * One sign-in or sign-out event, as the Security card shows it — no IP
+     * (ADR-093): the audit row behind this never captured one.
+     *
+     * <p>Named {@code SignInHistoryEntry}, not {@code SignInEvent}, to stay
+     * out of the way of the top-level {@link SignInEvent} (ADR-089) in this
+     * same package — an unrelated, pre-existing Spring application event for
+     * the mailed attendance report, not this card's read model.
+     */
+    public record SignInHistoryEntry(String action, Instant occurredAt, String device) {}
+
+    /**
+     * This account's own last {@code limit} sign-in/sign-out events, for the
+     * Security card's "Recent sign-ins" (ADR-093). Reuses the existing audit
+     * trail rather than a dedicated table — {@code device} is read back from
+     * the same {@code detail} JSON {@link #issue} already writes, and is
+     * blank (never null) for a sign-out row, which has no device field.
+     *
+     * <p>// req: FR-OPS-001, NFR-SEC-PII, ADR-093
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<SignInHistoryEntry> recentSignIns(CurrentUser caller, int limit) {
+        return audit.recentSignInsForActor(caller.account().id(), limit).stream()
+                .map(entry -> new SignInHistoryEntry(
+                        entry.action(), entry.occurredAt(), entry.detail().path("device").asText("")))
+                .toList();
     }
 
     /**

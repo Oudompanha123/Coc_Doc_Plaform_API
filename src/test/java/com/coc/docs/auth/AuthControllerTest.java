@@ -122,6 +122,7 @@ class AuthControllerTest {
                     "http://localhost:3000",
                     false,
                     "test-client-id",
+                    "test-client-secret",
                     new AppProperties.Storage("", "test", "us-east-1", "", ""));
         }
 
@@ -338,7 +339,7 @@ class AuthControllerTest {
             mvc.perform(post("/api/v1/auth/register")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"email":"new.person@example.com","displayName":"New Person","password":"hunter2222"}
+                                    {"email":"new.person@example.com","displayName":"New Person","password":"Hunter2222!x"}
                                     """))
                     // 202: accepted, and there still isn't even a pending
                     // application until the code is confirmed.
@@ -358,7 +359,7 @@ class AuthControllerTest {
             mvc.perform(post("/api/v1/auth/register")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"email":"","displayName":"New Person","password":"hunter2222"}
+                                    {"email":"","displayName":"New Person","password":"Hunter2222!x"}
                                     """))
                     .andExpect(status().isBadRequest());
 
@@ -659,31 +660,31 @@ class AuthControllerTest {
             // ADR-029: the controller now relays whichever message the
             // service returns (it differs for a Google-only account's first
             // password vs. a genuine reset) rather than hardcoding one.
-            when(passwordResets.resetPassword("good-token", "newHunter2222"))
+            when(passwordResets.resetPassword("good-token", "newHunter2222!A"))
                     .thenReturn("Your password has been reset. You can now log in.");
 
             mvc.perform(post("/api/v1/auth/reset-password")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"token":"good-token","newPassword":"newHunter2222"}
+                                    {"token":"good-token","newPassword":"newHunter2222!A"}
                                     """))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.message").value(
                             "Your password has been reset. You can now log in."));
 
-            verify(passwordResets).resetPassword("good-token", "newHunter2222");
+            verify(passwordResets).resetPassword("good-token", "newHunter2222!A");
         }
 
         @Test
         @DisplayName("relays the distinct message for a Google-only account's first password (ADR-029)")
         void relaysInitialSetMessage() throws Exception {
-            when(passwordResets.resetPassword("google-only-token", "newHunter2222"))
+            when(passwordResets.resetPassword("google-only-token", "newHunter2222!A"))
                     .thenReturn("Your password has been set. You can now log in with your email and password.");
 
             mvc.perform(post("/api/v1/auth/reset-password")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"token":"google-only-token","newPassword":"newHunter2222"}
+                                    {"token":"google-only-token","newPassword":"newHunter2222!A"}
                                     """))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.message").value(
@@ -700,7 +701,7 @@ class AuthControllerTest {
             mvc.perform(post("/api/v1/auth/reset-password")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"token":"bad-token","newPassword":"newHunter2222"}
+                                    {"token":"bad-token","newPassword":"newHunter2222!A"}
                                     """))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.detail").value("this reset link is invalid or has expired"));

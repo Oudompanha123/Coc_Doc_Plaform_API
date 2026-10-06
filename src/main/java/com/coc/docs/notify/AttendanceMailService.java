@@ -63,13 +63,18 @@ public class AttendanceMailService {
 
     private final PersonalMailSenderFactory personalSenders;
 
+    /** Mints the access token an OAuth credential sends with (ADR-085). */
+    private final GoogleMailOAuthService oauth;
+
     public AttendanceMailService(
             AccountRepository accounts,
             NotificationMailService mailService,
             ReportMailRenderer renderer,
             NotificationProperties properties,
             AccountMailCredentialRepository credentials,
-            PersonalMailSenderFactory personalSenders) {
+            PersonalMailSenderFactory personalSenders,
+            GoogleMailOAuthService oauth) {
+        this.oauth = oauth;
         this.accounts = accounts;
         this.mailService = mailService;
         this.renderer = renderer;
@@ -110,6 +115,21 @@ public class AttendanceMailService {
         return sent;
     }
 
+    /**
+     * Mails one person one report, outside the poll (ADR-089).
+     *
+     * <p>The same send the poll uses, exposed for the sign-in mailer. Routed
+     * through the identical path on purpose: the choice of sender, the one
+     * address per message rule and the fallback all live in {@link #send}, and
+     * a second entry point that reimplemented any of them would drift from it.
+     *
+     * @return whether it was sent. False means the caller should not record it
+     *     as delivered.
+     */
+    public boolean sendReportTo(UUID accountId, String email, HrmsMailContent content) {
+        return send(accountId, email, content);
+    }
+
     private boolean send(UUID accountId, String email, HrmsMailContent mine) {
         ReportMail mail = build(mine);
         String subject = properties.brandName() + " — your attendance"
@@ -143,7 +163,18 @@ public class AttendanceMailService {
             String subject,
             ReportMail mail) {
         try {
-            var sender = personalSenders.senderFor(credential);
+            // Empty for an OAuth grant Google will not honour (ADR-085).
+            // Treated exactly like a send failure below: the shared sender
+            // still delivers, and somebody whose grant lapsed should still
+            // learn they were late.
+            var maybeSender = personalSenders.senderOrEmpty(credential, oauth);
+            if (maybeSender.isEmpty()) {
+                log.warn(
+                        "attendance: {} has no usable mail grant, falling back to the shared sender",
+                        credential.username());
+                return mailService.send(List.of(email), subject, renderer.text(mail), renderer.html(mail));
+            }
+            var sender = maybeSender.get();
             MimeMessage message = sender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             // Gmail rewrites a From that is not the authenticated account, so
