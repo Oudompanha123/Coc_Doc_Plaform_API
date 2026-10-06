@@ -85,6 +85,21 @@ public class ClaudeUsageIngestController {
         return new ApiDtos.ClaudeUsageIngestResponse(outcome.action());
     }
 
+    /**
+     * A reporter's scan found nothing new to upload (its ledger said every day
+     * is already reported): records only that it scanned, so the dashboard's
+     * "Last scan" moves while "Last reported" keeps meaning the last upload
+     * (ADR-095). Same credential check as {@link #ingest}; writes no usage.
+     */
+    @PostMapping("/api/ingest/scan")
+    ApiDtos.ClaudeUsageIngestResponse scan(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @Valid @RequestBody ApiDtos.ClaudeUsageScanRequest request) {
+
+        authorize(authorization, request.email());
+        return new ApiDtos.ClaudeUsageIngestResponse(usage.recordScan(request.email()).action());
+    }
+
     /** The wire DTO stays out of the service layer (ApiDtos.java's own stated rule) — this is the one conversion point. */
     private static Map<String, ClaudeUsageModelTokens> toDomain(Map<String, ApiDtos.ClaudeUsageModelTokensRequest> byModel) {
         if (byModel == null) {

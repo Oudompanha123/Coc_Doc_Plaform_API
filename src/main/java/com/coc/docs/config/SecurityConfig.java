@@ -279,6 +279,9 @@ public class SecurityConfig {
                         // in so many words that it is not a template for a second one.
                         // // req: FR-USAGE-002, NFR-SEC-CHANNEL, ADR-035
                         .requestMatchers(HttpMethod.POST, "/api/ingest").permitAll()
+                        // Its scan-only sibling (ADR-095): same controller, same
+                        // bearer check, records only when the reporter scanned.
+                        .requestMatchers(HttpMethod.POST, "/api/ingest/scan").permitAll()
 
                         // The claude-team-usage CLI's code exchange (ADR-060): a CLI
                         // has no session either. Protected by a one-time, two-minute

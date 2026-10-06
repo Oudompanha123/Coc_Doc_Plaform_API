@@ -23,6 +23,9 @@ import java.util.List;
  *     their full weekly soft budget (ADR-065).
  * @param subscriptionUsdPerMonth the plan's list price, shown on its own and
  *     never subtracted from or compared with the Reference API Cost (ADR-065).
+ * @param lastScanAt when the caller's reporter last finished a scan, whether
+ *     or not it uploaded anything (ADR-095) — {@code lastUpdated} is the last
+ *     upload. Null when none is recorded.
  */
 public record ClaudeUsageMyDashboard(
         String email,
@@ -35,7 +38,8 @@ public record ClaudeUsageMyDashboard(
         ClaudeUsageMemberUsage todayUsage,
         ModelBreakdown usage,
         WeekUsage week,
-        BigDecimal subscriptionUsdPerMonth) {
+        BigDecimal subscriptionUsdPerMonth,
+        Instant lastScanAt) {
 
     public long todayTotalTokens() {
         return todayInputTokens + todayOutputTokens;

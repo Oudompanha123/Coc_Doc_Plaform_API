@@ -27,6 +27,9 @@ import java.util.List;
  * @param avatarUrl the profile picture of the platform {@code account} with
  *     the same email, or null when there is no such account or it has no
  *     picture — the frontend shows initials then.
+ * @param lastScanAt when this member's reporter last finished a scan, whether
+ *     or not it uploaded anything (V65, ADR-095), or null when none is
+ *     recorded. Not range-scoped, unlike {@code lastActiveAt}.
  */
 public record ClaudeUsageMemberUsage(
         ClaudeUsageMember member,
@@ -40,7 +43,8 @@ public record ClaudeUsageMemberUsage(
         long effectiveBudgetTokens,
         int budgetPct,
         String budgetStatus,
-        String avatarUrl) {
+        String avatarUrl,
+        Instant lastScanAt) {
 
     /** Comfortably under budget. */
     public static final String STATUS_GREEN = "green";

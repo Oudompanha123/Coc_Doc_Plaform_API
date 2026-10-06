@@ -245,6 +245,10 @@ public class ClaudeUsageService {
     public record IngestOutcome(String action) {
         public static final String CREATED = "created";
         public static final String UPDATED = "updated";
+        /** {@link #recordScan}: the scan time was stored. */
+        public static final String SCAN_RECORDED = "scan-recorded";
+        /** {@link #recordScan}: no roster row for that email yet, so nothing was stored. */
+        public static final String NOT_TRACKED = "not-tracked";
     }
 
     /**
@@ -354,7 +358,28 @@ public class ClaudeUsageService {
         // the totals they break down, and a replay never adds a second set.
         dailyModels.replaceDay(member.id(), date, modelRowsFor(member.id(), date, byModel));
         activities.replaceDay(member.id(), date, activity);
+        // An upload is a scan too (ADR-095): both times move together here.
+        members.touchLastScan(member.id());
         return new IngestOutcome(created ? IngestOutcome.CREATED : IngestOutcome.UPDATED);
+    }
+
+    /**
+     * A reporter scanned and found nothing new to upload (ADR-095): records
+     * only when it scanned. Writes no usage row, so an unchanged day is never
+     * duplicated or re-stamped, and "Last reported" keeps meaning the last
+     * upload. An email with no roster row yet is left alone -- reporting
+     * usage is what adds someone (ADR-035 decision 3), not checking in.
+     *
+     * @return {@link IngestOutcome#SCAN_RECORDED}, or {@link IngestOutcome#NOT_TRACKED} for an untracked email
+     */
+    @Transactional
+    public IngestOutcome recordScan(String rawEmail) {
+        ClaudeUsageMember member = members.findByEmail(normalizeEmail(rawEmail)).orElse(null);
+        if (member == null) {
+            return new IngestOutcome(IngestOutcome.NOT_TRACKED);
+        }
+        members.touchLastScan(member.id());
+        return new IngestOutcome(IngestOutcome.SCAN_RECORDED);
     }
 
     /**
@@ -598,11 +623,13 @@ public class ClaudeUsageService {
         Map<UUID, List<ClaudeUsageDaily>> rowsByMember =
                 rows.stream().collect(Collectors.groupingBy(ClaudeUsageDaily::memberId));
         Map<UUID, String> avatarUrls = members.avatarUrlsByMemberId();
+        Map<UUID, Instant> lastScans = members.lastScanAtByMemberId();
 
         List<ClaudeUsageMemberUsage> memberUsages = new ArrayList<>();
         for (ClaudeUsageMember member : roster) {
             memberUsages.add(rollupMember(
-                    member, rowsByMember.getOrDefault(member.id(), List.of()), daysInRange, avatarUrls.get(member.id())));
+                    member, rowsByMember.getOrDefault(member.id(), List.of()), daysInRange, avatarUrls.get(member.id()),
+                    lastScans.get(member.id())));
         }
         memberUsages.sort((a, b) -> Long.compare(b.totalTokens(), a.totalTokens()));
 
@@ -903,8 +930,12 @@ public class ClaudeUsageService {
         Instant lastUpdated = rows.stream().map(ClaudeUsageDaily::reportedAt).max(Instant::compareTo).orElse(null);
         String displayName = member != null ? member.displayName() : displayNameOrFallback(actor.account().displayName(), email);
 
-        ClaudeUsageMemberUsage todayUsage =
-                member == null ? null : rollupMember(member, todayRow == null ? List.of() : List.of(todayRow), 1, actor.account().avatarUrl());
+        // When the reporter last checked, separate from lastUpdated (the last upload) — ADR-095.
+        Instant lastScanAt = member == null ? null : members.findLastScanAt(member.id()).orElse(null);
+
+        ClaudeUsageMemberUsage todayUsage = member == null
+                ? null
+                : rollupMember(member, todayRow == null ? List.of() : List.of(todayRow), 1, actor.account().avatarUrl(), lastScanAt);
 
         int rangeDays = MY_RANGE_DAYS.contains(rawRangeDays) ? rawRangeDays : MY_DEFAULT_RANGE_DAYS;
         ClaudeUsageMyDashboard.ModelBreakdown breakdown = member == null
@@ -927,7 +958,7 @@ public class ClaudeUsageService {
 
         return new ClaudeUsageMyDashboard(
                 email, displayName, today, todayInput, todayOutput, history, lastUpdated, todayUsage, breakdown, week,
-                ClaudeUsagePricing.SUBSCRIPTION_USD_PER_MONTH);
+                ClaudeUsagePricing.SUBSCRIPTION_USD_PER_MONTH, lastScanAt);
     }
 
     /**
@@ -999,7 +1030,7 @@ public class ClaudeUsageService {
     }
 
     private ClaudeUsageMemberUsage rollupMember(
-            ClaudeUsageMember member, List<ClaudeUsageDaily> rows, long daysInRange, String avatarUrl) {
+            ClaudeUsageMember member, List<ClaudeUsageDaily> rows, long daysInRange, String avatarUrl, Instant lastScanAt) {
         long input = 0;
         long output = 0;
         long cacheRead = 0;
@@ -1033,7 +1064,7 @@ public class ClaudeUsageService {
 
         return new ClaudeUsageMemberUsage(
                 member, input, output, cacheRead, cacheCreation, cost, List.copyOf(models), lastActive, effectiveBudget, pct,
-                budgetStatusFor(pct), avatarUrl);
+                budgetStatusFor(pct), avatarUrl, lastScanAt);
     }
 
     /** Green below {@link #AMBER_AT_PCT}, amber below {@link #RED_AT_PCT}, red at or above it. */
