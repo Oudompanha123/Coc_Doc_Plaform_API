@@ -118,7 +118,24 @@ public enum NotificationType {
             "Run reviewed",
             "Your AX Renewal implementation run was reviewed",
             "/ax-renewal",
-            "project");
+            "project"),
+
+    /**
+     * An admin published an announcement (ADR-098). Goes to every active
+     * account except the one who published it.
+     *
+     * <p>The push body is this fixed sentence and never the announcement's
+     * title: an announcement is internal company news, and a lock screen is
+     * not inside the company. The bell row carries the title in its payload,
+     * which only its signed-in recipient reads; opening it fetches the
+     * current text, so an edit after publishing is what the reader sees.
+     */
+    ANNOUNCEMENT_PUBLISHED(
+            "announcement.published",
+            "Announcements",
+            "There is a new announcement",
+            "/home",
+            "announcement");
 
     /** {@link #AX_RENEWAL_RUN_REVIEWED}'s body for a run that was approved — and so applied (ADR-081). */
     public static final String RUN_APPROVED_BODY = "Your AX Renewal implementation run was approved and applied";

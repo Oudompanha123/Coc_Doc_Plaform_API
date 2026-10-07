@@ -221,12 +221,26 @@ public final class AuditAction {
      */
     public static final String AX_RENEWAL_IMPLEMENTATION_REVERT = "ax_renewal.implementation_revert";
 
+    /**
+     * An admin-authored announcement's lifecycle (ADR-098). Publish and
+     * unpublish are their own actions rather than an update with a status in
+     * the detail: publishing is the one that puts a row in every user's bell,
+     * and "who announced this to everyone" should be one query, not a scan of
+     * every edit.
+     */
+    public static final String ANNOUNCEMENT_CREATE = "announcement.create";
+    public static final String ANNOUNCEMENT_UPDATE = "announcement.update";
+    public static final String ANNOUNCEMENT_PUBLISH = "announcement.publish";
+    public static final String ANNOUNCEMENT_UNPUBLISH = "announcement.unpublish";
+    public static final String ANNOUNCEMENT_DELETE = "announcement.delete";
+
     /** Target types, for the {@code target_type} column. */
     public static final String TARGET_PAGE = "page";
 
     public static final String TARGET_SECTION = "section";
     public static final String TARGET_ACCOUNT = "account";
     public static final String TARGET_SESSION = "session";
+    public static final String TARGET_ANNOUNCEMENT = "announcement";
 
     /** A notification the system sent; carries no target id, there is no row to point at. */
     public static final String TARGET_NOTIFICATION = "notification";

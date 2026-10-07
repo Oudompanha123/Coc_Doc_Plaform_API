@@ -562,6 +562,18 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/me/security")
                         .hasRole(AppRole.USER.name())
 
+                        // --- Announcements, read side (ADR-098) ---------------
+                        // Its own prefix rather than /api/v1/admin/**: every
+                        // signed-in role reads announcements, and the admin floor
+                        // below would refuse a plain `user`. GET only -- the
+                        // writes live under /api/v1/admin/announcements and keep
+                        // the admin floor. Not a hole in it: the service returns
+                        // only published, unexpired announcements and answers 404
+                        // for a draft, so nothing an admin has in progress leaks.
+                        // // req: ADR-098
+                        .requestMatchers(HttpMethod.GET, "/api/v1/announcements", "/api/v1/announcements/*")
+                        .hasRole(AppRole.USER.name())
+
                         // --- editorial writes and admin reads ----------------
                         .requestMatchers("/api/v1/admin/**").hasRole(AppRole.ADMIN.name())
 

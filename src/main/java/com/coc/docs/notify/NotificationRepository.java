@@ -141,6 +141,42 @@ public class NotificationRepository {
     }
 
     /**
+     * Rewrites one payload field on every recipient's copy of a notification
+     * about {@code targetId} — for a subject whose wording can change after it
+     * was sent, which today is only an announcement edited while published
+     * (ADR-098). Read state is untouched: a corrected title is not news.
+     *
+     * <p>Deliberately not scoped to an account, unlike every reader here. It is
+     * called by the service that owns the subject, never with an id from a
+     * request, and it changes wording, not who can see what.
+     *
+     * @return how many rows changed
+     */
+    public int updatePayloadFieldForTarget(NotificationType type, String targetId, String field, String value) {
+        return jdbc.sql("""
+                        update notification
+                        set payload = jsonb_set(payload, array[?]::text[], to_jsonb(?::text))
+                        where type = ? and target_id = ?
+                        """)
+                .params(field, value, type.key(), targetId)
+                .update();
+    }
+
+    /**
+     * Removes every recipient's copy of a notification about {@code targetId}
+     * — for a subject that has been withdrawn, so a bell does not keep
+     * offering something that no longer opens (ADR-098). Same scoping note as
+     * {@link #updatePayloadFieldForTarget}.
+     *
+     * @return how many rows were deleted
+     */
+    public int deleteForTarget(NotificationType type, String targetId) {
+        return jdbc.sql("delete from notification where type = ? and target_id = ?")
+                .params(type.key(), targetId)
+                .update();
+    }
+
+    /**
      * Deletes everything older than the cutoff, read or unread.
      *
      * <p>A bell is not an archive. {@code audit_log} is the archive — append

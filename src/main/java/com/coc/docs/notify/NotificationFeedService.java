@@ -367,6 +367,11 @@ public class NotificationFeedService {
             case AuditAction.AX_RENEWAL_RUN_LOCALLY_STOP -> "Stopped a local run of a renewed project";
             case AuditAction.ACCOUNT_CAPABILITY_GRANT -> "Granted a capability";
             case AuditAction.ACCOUNT_CAPABILITY_REVOKE -> "Revoked a capability";
+            case AuditAction.ANNOUNCEMENT_CREATE -> "Drafted an announcement";
+            case AuditAction.ANNOUNCEMENT_UPDATE -> "Edited an announcement";
+            case AuditAction.ANNOUNCEMENT_PUBLISH -> "Published an announcement";
+            case AuditAction.ANNOUNCEMENT_UNPUBLISH -> "Unpublished an announcement";
+            case AuditAction.ANNOUNCEMENT_DELETE -> "Deleted an announcement";
             default -> entry.action();
         };
     }

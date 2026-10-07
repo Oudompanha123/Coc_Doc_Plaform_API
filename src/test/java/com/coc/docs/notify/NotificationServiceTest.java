@@ -188,4 +188,51 @@ class NotificationServiceTest {
         verifyNoInteractions(devices);
         verifyNoInteractions(push);
     }
+
+    @Test
+    @DisplayName("an announcement reaches every active account but its publisher, title in the bell and not on the lock screen (ADR-098)")
+    void announcementBroadcastSkipsThePublisher() {
+        UUID publisher = UUID.randomUUID();
+        UUID reader = UUID.randomUUID();
+        when(accounts.activeMailTargets())
+                .thenReturn(List.of(
+                        new AccountRepository.MailTarget(publisher, "admin@example.com", null),
+                        new AccountRepository.MailTarget(reader, "reader@example.com", null)));
+        when(notifications.insertFor(anyCollection(), any(), any(), any())).thenReturn(1);
+        when(devices.findByAccountIds(any())).thenReturn(List.of(device(reader, "token-reader")));
+        when(push.send(anyCollection(), any(), any())).thenReturn(List.of());
+
+        int stored = service.notifyActiveAccounts(
+                NotificationType.ANNOUNCEMENT_PUBLISHED,
+                new NotificationTarget("a1", null),
+                java.util.Map.of("title", "Maintenance on Friday"),
+                publisher);
+
+        assertThat(stored).isEqualTo(1);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<java.util.Collection<UUID>> recipients = ArgumentCaptor.forClass(java.util.Collection.class);
+        ArgumentCaptor<com.fasterxml.jackson.databind.JsonNode> payload =
+                ArgumentCaptor.forClass(com.fasterxml.jackson.databind.JsonNode.class);
+        verify(notifications).insertFor(recipients.capture(), any(), any(), payload.capture());
+        assertThat(recipients.getValue()).containsExactly(reader);
+        assertThat(payload.getValue().get("title").asText()).isEqualTo("Maintenance on Friday");
+        assertThat(payload.getValue().get("body").asText()).isEqualTo(NotificationType.ANNOUNCEMENT_PUBLISHED.body());
+        // The three-argument send: the type's fixed sentence, never the title.
+        verify(push).send(anyCollection(), any(), any());
+    }
+
+    @Test
+    @DisplayName("an announcement with nobody left to tell stores and sends nothing")
+    void announcementWithNoRecipients() {
+        UUID publisher = UUID.randomUUID();
+        when(accounts.activeMailTargets())
+                .thenReturn(List.of(new AccountRepository.MailTarget(publisher, "admin@example.com", null)));
+
+        int stored = service.notifyActiveAccounts(
+                NotificationType.ANNOUNCEMENT_PUBLISHED, new NotificationTarget("a1", null), java.util.Map.of(), publisher);
+
+        assertThat(stored).isZero();
+        verify(notifications, never()).insertFor(anyCollection(), any(), any(), any());
+        verifyNoInteractions(push);
+    }
 }
