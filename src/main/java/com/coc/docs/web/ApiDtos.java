@@ -1886,4 +1886,93 @@ public final class ApiDtos {
 
         public record SignInEventResponse(String action, Instant occurredAt, String device) {}
     }
+
+    // -----------------------------------------------------------------------
+    // Announcements (ADR-098)
+    // -----------------------------------------------------------------------
+
+    /**
+     * An announcement as an admin edits it: every field, every state.
+     *
+     * <p>{@code expired} is computed at response time rather than stored —
+     * see {@link com.coc.docs.announcement.Announcement#isExpired}.
+     */
+    public record AdminAnnouncementResponse(
+            UUID id,
+            String title,
+            String body,
+            String category,
+            String status,
+            boolean expired,
+            Instant expiresAt,
+            int versionNo,
+            Instant publishedAt,
+            String publishedByName,
+            Instant createdAt,
+            Instant updatedAt,
+            String updatedByName) {
+
+        public static AdminAnnouncementResponse of(com.coc.docs.announcement.Announcement a, boolean expired) {
+            return new AdminAnnouncementResponse(
+                    a.id(),
+                    a.title(),
+                    a.body(),
+                    a.category(),
+                    a.status(),
+                    expired,
+                    a.expiresAt(),
+                    a.versionNo(),
+                    a.publishedAt(),
+                    a.publishedByName(),
+                    a.createdAt(),
+                    a.updatedAt(),
+                    a.updatedByName());
+        }
+    }
+
+    /**
+     * An announcement as a reader sees it.
+     *
+     * <p>No status, version or editor names: a reader only ever receives a
+     * live announcement, and who wrote or last touched it is admin business.
+     */
+    public record AnnouncementResponse(
+            UUID id, String title, String body, String category, Instant publishedAt, Instant expiresAt) {
+
+        public static AnnouncementResponse of(com.coc.docs.announcement.Announcement a) {
+            return new AnnouncementResponse(
+                    a.id(), a.title(), a.body(), a.category(), a.publishedAt(), a.expiresAt());
+        }
+    }
+
+    /**
+     * Create or edit. Lengths are checked again, with reasons, by
+     * {@code AnnouncementService.validated}; these annotations are the cheap
+     * first wall against an oversized request.
+     *
+     * @param expiresAt null for "until unpublished"
+     */
+    public record AnnouncementRequest(
+            @NotBlank @Size(max = 150) String title,
+            @NotBlank @Size(max = 5000) String body,
+            String category,
+            Instant expiresAt) {
+
+        public com.coc.docs.announcement.AnnouncementService.Draft toDraft() {
+            return new com.coc.docs.announcement.AnnouncementService.Draft(title, body, category, expiresAt);
+        }
+    }
+
+    /** An edit names the version it was made against, so a stale one is refused (409). */
+    public record UpdateAnnouncementRequest(
+            @NotBlank @Size(max = 150) String title,
+            @NotBlank @Size(max = 5000) String body,
+            String category,
+            Instant expiresAt,
+            @NotNull Integer versionNo) {
+
+        public com.coc.docs.announcement.AnnouncementService.Draft toDraft() {
+            return new com.coc.docs.announcement.AnnouncementService.Draft(title, body, category, expiresAt);
+        }
+    }
 }

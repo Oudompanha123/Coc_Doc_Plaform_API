@@ -101,4 +101,13 @@ class NotificationTypeTest {
                 .isEqualTo("Your AX Renewal implementation run was approved and applied");
         assertThat(NotificationType.RUN_REJECTED_BODY).isEqualTo("Your AX Renewal implementation run was rejected");
     }
+
+    @Test
+    @DisplayName("an announcement opens on the user site's home, and its lock-screen sentence carries no title (ADR-098)")
+    void announcementOpensHomeAndSaysNothingSpecific() {
+        assertThat(NotificationType.ANNOUNCEMENT_PUBLISHED.deepLink(ORIGIN, "a1"))
+                .isEqualTo("https://docs.example.com/home?announcement=a1");
+        assertThat(NotificationType.ANNOUNCEMENT_PUBLISHED.body()).isEqualTo("There is a new announcement");
+        assertThat(NotificationType.ANNOUNCEMENT_PUBLISHED.key()).isEqualTo("announcement.published");
+    }
 }

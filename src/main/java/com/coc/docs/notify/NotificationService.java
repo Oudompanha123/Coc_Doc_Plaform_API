@@ -4,10 +4,11 @@ import com.coc.docs.account.Account;
 import com.coc.docs.account.AccountRepository;
 import com.coc.docs.account.AppRole;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -198,6 +199,59 @@ public class NotificationService {
     }
 
     /**
+     * Notifies every active account but {@code except} — the broadcast an
+     * announcement needs (ADR-098).
+     *
+     * <p>Recipients are resolved at send time from the same "can be written
+     * to" query the attendance mail uses, so a deactivated account or one
+     * still awaiting approval is not sent a company announcement. Opt-outs
+     * (ADR-041) are honoured exactly as for every other type.
+     *
+     * <p>{@code facts} are added to the stored payload beside the fixed
+     * {@code body}; they are read by the signed-in recipient only. The push
+     * itself carries the type's fixed sentence and nothing from {@code facts},
+     * because a push renders on a lock screen.
+     *
+     * @param except the account that caused it, who is not told about their
+     *     own action; null to include everybody
+     * @return how many accounts it was stored for
+     */
+    @Transactional
+    public int notifyActiveAccounts(
+            NotificationType type, NotificationTarget target, Map<String, String> facts, UUID except) {
+        Set<UUID> recipients = accounts.activeMailTargets().stream()
+                .map(AccountRepository.MailTarget::accountId)
+                .filter(id -> !id.equals(except))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        recipients = preferences.filterEnabled(recipients, type);
+        if (recipients.isEmpty()) {
+            log.debug("nobody to notify about {}", type.key());
+            return 0;
+        }
+
+        ObjectNode payload = payloadOf(target, type.body());
+        facts.forEach(payload::put);
+
+        // Persisted first, in the transaction that carries the event, as in
+        // notifyApprovers -- delivery below is best-effort.
+        int stored = notifications.insertFor(recipients, type, target.id(), payload);
+        log.info("stored {} {} notification(s) for {} account(s)", stored, type.key(), recipients.size());
+
+        recipients.forEach(id -> stream.publish(id, type));
+
+        List<String> tokens =
+                devices.findByAccountIds(recipients).stream().map(DeviceToken::token).toList();
+        if (tokens.isEmpty()) {
+            return stored;
+        }
+        List<String> dead = push.send(tokens, type, target);
+        if (!dead.isEmpty()) {
+            devices.deleteAll(dead);
+        }
+        return stored;
+    }
+
+    /**
      * The facts a type needs to render its sentence, and no more of them.
      *
      * <p>The wording itself is not stored (ADR-034 decision 2): a row carries
@@ -215,7 +269,7 @@ public class NotificationService {
      *     build, or one after a type was retired — still has something true to
      *     show rather than a blank row.
      */
-    private JsonNode payloadOf(NotificationTarget target, String body) {
+    private ObjectNode payloadOf(NotificationTarget target, String body) {
         var payload = json.createObjectNode().put("body", body);
         if (target.iconUrl() != null) {
             // A picture the client already shows in the bell. Not identity: a
