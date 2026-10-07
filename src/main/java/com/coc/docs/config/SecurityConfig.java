@@ -282,6 +282,9 @@ public class SecurityConfig {
                         // Its scan-only sibling (ADR-097): same controller, same
                         // bearer check, records only when the reporter scanned.
                         .requestMatchers(HttpMethod.POST, "/api/ingest/scan").permitAll()
+                        // And its scan-log sibling (ADR-099): same controller, same
+                        // bearer check, records how one scan went.
+                        .requestMatchers(HttpMethod.POST, "/api/ingest/scan-log").permitAll()
 
                         // The claude-team-usage CLI's code exchange (ADR-060): a CLI
                         // has no session either. Protected by a one-time, two-minute
