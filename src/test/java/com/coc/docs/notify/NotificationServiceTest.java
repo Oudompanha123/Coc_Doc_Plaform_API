@@ -235,4 +235,46 @@ class NotificationServiceTest {
         verify(notifications, never()).insertFor(anyCollection(), any(), any(), any());
         verifyNoInteractions(push);
     }
+
+    @Test
+    @DisplayName("nothing is nudged or pushed until the storing transaction commits")
+    void deliversOnlyAfterCommit() {
+        // The regression: delivery inside the transaction nudged open tabs
+        // before the row was visible, so they re-read an inbox without it and
+        // showed no banner (ADR-098, reported on an announcement).
+        UUID reader = UUID.randomUUID();
+        when(accounts.activeMailTargets())
+                .thenReturn(List.of(new AccountRepository.MailTarget(reader, "reader@example.com", null)));
+        when(notifications.insertFor(anyCollection(), any(), any(), any())).thenReturn(1);
+        when(devices.findByAccountIds(any())).thenReturn(List.of(device(reader, "token-reader")));
+        when(push.send(anyCollection(), any(), any())).thenReturn(List.of());
+
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.notifyActiveAccounts(
+                    NotificationType.ANNOUNCEMENT_PUBLISHED, new NotificationTarget("a1", null), java.util.Map.of(), null);
+
+            verify(notifications).insertFor(anyCollection(), any(), any(), any());
+            verifyNoInteractions(push);
+
+            org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(org.springframework.transaction.support.TransactionSynchronization::afterCommit);
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        verify(push).send(anyCollection(), any(), any());
+    }
+
+    @Test
+    @DisplayName("a push that fails after the commit is logged, never thrown at a caller whose work is saved")
+    void deliveryFailureIsSwallowed() {
+        UUID reader = UUID.randomUUID();
+        when(devices.findByAccountIds(any())).thenReturn(List.of(device(reader, "token-reader")));
+        when(push.send(anyCollection(), any(), any(), any())).thenThrow(new IllegalStateException("fcm down"));
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> service.notifyAccount(
+                        reader, NotificationType.NEW_DEVICE_SIGN_IN, NotificationTarget.none(), "Chrome on Windows"))
+                .doesNotThrowAnyException();
+    }
 }

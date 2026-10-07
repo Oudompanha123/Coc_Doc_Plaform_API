@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -18,8 +17,6 @@ import com.coc.docs.audit.AuditRepository;
 import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.auth.TestCallers;
 import com.coc.docs.notify.NotificationRepository;
-import com.coc.docs.notify.NotificationService;
-import com.coc.docs.notify.NotificationTarget;
 import com.coc.docs.notify.NotificationType;
 import com.coc.docs.web.ApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,6 +29,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 
 /**
@@ -49,12 +47,12 @@ class AnnouncementServiceTest {
     private static final Instant NOW = Instant.parse("2026-10-07T03:00:00Z");
 
     private final AnnouncementRepository repository = mock(AnnouncementRepository.class);
-    private final NotificationService notifier = mock(NotificationService.class);
+    private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     private final NotificationRepository notifications = mock(NotificationRepository.class);
     private final AuditRepository audit = mock(AuditRepository.class);
 
     private final AnnouncementService service = new AnnouncementService(
-            repository, notifier, notifications, audit, new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC));
+            repository, events, notifications, audit, new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC));
 
     private final CurrentUser admin = TestCallers.user(AppRole.ADMIN);
 
@@ -106,7 +104,7 @@ class AnnouncementServiceTest {
     class Publishing {
 
         @Test
-        @DisplayName("a draft is published and every active account but the publisher is told")
+        @DisplayName("a draft is published, and the notifier is handed the event to deliver after commit")
         void publishesAndNotifies() {
             UUID id = UUID.randomUUID();
             when(repository.findById(id))
@@ -117,11 +115,9 @@ class AnnouncementServiceTest {
             Announcement result = service.publish(id, admin);
 
             assertThat(result.isPublished()).isTrue();
-            verify(notifier).notifyActiveAccounts(
-                    eq(NotificationType.ANNOUNCEMENT_PUBLISHED),
-                    eq(new NotificationTarget(id.toString(), null)),
-                    anyMap(),
-                    eq(admin.id()));
+            // Not delivered here: inside this transaction an open tab's re-read
+            // would not yet see the row (AnnouncementNotifier's javadoc).
+            verify(events).publishEvent(new AnnouncementPublishedEvent(id, admin.id()));
             verify(audit).append(eq(admin.id()), any(), eq(AuditAction.ANNOUNCEMENT_PUBLISH),
                     eq(AuditAction.TARGET_ANNOUNCEMENT), eq(id), any());
         }
@@ -135,7 +131,7 @@ class AnnouncementServiceTest {
 
             assertThatThrownBy(() -> service.publish(id, admin))
                     .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.CONFLICT));
-            verifyNoInteractions(notifier);
+            verifyNoInteractions(events);
         }
 
         @Test
@@ -147,7 +143,7 @@ class AnnouncementServiceTest {
 
             assertThatThrownBy(() -> service.publish(id, admin)).isInstanceOf(ApiException.class);
             verify(repository, never()).publish(any(), any(), any());
-            verifyNoInteractions(notifier);
+            verifyNoInteractions(events);
         }
     }
 
