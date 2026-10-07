@@ -122,6 +122,10 @@ public class AnnouncementService {
         if (saved.isPublished()) {
             notifications.updatePayloadFieldForTarget(
                     NotificationType.ANNOUNCEMENT_PUBLISHED, id.toString(), "title", saved.title());
+            // The bell draws its icon from the category, so a recategorised
+            // announcement must not keep its old icon in everyone's bell.
+            notifications.updatePayloadFieldForTarget(
+                    NotificationType.ANNOUNCEMENT_PUBLISHED, id.toString(), "category", saved.category());
         }
         record(caller, AuditAction.ANNOUNCEMENT_UPDATE, id, saved.title());
         return saved;
