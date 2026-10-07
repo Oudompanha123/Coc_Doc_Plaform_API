@@ -2,6 +2,7 @@ package com.coc.docs.web;
 
 import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.claudeusage.ClaudeUsageMember;
+import com.coc.docs.claudeusage.ClaudeUsageScanLogService;
 import com.coc.docs.claudeusage.ClaudeUsageService;
 import jakarta.validation.Valid;
 import java.net.URI;
@@ -38,9 +39,32 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminClaudeUsageController {
 
     private final ClaudeUsageService usage;
+    private final ClaudeUsageScanLogService scanLogs;
 
-    public AdminClaudeUsageController(ClaudeUsageService usage) {
+    public AdminClaudeUsageController(ClaudeUsageService usage, ClaudeUsageScanLogService scanLogs) {
         this.usage = usage;
+        this.scanLogs = scanLogs;
+    }
+
+    /**
+     * The View Logs page (ADR-096): every reporter scan that started on
+     * {@code from}..{@code to} (ISO dates, inclusive, team reporting zone;
+     * both or neither — neither is the last 7 days), newest first, without
+     * their steps. Admin-only for the same reason as a member's activity: it
+     * is per-colleague detail.
+     */
+    @GetMapping("/scan-logs")
+    ApiDtos.ClaudeUsageScanLogListResponse scanLogs(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+
+        return ApiDtos.ClaudeUsageScanLogListResponse.of(scanLogs.list(from, to));
+    }
+
+    /** One scan with its step-by-step timeline. */
+    @GetMapping("/scan-logs/{id}")
+    ApiDtos.ClaudeUsageScanLogDetailResponse scanLog(@PathVariable UUID id) {
+        return ApiDtos.ClaudeUsageScanLogDetailResponse.of(scanLogs.detail(id));
     }
 
     /*

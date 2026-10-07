@@ -5,6 +5,7 @@ import com.coc.docs.claudeusage.ClaudeUsageDayActivity;
 import com.coc.docs.claudeusage.ClaudeUsageIngestTokenService;
 import com.coc.docs.claudeusage.ClaudeUsageModelTokens;
 import com.coc.docs.claudeusage.ClaudeUsageProperties;
+import com.coc.docs.claudeusage.ClaudeUsageScanLogService;
 import com.coc.docs.claudeusage.ClaudeUsageService;
 import jakarta.validation.Valid;
 import java.nio.charset.StandardCharsets;
@@ -55,12 +56,17 @@ public class ClaudeUsageIngestController {
     private final ClaudeUsageService usage;
     private final ClaudeUsageProperties properties;
     private final ClaudeUsageIngestTokenService tokens;
+    private final ClaudeUsageScanLogService scanLogs;
 
     public ClaudeUsageIngestController(
-            ClaudeUsageService usage, ClaudeUsageProperties properties, ClaudeUsageIngestTokenService tokens) {
+            ClaudeUsageService usage,
+            ClaudeUsageProperties properties,
+            ClaudeUsageIngestTokenService tokens,
+            ClaudeUsageScanLogService scanLogs) {
         this.usage = usage;
         this.properties = properties;
         this.tokens = tokens;
+        this.scanLogs = scanLogs;
     }
 
     @PostMapping("/api/ingest")
@@ -98,6 +104,22 @@ public class ClaudeUsageIngestController {
 
         authorize(authorization, request.email());
         return new ApiDtos.ClaudeUsageIngestResponse(usage.recordScan(request.email()).action());
+    }
+
+    /**
+     * One scan's record for the admin View Logs page (ADR-096): its steps,
+     * counts, and where it failed. Sent by the reporter at the end of every
+     * scan — a failed one too, and later, from its local queue, one that
+     * failed because this server was unreachable. Same credential check as
+     * {@link #ingest}; writes no usage and does not move {@code last_scan_at}.
+     */
+    @PostMapping("/api/ingest/scan-log")
+    ApiDtos.ClaudeUsageIngestResponse scanLog(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @Valid @RequestBody ApiDtos.ClaudeUsageScanLogRequest request) {
+
+        authorize(authorization, request.email());
+        return new ApiDtos.ClaudeUsageIngestResponse(scanLogs.record(request.toReport()));
     }
 
     /** The wire DTO stays out of the service layer (ApiDtos.java's own stated rule) — this is the one conversion point. */

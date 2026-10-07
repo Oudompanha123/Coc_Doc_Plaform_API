@@ -167,6 +167,9 @@ class SecurityRulesTest {
     // the same reason: which routes the chain admits, not what the handshake does.
     @MockitoBean com.coc.docs.claudeusage.ClaudeUsageCliAuthService claudeUsageCliAuthService;
 
+    // Both Claude Usage controllers take it (ADR-096) — mocked for the same reason.
+    @MockitoBean com.coc.docs.claudeusage.ClaudeUsageScanLogService claudeUsageScanLogService;
+
     @MockitoBean com.coc.docs.axrenewal.AxRenewalService axRenewalService;
 
     @TestConfiguration
@@ -774,6 +777,24 @@ class SecurityRulesTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"email\":\"a@example.com\"}"))
                     .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void ingest_scan_log_is_reachable_without_a_session() throws Exception {
+            // Same permitAll() as /api/ingest/scan (ADR-096): the 401 comes from
+            // the controller's own bearer check, past the filter chain.
+            mvc.perform(post("/api/ingest/scan-log")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"scanId\":\"" + java.util.UUID.randomUUID() + "\",\"email\":\"a@example.com\","
+                                    + "\"startedAt\":\"2026-10-07T04:00:00Z\",\"finishedAt\":\"2026-10-07T04:00:08Z\"}"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void scan_logs_are_admin_only() throws Exception {
+            mvc.perform(get("/api/v1/admin/claude-usage/scan-logs")).andExpect(status().isUnauthorized());
+            mvc.perform(get("/api/v1/admin/claude-usage/scan-logs").with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
         }
 
         @Test

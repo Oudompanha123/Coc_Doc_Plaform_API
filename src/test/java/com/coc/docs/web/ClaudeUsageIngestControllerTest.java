@@ -14,10 +14,13 @@ import com.coc.docs.account.AppRole;
 import com.coc.docs.auth.TestCallers;
 import com.coc.docs.claudeusage.ClaudeUsageIngestTokenService;
 import com.coc.docs.claudeusage.ClaudeUsageProperties;
+import com.coc.docs.claudeusage.ClaudeUsageScanLogService;
 import com.coc.docs.claudeusage.ClaudeUsageService;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -35,6 +38,7 @@ class ClaudeUsageIngestControllerTest {
 
     private final ClaudeUsageService usage = mock(ClaudeUsageService.class);
     private final ClaudeUsageIngestTokenService tokens = mock(ClaudeUsageIngestTokenService.class);
+    private final ClaudeUsageScanLogService scanLogs = mock(ClaudeUsageScanLogService.class);
 
     private static ApiDtos.ClaudeUsageIngestRequest request(String email) {
         return new ApiDtos.ClaudeUsageIngestRequest(
@@ -42,7 +46,7 @@ class ClaudeUsageIngestControllerTest {
     }
 
     private ClaudeUsageIngestController controllerWithSecret(String configuredSecret) {
-        return new ClaudeUsageIngestController(usage, new ClaudeUsageProperties(configuredSecret), tokens);
+        return new ClaudeUsageIngestController(usage, new ClaudeUsageProperties(configuredSecret), tokens, scanLogs);
     }
 
     @Nested
@@ -153,6 +157,51 @@ class ClaudeUsageIngestControllerTest {
             assertThatThrownBy(() -> controllerWithSecret("s3cr3t").scan(null, new ApiDtos.ClaudeUsageScanRequest("a@example.com")))
                     .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.UNAUTHORIZED));
             verify(usage, never()).recordScan(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /api/ingest/scan-log — one scan's record for View Logs (ADR-096)")
+    class ScanLog {
+
+        private ApiDtos.ClaudeUsageScanLogRequest log(String email) {
+            Instant start = Instant.parse("2026-10-07T04:00:01Z");
+            return new ApiDtos.ClaudeUsageScanLogRequest(
+                    UUID.randomUUID(), email, "scheduled", "0.4.0", start, start.plusSeconds(8),
+                    118, 127, 163, 15_240L, 1, "uploaded", List.of(), null, null);
+        }
+
+        @Test
+        @DisplayName("own token, own email -> recorded, and no usage or scan time is written")
+        void recordsTheLogOnly() {
+            var owner = TestCallers.user(AppRole.ADMIN).account();
+            when(tokens.resolve("coc_abc")).thenReturn(Optional.of(owner));
+            when(scanLogs.record(any())).thenReturn(ClaudeUsageScanLogService.RECORDED);
+
+            ApiDtos.ClaudeUsageIngestResponse response = controllerWithSecret(null).scanLog("Bearer coc_abc", log(owner.email()));
+
+            assertThat(response.action()).isEqualTo("recorded");
+            verify(usage, never()).recordScan(any());
+            verify(usage, never()).recordUsage(any(), any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("another account's email is forbidden, nothing recorded")
+        void tokenMayNotLogSomeoneElsesScan() {
+            var owner = TestCallers.user(AppRole.ADMIN).account();
+            when(tokens.resolve("coc_abc")).thenReturn(Optional.of(owner));
+
+            assertThatThrownBy(() -> controllerWithSecret(null).scanLog("Bearer coc_abc", log("someone-else@example.com")))
+                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.FORBIDDEN));
+            verify(scanLogs, never()).record(any());
+        }
+
+        @Test
+        @DisplayName("no credential -> unauthorized, nothing recorded")
+        void missingCredentialIsUnauthorized() {
+            assertThatThrownBy(() -> controllerWithSecret("s3cr3t").scanLog(null, log("a@example.com")))
+                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.UNAUTHORIZED));
+            verify(scanLogs, never()).record(any());
         }
     }
 

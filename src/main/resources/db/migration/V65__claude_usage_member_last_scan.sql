@@ -1,4 +1,4 @@
--- Coc Docs Platform -- Claude usage: when a member's reporter last scanned (ADR-095)
+-- Coc Docs Platform -- Claude usage: when a member's reporter last scanned (ADR-097)
 --
 -- WHY
 -- The dashboard's "Last reported" is the newest claude_usage_daily.reported_at:
@@ -18,9 +18,9 @@
 -- NULL means "no scan recorded yet" (a member who last reported with an older
 -- reporter, or never), not "never scanned".
 --
--- // req: FR-USAGE-002, ADR-095
+-- // req: FR-USAGE-002, ADR-097
 
 alter table claude_usage_member add column last_scan_at timestamptz;
 
 comment on column claude_usage_member.last_scan_at is
-  'When this member''s reporter last completed a scan (any machine), whether or not it uploaded usage. Server time. NULL = none recorded yet (ADR-095).';
+  'When this member''s reporter last completed a scan (any machine), whether or not it uploaded usage. Server time. NULL = none recorded yet (ADR-097).';
