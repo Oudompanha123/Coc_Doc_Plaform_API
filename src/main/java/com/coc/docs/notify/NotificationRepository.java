@@ -102,6 +102,27 @@ public class NotificationRepository {
                 .list();
     }
 
+    /**
+     * This account's unread notifications, newest first — however old.
+     *
+     * <p>Read beside {@link #findFor}, because "the newest N" and "everything
+     * unread" are different questions: the bell's Unread tab filters the list
+     * it was given, so an unread row older than the newest N was counted by
+     * the badge and shown nowhere. Same ownership rule as every reader here.
+     */
+    public List<Notification> findUnreadFor(UUID accountId, int limit) {
+        return jdbc.sql("""
+                        select id, account_id, type, target_id, payload, created_at, read_at
+                        from notification
+                        where account_id = ? and read_at is null
+                        order by created_at desc
+                        limit ?
+                        """)
+                .params(accountId, limit)
+                .query(this::map)
+                .list();
+    }
+
     /** How many this account has not seen. Drives the badge. */
     public int countUnread(UUID accountId) {
         Integer count = jdbc.sql(
