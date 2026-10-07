@@ -13,6 +13,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Decides who hears about something, and makes sure the destinations stay
@@ -124,21 +126,7 @@ public class NotificationService {
         // and it used to be invisible.
         log.info("stored {} {} notification(s) for {} approver(s)", stored, type.key(), recipients.size());
 
-        recipients.forEach(id -> stream.publish(id, type));
-
-        List<String> tokens =
-                devices.findByAccountIds(recipients).stream().map(DeviceToken::token).toList();
-        if (tokens.isEmpty()) {
-            // Normal, not a fault: nobody has granted notification permission
-            // yet. The pending queue is still the authority on who is waiting.
-            log.debug("no registered devices for {} approver(s)", recipients.size());
-            return;
-        }
-
-        List<String> dead = push.send(tokens, type, target);
-        if (!dead.isEmpty()) {
-            devices.deleteAll(dead);
-        }
+        afterCommit(recipients, type, target, null);
     }
 
     /**
@@ -175,27 +163,7 @@ public class NotificationService {
         int stored = notifications.insertFor(List.of(accountId), type, target.id(), payloadOf(target, body));
         log.info("stored {} {} notification(s) for account {}", stored, type.key(), accountId);
 
-        // Before the push, and before the early return below: an open tab is
-        // updated whether or not this person has ever granted notification
-        // permission, which for most of this team is the only thing that
-        // happens at all.
-        stream.publish(accountId, type);
-
-        List<String> tokens = devices.findByAccountIds(Set.of(accountId)).stream()
-                .map(DeviceToken::token)
-                .toList();
-        if (tokens.isEmpty()) {
-
-            // Normal: this person has not granted notification permission on
-            // any device. The alert is still in the bell and in the audit log.
-            log.debug("no registered devices for account {} ({})", accountId, type.key());
-            return;
-        }
-
-        List<String> dead = push.send(tokens, type, target, body);
-        if (!dead.isEmpty()) {
-            devices.deleteAll(dead);
-        }
+        afterCommit(Set.of(accountId), type, target, body);
     }
 
     /**
@@ -237,18 +205,73 @@ public class NotificationService {
         int stored = notifications.insertFor(recipients, type, target.id(), payload);
         log.info("stored {} {} notification(s) for {} account(s)", stored, type.key(), recipients.size());
 
-        recipients.forEach(id -> stream.publish(id, type));
-
-        List<String> tokens =
-                devices.findByAccountIds(recipients).stream().map(DeviceToken::token).toList();
-        if (tokens.isEmpty()) {
-            return stored;
-        }
-        List<String> dead = push.send(tokens, type, target);
-        if (!dead.isEmpty()) {
-            devices.deleteAll(dead);
-        }
+        afterCommit(recipients, type, target, null);
         return stored;
+    }
+
+    /**
+     * Delivers what was just stored — the stream nudge to open tabs, then the
+     * push — once the transaction that stored it has committed.
+     *
+     * <p><b>Why not straight away.</b> Every method here is {@code @Transactional},
+     * so the rows are invisible to anybody else until it returns. Delivering
+     * inline nudged each open tab first; the tab re-read its inbox within
+     * milliseconds, found nothing new (the commit was still behind the
+     * ~half-second push call), and showed no banner until its next minute's
+     * poll. A member watching the page saw nothing — reported on an
+     * announcement (ADR-098), but true of every type. A push tapped in that
+     * window opened an inbox without its row, too. {@link NotificationStream}
+     * has always documented that it is called after the commit; this makes it
+     * so.
+     *
+     * <p>Outside a transaction (a unit test, a caller with none) it runs at
+     * once, which is the same thing.
+     *
+     * @param body the banner text, or null for the type's own sentence
+     */
+    private void afterCommit(Set<UUID> recipients, NotificationType type, NotificationTarget target, String body) {
+        Runnable delivery = () -> deliver(recipients, type, target, body);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    delivery.run();
+                }
+            });
+        } else {
+            delivery.run();
+        }
+    }
+
+    /**
+     * The best-effort half. The record already exists (ADR-034 decision 5), so
+     * nothing here can lose it, and nothing here is allowed to throw back into
+     * a caller whose work has already committed.
+     */
+    private void deliver(Set<UUID> recipients, NotificationType type, NotificationTarget target, String body) {
+        try {
+            // Before the push and before the early return below: an open tab
+            // is updated whether or not anybody has ever granted notification
+            // permission, which for most of this team is the only thing that
+            // happens at all.
+            recipients.forEach(id -> stream.publish(id, type));
+
+            List<String> tokens =
+                    devices.findByAccountIds(recipients).stream().map(DeviceToken::token).toList();
+            if (tokens.isEmpty()) {
+                // Normal, not a fault: nobody has granted notification
+                // permission on any device yet. The row is in the bell.
+                log.debug("no registered devices for {} recipient(s) of {}", recipients.size(), type.key());
+                return;
+            }
+
+            List<String> dead = body == null ? push.send(tokens, type, target) : push.send(tokens, type, target, body);
+            if (!dead.isEmpty()) {
+                devices.deleteAll(dead);
+            }
+        } catch (RuntimeException e) {
+            log.error("could not deliver {} to {} recipient(s); it is still in their bell", type.key(), recipients.size(), e);
+        }
     }
 
     /**

@@ -4,16 +4,14 @@ import com.coc.docs.audit.AuditAction;
 import com.coc.docs.audit.AuditRepository;
 import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.notify.NotificationRepository;
-import com.coc.docs.notify.NotificationService;
-import com.coc.docs.notify.NotificationTarget;
 import com.coc.docs.notify.NotificationType;
 import com.coc.docs.web.ApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,7 +45,7 @@ public class AnnouncementService {
     static final int MAX_LIVE = 50;
 
     private final AnnouncementRepository announcements;
-    private final NotificationService notifier;
+    private final ApplicationEventPublisher events;
     private final NotificationRepository notifications;
     private final AuditRepository audit;
     private final ObjectMapper json;
@@ -55,13 +53,13 @@ public class AnnouncementService {
 
     public AnnouncementService(
             AnnouncementRepository announcements,
-            NotificationService notifier,
+            ApplicationEventPublisher events,
             NotificationRepository notifications,
             AuditRepository audit,
             ObjectMapper json,
             Clock clock) {
         this.announcements = announcements;
-        this.notifier = notifier;
+        this.events = events;
         this.notifications = notifications;
         this.audit = audit;
         this.json = json;
@@ -131,7 +129,10 @@ public class AnnouncementService {
 
     /**
      * Publishes a draft or archived announcement, and tells every active
-     * account but the caller.
+     * account but the caller — after this transaction commits, through
+     * {@link AnnouncementPublishedEvent} and {@code AnnouncementNotifier}, so
+     * the bell row, the live nudge and the push never get ahead of the publish
+     * itself.
      *
      * <p>Republishing an archived one notifies again: it was withdrawn, its
      * bell rows were removed, and putting it back is news.
@@ -151,18 +152,8 @@ public class AnnouncementService {
             // sent the notifications; sending them again would double every bell.
             throw ApiException.conflict("this announcement is already published");
         }
-        int notified = notifier.notifyActiveAccounts(
-                NotificationType.ANNOUNCEMENT_PUBLISHED,
-                new NotificationTarget(id.toString(), null),
-                Map.of("title", current.title(), "category", current.category()),
-                caller.id());
-        audit.append(
-                caller.id(),
-                caller.email(),
-                AuditAction.ANNOUNCEMENT_PUBLISH,
-                AuditAction.TARGET_ANNOUNCEMENT,
-                id,
-                json.createObjectNode().put("title", current.title()).put("recipients", notified));
+        record(caller, AuditAction.ANNOUNCEMENT_PUBLISH, id, current.title());
+        events.publishEvent(new AnnouncementPublishedEvent(id, caller.id()));
         return get(id);
     }
 
