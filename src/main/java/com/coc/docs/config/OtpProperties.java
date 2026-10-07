@@ -18,14 +18,13 @@ import org.springframework.stereotype.Component;
  * at all.
  *
  * <p>To turn on the developer bypass locally, add to your own
- * {@code application.yml} (or the equivalent environment variables,
- * {@code APP_OTP_ENABLED}/{@code APP_OTP_DEV_CODE}):
+ * {@code backend/.env.local} (loaded by {@link DotenvEnvironmentPostProcessor};
+ * relaxed binding maps these onto {@code app.otp.*}, see
+ * {@code backend/.env.example}):
  *
  * <pre>{@code
- * app:
- *   otp:
- *     enabled: false
- *     dev-code: "123456"
+ * APP_OTP_ENABLED=false
+ * APP_OTP_DEV_CODE=123456
  * }</pre>
  *
  * <p>{@link OtpDevModeGuard} refuses to start the application if this bypass

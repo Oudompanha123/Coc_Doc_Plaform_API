@@ -14,9 +14,6 @@ app:
   # http origin, so sign-in appears to succeed and then silently does
   # nothing. // req: NFR-SEC-SESSION, NFR-SEC-CHANNEL
   cookie-secure: false
-  otp:
-    enabled: false
-    dev-code: 123456
 
 
 # Swagger UI at http://localhost:8081/swagger-ui.html, and the contract it
