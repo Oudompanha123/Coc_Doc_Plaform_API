@@ -152,7 +152,7 @@ class AnnouncementServiceTest {
     class BellInStep {
 
         @Test
-        @DisplayName("editing a published announcement rewrites the title on every bell copy")
+        @DisplayName("editing a published announcement rewrites the title and category on every bell copy")
         void editRewritesTitle() {
             UUID id = UUID.randomUUID();
             when(repository.findById(id)).thenReturn(Optional.of(announcement(id, Announcement.STATUS_PUBLISHED, null)));
@@ -162,6 +162,8 @@ class AnnouncementServiceTest {
 
             verify(notifications).updatePayloadFieldForTarget(
                     NotificationType.ANNOUNCEMENT_PUBLISHED, id.toString(), "title", "Maintenance");
+            verify(notifications).updatePayloadFieldForTarget(
+                    NotificationType.ANNOUNCEMENT_PUBLISHED, id.toString(), "category", "maintenance");
         }
 
         @Test
