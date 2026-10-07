@@ -2,6 +2,7 @@ package com.coc.docs.claudeusage;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -123,5 +124,34 @@ public class ClaudeUsageMemberRepository {
                         """)
                 .params(displayName, id)
                 .update();
+    }
+
+    /**
+     * Records that this member's reporter just finished a scan (V65, ADR-097),
+     * whether or not it uploaded usage. Server time; never moves backwards.
+     * Leaves {@code updated_at} alone -- that is the roster row's edit time.
+     */
+    public void touchLastScan(UUID id) {
+        jdbc.sql("update claude_usage_member set last_scan_at = greatest(last_scan_at, now()) where id = ?")
+                .param(id)
+                .update();
+    }
+
+    /** {@code last_scan_at} per member id, for members that have one. */
+    public Map<UUID, Instant> lastScanAtByMemberId() {
+        Map<UUID, Instant> scans = new HashMap<>();
+        jdbc.sql("select id, last_scan_at from claude_usage_member where last_scan_at is not null")
+                .query(rs -> {
+                    scans.put(rs.getObject("id", UUID.class), rs.getObject("last_scan_at", OffsetDateTime.class).toInstant());
+                });
+        return scans;
+    }
+
+    /** This member's {@code last_scan_at}, or empty when none is recorded yet. */
+    public Optional<Instant> findLastScanAt(UUID id) {
+        return jdbc.sql("select last_scan_at from claude_usage_member where id = ? and last_scan_at is not null")
+                .param(id)
+                .query((rs, rowNum) -> rs.getObject("last_scan_at", OffsetDateTime.class).toInstant())
+                .optional();
     }
 }

@@ -116,6 +116,46 @@ class ClaudeUsageIngestControllerTest {
         }
     }
 
+    @Nested
+    @DisplayName("POST /api/ingest/scan — a scan with nothing new to upload (ADR-097)")
+    class ScanOnly {
+
+        @Test
+        @DisplayName("records only the scan: no usage is written")
+        void recordsTheScanAndNoUsage() {
+            var owner = TestCallers.user(AppRole.ADMIN).account();
+            when(tokens.resolve("coc_abc")).thenReturn(Optional.of(owner));
+            when(usage.recordScan(owner.email()))
+                    .thenReturn(new ClaudeUsageService.IngestOutcome(ClaudeUsageService.IngestOutcome.SCAN_RECORDED));
+
+            ApiDtos.ClaudeUsageIngestResponse response = controllerWithSecret(null)
+                    .scan("Bearer coc_abc", new ApiDtos.ClaudeUsageScanRequest(owner.email()));
+
+            assertThat(response.action()).isEqualTo("scan-recorded");
+            verify(usage, never()).recordUsage(any(), any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("same credential rules as /api/ingest: another account's email is forbidden, nothing recorded")
+        void tokenMayNotRecordSomeoneElsesScan() {
+            var owner = TestCallers.user(AppRole.ADMIN).account();
+            when(tokens.resolve("coc_abc")).thenReturn(Optional.of(owner));
+
+            assertThatThrownBy(() -> controllerWithSecret(null)
+                            .scan("Bearer coc_abc", new ApiDtos.ClaudeUsageScanRequest("someone-else@example.com")))
+                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.FORBIDDEN));
+            verify(usage, never()).recordScan(any());
+        }
+
+        @Test
+        @DisplayName("no credential -> unauthorized, nothing recorded")
+        void missingCredentialIsUnauthorized() {
+            assertThatThrownBy(() -> controllerWithSecret("s3cr3t").scan(null, new ApiDtos.ClaudeUsageScanRequest("a@example.com")))
+                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.UNAUTHORIZED));
+            verify(usage, never()).recordScan(any());
+        }
+    }
+
     @Test
     @DisplayName("missing Authorization header is rejected before either credential check runs")
     void missingAuthorizationHeaderIsUnauthorized() {

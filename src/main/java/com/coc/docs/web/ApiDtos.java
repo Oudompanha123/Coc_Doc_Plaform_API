@@ -908,7 +908,9 @@ public final class ApiDtos {
             long totalTokens,
             BigDecimal costUsd,
             /** Profile picture of the account with the same email, or null — the UI shows initials then. */
-            String avatarUrl) {
+            String avatarUrl,
+            /** When their reporter last finished a scan, uploaded or not (ADR-097); {@code lastActiveAt} is the last upload in range. */
+            Instant lastScanAt) {
 
         public static ClaudeUsageMemberResponse of(ClaudeUsageMemberUsage usage) {
             var member = usage.member();
@@ -928,7 +930,8 @@ public final class ApiDtos {
                     usage.outputTokens(),
                     usage.totalTokens(),
                     usage.costUsd(),
-                    usage.avatarUrl());
+                    usage.avatarUrl(),
+                    usage.lastScanAt());
         }
     }
 
@@ -1008,7 +1011,9 @@ public final class ApiDtos {
             ClaudeUsageMyBreakdownResponse usage,
             ClaudeUsageWeekResponse week,
             /** Display only — never subtracted from {@code usage.costUsd} (ADR-065). */
-            BigDecimal subscriptionUsdPerMonth) {
+            BigDecimal subscriptionUsdPerMonth,
+            /** When the caller's reporter last finished a scan, uploaded or not (ADR-097); {@code lastUpdated} is the last upload. */
+            Instant lastScanAt) {
 
         public static ClaudeUsageMyDashboardResponse of(ClaudeUsageMyDashboard dashboard) {
             return new ClaudeUsageMyDashboardResponse(
@@ -1023,7 +1028,8 @@ public final class ApiDtos {
                     dashboard.todayUsage() == null ? null : ClaudeUsageMemberResponse.of(dashboard.todayUsage()),
                     ClaudeUsageMyBreakdownResponse.of(dashboard.usage()),
                     ClaudeUsageWeekResponse.of(dashboard.week()),
-                    dashboard.subscriptionUsdPerMonth());
+                    dashboard.subscriptionUsdPerMonth(),
+                    dashboard.lastScanAt());
         }
     }
 
@@ -1369,6 +1375,9 @@ public final class ApiDtos {
             Instant startedAt, Instant endedAt, int requestCount, List<String> projects) {}
 
     public record ClaudeUsageIngestResponse(String action) {}
+
+    /** {@code POST /api/ingest/scan}: a scan that found nothing new to upload (ADR-097). Only the email — no usage. */
+    public record ClaudeUsageScanRequest(@NotBlank @Email String email) {}
 
     // -----------------------------------------------------------------------
     // Claude Usage ingest tokens (per-account /api/ingest credential, V35, ADR-047)

@@ -595,6 +595,89 @@ class ClaudeUsageServiceTest {
     }
 
     @Nested
+    @DisplayName("Last scan vs last usage update (ADR-097)")
+    class LastScan {
+
+        private final LocalDate today = LocalDate.of(2026, 10, 6);
+        private final Instant uploadedAt = Instant.parse("2026-10-06T07:50:00Z"); // 14:50 Phnom Penh
+
+        @Test
+        @DisplayName("changed usage: the upload writes the day AND records the scan")
+        void changedUsageUploadsAndRecordsScan() {
+            ClaudeUsageMember me = member("dev@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findByEmail("dev@cocdocs.example")).thenReturn(Optional.of(me));
+            when(daily.upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any())).thenReturn(false);
+
+            service.recordUsage("dev@cocdocs.example", null, today, 150, 20, 0, 0, List.of(), Map.of());
+
+            verify(daily).upsert(eq(me.id()), eq(today), eq(150L), eq(20L), anyLong(), anyLong(), any(), any());
+            verify(members).touchLastScan(me.id());
+        }
+
+        @Test
+        @DisplayName("unchanged usage: recordScan records only the scan — no usage row, model rows or activity written")
+        void unchangedUsageRecordsOnlyTheScan() {
+            ClaudeUsageMember me = member("dev@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findByEmail("dev@cocdocs.example")).thenReturn(Optional.of(me));
+
+            var outcome = service.recordScan("Dev@CocDocs.example");
+
+            assertThat(outcome.action()).isEqualTo(ClaudeUsageService.IngestOutcome.SCAN_RECORDED);
+            verify(members).touchLastScan(me.id());
+            verify(daily, never()).upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any());
+            verify(dailyModels, never()).replaceDay(any(), any(), any());
+            verify(activities, never()).replaceDay(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a scan from an email not on the roster adds no one and records nothing")
+        void untrackedEmailIsNotAdded() {
+            when(members.findByEmail("new@cocdocs.example")).thenReturn(Optional.empty());
+
+            assertThat(service.recordScan("new@cocdocs.example").action()).isEqualTo(ClaudeUsageService.IngestOutcome.NOT_TRACKED);
+            verify(members, never()).insert(any(), any(), any(), any(), any());
+            verify(members, never()).touchLastScan(any());
+        }
+
+        @Test
+        @DisplayName("My Claude Usage: lastScanAt (16:00) is reported apart from lastUpdated (the 14:50 upload)")
+        void myDashboardKeepsTheTwoApart() {
+            CurrentUser actor = TestCallers.user(AppRole.USER);
+            ClaudeUsageMember me = member(actor.email(), ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findByEmail(actor.email())).thenReturn(Optional.of(me));
+            when(daily.listInRangeForMember(eq(me.id()), any(), eq(today))).thenReturn(List.of(new ClaudeUsageDaily(
+                    UUID.randomUUID(), me.id(), today, 150, 0, 0, 0, BigDecimal.ZERO, "Sonnet 5", uploadedAt)));
+            Instant scannedAt = Instant.parse("2026-10-06T09:00:00Z"); // 16:00 Phnom Penh
+            when(members.findLastScanAt(me.id())).thenReturn(Optional.of(scannedAt));
+
+            var dashboard = service.myDashboard(actor, today);
+
+            assertThat(dashboard.lastUpdated()).isEqualTo(uploadedAt);
+            assertThat(dashboard.lastScanAt()).isEqualTo(scannedAt);
+            assertThat(dashboard.todayUsage().lastScanAt()).isEqualTo(scannedAt);
+        }
+
+        @Test
+        @DisplayName("team dashboard: each member carries their own lastScanAt next to lastActiveAt")
+        void teamDashboardCarriesLastScanPerMember() {
+            ClaudeUsageMember scanned = member("a@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            ClaudeUsageMember never = member("b@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.list()).thenReturn(List.of(scanned, never));
+            when(daily.listInRange(any(), any())).thenReturn(List.of(new ClaudeUsageDaily(
+                    UUID.randomUUID(), scanned.id(), today, 150, 0, 0, 0, BigDecimal.ZERO, "Sonnet 5", uploadedAt)));
+            Instant scannedAt = Instant.parse("2026-10-06T09:00:00Z");
+            when(members.lastScanAtByMemberId()).thenReturn(Map.of(scanned.id(), scannedAt));
+
+            var byEmail = service.dashboard("day", 0, today).members().stream()
+                    .collect(java.util.stream.Collectors.toMap(m -> m.member().email(), m -> m));
+
+            assertThat(byEmail.get("a@cocdocs.example").lastActiveAt()).isEqualTo(uploadedAt);
+            assertThat(byEmail.get("a@cocdocs.example").lastScanAt()).isEqualTo(scannedAt);
+            assertThat(byEmail.get("b@cocdocs.example").lastScanAt()).isNull();
+        }
+    }
+
+    @Nested
     @DisplayName("My Claude Usage (ADR-052)")
     class MyDashboard {
 

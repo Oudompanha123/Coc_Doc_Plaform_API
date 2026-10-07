@@ -766,6 +766,17 @@ class SecurityRulesTest {
         }
 
         @Test
+        void ingest_scan_is_reachable_without_a_session() throws Exception {
+            // Same permitAll() as /api/ingest (ADR-097): 401 for a missing
+            // Authorization header proves the request reached the controller's
+            // own bearer check rather than being stopped by the filter chain.
+            mvc.perform(post("/api/ingest/scan")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"email\":\"a@example.com\"}"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
         void my_dashboard_refuses_a_caller_with_no_session() throws Exception {
             mvc.perform(get("/api/v1/claude-usage/me")).andExpect(status().isUnauthorized());
         }
@@ -782,7 +793,7 @@ class SecurityRulesTest {
                                     7, java.time.LocalDate.now(), java.time.LocalDate.now()),
                             new com.coc.docs.claudeusage.ClaudeUsageMyDashboard.WeekUsage(
                                     java.time.LocalDate.now(), java.time.LocalDate.now(), 0, 0, 0),
-                            java.math.BigDecimal.ZERO));
+                            java.math.BigDecimal.ZERO, null));
 
             mvc.perform(get("/api/v1/claude-usage/me").with(as(AppRole.USER)))
                     .andExpect(status().isOk());
@@ -798,7 +809,7 @@ class SecurityRulesTest {
                                     7, java.time.LocalDate.now(), java.time.LocalDate.now()),
                             new com.coc.docs.claudeusage.ClaudeUsageMyDashboard.WeekUsage(
                                     java.time.LocalDate.now(), java.time.LocalDate.now(), 0, 0, 0),
-                            java.math.BigDecimal.ZERO));
+                            java.math.BigDecimal.ZERO, null));
 
             mvc.perform(get("/api/v1/claude-usage/me").with(as(AppRole.ADMIN)))
                     .andExpect(status().isOk());
