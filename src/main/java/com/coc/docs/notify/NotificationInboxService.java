@@ -41,12 +41,37 @@ public class NotificationInboxService {
         this.clock = clock;
     }
 
+    /**
+     * The newest {@code limit} notifications, plus every unread one older than
+     * those (up to {@link #MAX_LIMIT}), newest first.
+     *
+     * <p><b>Why the unread are added.</b> The bell's Unread tab is a filter
+     * over this list, and its badge is {@link #unreadCountFor} — every unread
+     * row. With the newest thirty alone, somebody whose unread rows had been
+     * pushed down by newer read ones (an announcement goes to everyone, so
+     * that is easy) saw a badge of 5 over an Unread tab saying "You're all
+     * caught up". Adding the unread keeps the tab and the badge in agreement;
+     * "All" stays the newest {@code limit}, with any older unread rows in
+     * their place by date.
+     */
     @Transactional(readOnly = true)
     public List<Notification> listFor(CurrentUser caller, int limit) {
         // Clamped rather than refused: this drives a decoration, and answering
         // 400 because somebody asked for 500 helps nobody.
         int bounded = Math.clamp(limit, 1, MAX_LIMIT);
-        return notifications.findFor(caller.account().id(), bounded);
+        UUID accountId = caller.account().id();
+        List<Notification> recent = notifications.findFor(accountId, bounded);
+        List<Notification> unread = notifications.findUnreadFor(accountId, MAX_LIMIT);
+
+        java.util.Map<UUID, Notification> merged = new java.util.LinkedHashMap<>();
+        recent.forEach(n -> merged.put(n.id(), n));
+        unread.forEach(n -> merged.putIfAbsent(n.id(), n));
+        if (merged.size() == recent.size()) {
+            return recent;
+        }
+        return merged.values().stream()
+                .sorted(java.util.Comparator.comparing(Notification::createdAt).reversed())
+                .toList();
     }
 
     @Transactional(readOnly = true)
