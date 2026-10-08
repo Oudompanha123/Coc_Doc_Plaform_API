@@ -42,12 +42,12 @@ class AnnouncementNotifierTest {
             new AnnouncementNotifier(notifications, announcements, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private static Announcement announcement(UUID id, String status) {
-        return new Announcement(id, "Maintenance on Friday", "Body", "maintenance", status, null, 2,
+        return new Announcement(id, "Maintenance on Friday", "The **portal** is offline from `22:00`.", "maintenance", status, null, 2,
                 NOW.minusSeconds(5), "Admin", NOW.minusSeconds(60), NOW.minusSeconds(5), "Admin");
     }
 
     @Test
-    @DisplayName("tells every active account but the publisher: bell, live nudge and push")
+    @DisplayName("tells every active account but the publisher, with the type, title and text on the push (ADR-103)")
     void notifiesEveryoneButThePublisher() {
         UUID id = UUID.randomUUID();
         UUID publisher = UUID.randomUUID();
@@ -58,8 +58,18 @@ class AnnouncementNotifierTest {
         verify(notifications).notifyActiveAccounts(
                 eq(NotificationType.ANNOUNCEMENT_PUBLISHED),
                 eq(new NotificationTarget(id.toString(), null)),
-                eq(Map.of("title", "Maintenance on Friday", "category", "maintenance")),
-                eq(publisher));
+                eq(Map.of(
+                        "title", "Maintenance on Friday",
+                        "category", "maintenance",
+                        "excerpt", "The portal is offline from 22:00.")),
+                eq(publisher),
+                eq(new PushBanner(
+                        "Maintenance · Maintenance on Friday",
+                        "The portal is offline from 22:00.",
+                        null,
+                        // One tag per announcement: a shared tag replaced the
+                        // previous banner silently, so later ones never showed.
+                        "announcement.published:" + id)));
     }
 
     @Test
@@ -82,7 +92,8 @@ class AnnouncementNotifierTest {
     void swallowsFailures() {
         UUID id = UUID.randomUUID();
         when(announcements.findById(id)).thenReturn(Optional.of(announcement(id, Announcement.STATUS_PUBLISHED)));
-        when(notifications.notifyActiveAccounts(any(), any(), any(), any())).thenThrow(new IllegalStateException("db down"));
+        when(notifications.notifyActiveAccounts(any(), any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("db down"));
 
         assertThatCode(() -> notifier.onPublished(new AnnouncementPublishedEvent(id, UUID.randomUUID())))
                 .doesNotThrowAnyException();

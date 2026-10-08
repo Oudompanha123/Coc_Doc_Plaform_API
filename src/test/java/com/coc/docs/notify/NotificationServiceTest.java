@@ -3,6 +3,7 @@ package com.coc.docs.notify;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -219,6 +220,28 @@ class NotificationServiceTest {
         assertThat(payload.getValue().get("body").asText()).isEqualTo(NotificationType.ANNOUNCEMENT_PUBLISHED.body());
         // The three-argument send: the type's fixed sentence, never the title.
         verify(push).send(anyCollection(), any(), any());
+    }
+
+    @Test
+    @DisplayName("a caller's own banner is pushed as given, instead of the type's fixed sentence (ADR-103)")
+    void pushesTheCallersBanner() {
+        UUID reader = UUID.randomUUID();
+        when(accounts.activeMailTargets())
+                .thenReturn(List.of(new AccountRepository.MailTarget(reader, "reader@example.com", null)));
+        when(notifications.insertFor(anyCollection(), any(), any(), any())).thenReturn(1);
+        when(devices.findByAccountIds(any())).thenReturn(List.of(device(reader, "token-reader")));
+        PushBanner banner = new PushBanner("Update · New docs", "Read the new guide.", "/logo-coc-docs-platform.png", "announcement.published:a1");
+        when(push.sendBanner(anyCollection(), any(), any(), any())).thenReturn(List.of());
+
+        service.notifyActiveAccounts(
+                NotificationType.ANNOUNCEMENT_PUBLISHED,
+                new NotificationTarget("a1", null),
+                java.util.Map.of("title", "New docs"),
+                null,
+                banner);
+
+        verify(push).sendBanner(anyCollection(), eq(NotificationType.ANNOUNCEMENT_PUBLISHED), any(), eq(banner));
+        verify(push, org.mockito.Mockito.never()).send(anyCollection(), any(), any());
     }
 
     @Test

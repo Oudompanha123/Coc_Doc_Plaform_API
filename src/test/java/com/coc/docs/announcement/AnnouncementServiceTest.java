@@ -152,7 +152,7 @@ class AnnouncementServiceTest {
     class BellInStep {
 
         @Test
-        @DisplayName("editing a published announcement rewrites the title and category on every bell copy")
+        @DisplayName("editing a published announcement rewrites the title, category and banner excerpt on every bell copy")
         void editRewritesTitle() {
             UUID id = UUID.randomUUID();
             when(repository.findById(id)).thenReturn(Optional.of(announcement(id, Announcement.STATUS_PUBLISHED, null)));
@@ -164,6 +164,9 @@ class AnnouncementServiceTest {
                     NotificationType.ANNOUNCEMENT_PUBLISHED, id.toString(), "title", "Maintenance");
             verify(notifications).updatePayloadFieldForTarget(
                     NotificationType.ANNOUNCEMENT_PUBLISHED, id.toString(), "category", "maintenance");
+            // The saved row's body, flattened as the push would show it (ADR-103).
+            verify(notifications).updatePayloadFieldForTarget(
+                    NotificationType.ANNOUNCEMENT_PUBLISHED, id.toString(), "excerpt", "Down Friday 18:00");
         }
 
         @Test

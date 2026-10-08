@@ -126,6 +126,13 @@ public class AnnouncementService {
             // announcement must not keep its old icon in everyone's bell.
             notifications.updatePayloadFieldForTarget(
                     NotificationType.ANNOUNCEMENT_PUBLISHED, id.toString(), "category", saved.category());
+            // And the banner excerpt the publish stored beside them (ADR-103),
+            // so no copy keeps text the admin has since corrected.
+            notifications.updatePayloadFieldForTarget(
+                    NotificationType.ANNOUNCEMENT_PUBLISHED,
+                    id.toString(),
+                    "excerpt",
+                    AnnouncementText.excerpt(saved.body(), AnnouncementText.BANNER_EXCERPT_LENGTH));
         }
         record(caller, AuditAction.ANNOUNCEMENT_UPDATE, id, saved.title());
         return saved;

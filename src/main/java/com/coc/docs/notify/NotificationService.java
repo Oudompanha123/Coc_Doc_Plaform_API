@@ -126,7 +126,7 @@ public class NotificationService {
         // and it used to be invisible.
         log.info("stored {} {} notification(s) for {} approver(s)", stored, type.key(), recipients.size());
 
-        afterCommit(recipients, type, target, null);
+        afterCommit(recipients, type, target, null, null);
     }
 
     /**
@@ -163,7 +163,7 @@ public class NotificationService {
         int stored = notifications.insertFor(List.of(accountId), type, target.id(), payloadOf(target, body));
         log.info("stored {} {} notification(s) for account {}", stored, type.key(), accountId);
 
-        afterCommit(Set.of(accountId), type, target, body);
+        afterCommit(Set.of(accountId), type, target, body, null);
     }
 
     /**
@@ -178,7 +178,9 @@ public class NotificationService {
      * <p>{@code facts} are added to the stored payload beside the fixed
      * {@code body}; they are read by the signed-in recipient only. The push
      * itself carries the type's fixed sentence and nothing from {@code facts},
-     * because a push renders on a lock screen.
+     * because a push renders on a lock screen — unless the caller passes its
+     * own {@link PushBanner} to the overload below, which an announcement does
+     * (ADR-103).
      *
      * @param except the account that caused it, who is not told about their
      *     own action; null to include everybody
@@ -187,6 +189,23 @@ public class NotificationService {
     @Transactional
     public int notifyActiveAccounts(
             NotificationType type, NotificationTarget target, Map<String, String> facts, UUID except) {
+        return notifyActiveAccounts(type, target, facts, except, null);
+    }
+
+    /**
+     * As {@link #notifyActiveAccounts(NotificationType, NotificationTarget, Map, UUID)},
+     * with the push banner's title, text and picture chosen by the caller
+     * rather than the type's fixed wording (ADR-103).
+     *
+     * @param banner what the push shows, or null for the type's own title and sentence
+     */
+    @Transactional
+    public int notifyActiveAccounts(
+            NotificationType type,
+            NotificationTarget target,
+            Map<String, String> facts,
+            UUID except,
+            PushBanner banner) {
         Set<UUID> recipients = accounts.activeMailTargets().stream()
                 .map(AccountRepository.MailTarget::accountId)
                 .filter(id -> !id.equals(except))
@@ -205,7 +224,7 @@ public class NotificationService {
         int stored = notifications.insertFor(recipients, type, target.id(), payload);
         log.info("stored {} {} notification(s) for {} account(s)", stored, type.key(), recipients.size());
 
-        afterCommit(recipients, type, target, null);
+        afterCommit(recipients, type, target, null, banner);
         return stored;
     }
 
@@ -228,9 +247,11 @@ public class NotificationService {
      * once, which is the same thing.
      *
      * @param body the banner text, or null for the type's own sentence
+     * @param banner the whole banner, which wins over {@code body}; null for none
      */
-    private void afterCommit(Set<UUID> recipients, NotificationType type, NotificationTarget target, String body) {
-        Runnable delivery = () -> deliver(recipients, type, target, body);
+    private void afterCommit(
+            Set<UUID> recipients, NotificationType type, NotificationTarget target, String body, PushBanner banner) {
+        Runnable delivery = () -> deliver(recipients, type, target, body, banner);
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
@@ -248,7 +269,8 @@ public class NotificationService {
      * nothing here can lose it, and nothing here is allowed to throw back into
      * a caller whose work has already committed.
      */
-    private void deliver(Set<UUID> recipients, NotificationType type, NotificationTarget target, String body) {
+    private void deliver(
+            Set<UUID> recipients, NotificationType type, NotificationTarget target, String body, PushBanner banner) {
         try {
             // Before the push and before the early return below: an open tab
             // is updated whether or not anybody has ever granted notification
@@ -265,7 +287,9 @@ public class NotificationService {
                 return;
             }
 
-            List<String> dead = body == null ? push.send(tokens, type, target) : push.send(tokens, type, target, body);
+            List<String> dead = banner != null
+                    ? push.sendBanner(tokens, type, target, banner)
+                    : body == null ? push.send(tokens, type, target) : push.send(tokens, type, target, body);
             if (!dead.isEmpty()) {
                 devices.deleteAll(dead);
             }

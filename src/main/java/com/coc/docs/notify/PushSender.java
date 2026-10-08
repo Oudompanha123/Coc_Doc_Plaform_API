@@ -80,6 +80,20 @@ public class PushSender {
      */
     public List<String> send(
             Collection<String> tokens, NotificationType type, NotificationTarget target, String body) {
+        return sendBanner(tokens, type, target, new PushBanner(type.title(), body, null, null));
+    }
+
+    /**
+     * As {@link #send(Collection, NotificationType, NotificationTarget, String)},
+     * with the banner's title and large image chosen by the caller (ADR-103) —
+     * an announcement's own title and text, with the site logo.
+     *
+     * <p>A separate name rather than another four-argument {@code send}: the
+     * two would be ambiguous to every caller and mock that passes a bare
+     * {@code null}.
+     */
+    public List<String> sendBanner(
+            Collection<String> tokens, NotificationType type, NotificationTarget target, PushBanner banner) {
         if (tokens.isEmpty()) {
             return List.of();
         }
@@ -97,7 +111,7 @@ public class PushSender {
         List<String> dead = new ArrayList<>();
         for (int start = 0; start < all.size(); start += BATCH_LIMIT) {
             List<String> batch = all.subList(start, Math.min(start + BATCH_LIMIT, all.size()));
-            dead.addAll(sendBatch(fcm, batch, type, target, body));
+            dead.addAll(sendBatch(fcm, batch, type, target, banner));
         }
         return dead;
     }
@@ -107,18 +121,23 @@ public class PushSender {
             List<String> batch,
             NotificationType type,
             NotificationTarget target,
-            String body) {
-        MulticastMessage message = MulticastMessage.builder()
+            PushBanner banner) {
+        MulticastMessage.Builder builder = MulticastMessage.builder()
                 .addAllTokens(batch)
                 .setNotification(Notification.builder()
-                        .setTitle(type.title())
-                        .setBody(body)
+                        .setTitle(banner.title())
+                        .setBody(banner.body())
                         .build())
                 // Read by the service worker to route the click. Sent as data
                 // rather than baked into the notification so the client decides
                 // what to do with it — a phone and a browser want different
                 // things from the same event.
                 .putData("type", type.key())
+                // The banner's collapse key. The type, unless the banner asks
+                // for its own: a browser replaces a notification that shares a
+                // tag *without showing it*, so one tag for every announcement
+                // meant only the first ever popped up (ADR-103).
+                .putData("tag", banner.tag() == null ? type.key() : banner.tag())
                 // The exact thing to act on, so a click opens the approval
                 // dialog rather than dropping the reader on a list to search.
                 // An id, not a name — the banner text stays free of identity
@@ -129,8 +148,14 @@ public class PushSender {
                 // password registration; the client draws initials rather than
                 // falling back to an app logo, which says nothing about who
                 // this is.
-                .putData("icon", target.iconUrl() == null ? "" : target.iconUrl())
-                .build();
+                .putData("icon", target.iconUrl() == null ? "" : target.iconUrl());
+        if (banner.image() != null) {
+            // A large picture under the text (ADR-103) — the site logo on an
+            // announcement. A path on the frontend's own origin, which is
+            // where the service worker that draws the banner runs.
+            builder.putData("image", banner.image());
+        }
+        MulticastMessage message = builder.build();
 
         try {
             var response = fcm.sendEachForMulticast(message);
