@@ -15,6 +15,10 @@ import org.springframework.transaction.annotation.Transactional;
  * has touched yet is enabled and still needs to appear as a switch the caller
  * can flip.
  *
+ * <p>Only the types the caller's role can receive are listed
+ * ({@link NotificationType#isFor}): a {@code user} sees new-device sign-in and
+ * announcements, not the approval queue or AX Renewal.
+ *
  * <p>// req: ADR-041
  */
 @Service
@@ -26,13 +30,14 @@ public class NotificationPreferenceService {
         this.preferences = preferences;
     }
 
-    /** One entry per real {@link NotificationType}, defaulted to enabled where no row exists. */
+    /** One entry per {@link NotificationType} the caller can receive, defaulted to enabled where no row exists. */
     public record Preference(NotificationType type, boolean enabled) {}
 
     @Transactional(readOnly = true)
     public List<Preference> listFor(CurrentUser caller) {
         Map<String, Boolean> overrides = preferences.findOverridesFor(caller.id());
         return java.util.Arrays.stream(NotificationType.values())
+                .filter(type -> type.isFor(caller.role()))
                 .map(type -> new Preference(type, overrides.getOrDefault(type.key(), true)))
                 .toList();
     }

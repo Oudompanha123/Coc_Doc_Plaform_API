@@ -1,5 +1,7 @@
 package com.coc.docs.notify;
 
+import com.coc.docs.account.AppRole;
+
 /**
  * What a notification says and where it leads.
  *
@@ -172,6 +174,34 @@ public enum NotificationType {
      */
     public static java.util.Optional<NotificationType> fromKey(String key) {
         return java.util.Arrays.stream(values()).filter(t -> t.key.equals(key)).findFirst();
+    }
+
+    /**
+     * The lowest role that can ever receive this type, so a preference switch
+     * is only offered to somebody it can reach (a {@code user} has no AX
+     * Renewal access and never approves a registration, so those switches
+     * would do nothing for them). Mirrors who each sender actually picks:
+     * {@code NotificationService.notifyApprovers} for a registration, AX
+     * Renewal's {@code DEVELOPER} floor in {@code SecurityConfig} for its four
+     * types, and every active account for the other two.
+     *
+     * <p>A switch rather than a constructor argument so that a new type does
+     * not compile until somebody has decided who it is for.
+     *
+     * <p>// req: ADR-041
+     */
+    public AppRole minimumRole() {
+        return switch (this) {
+            case NEW_REGISTRATION -> AppRole.SUPER_ADMIN;
+            case AX_RENEWAL_MEMBER_ADDED, AX_RENEWAL_RUN_READY, AX_RENEWAL_COMMENT_ADDED, AX_RENEWAL_RUN_REVIEWED ->
+                AppRole.DEVELOPER;
+            case NEW_DEVICE_SIGN_IN, ANNOUNCEMENT_PUBLISHED -> AppRole.USER;
+        };
+    }
+
+    /** True when somebody whose highest role is {@code role} can receive this type. */
+    public boolean isFor(AppRole role) {
+        return role.isAtLeast(minimumRole());
     }
 
     public String title() {
