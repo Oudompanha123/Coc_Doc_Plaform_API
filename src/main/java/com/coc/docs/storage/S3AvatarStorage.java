@@ -14,7 +14,13 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.services.s3.model.S3Exception;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 
 /**
  * Stores a self-uploaded profile photo behind the S3 API (CONST-TECH-08,
@@ -30,6 +36,8 @@ import software.amazon.awssdk.services.s3.model.S3Exception;
  */
 public class S3AvatarStorage implements AvatarStorage {
 
+    private static final Logger log = LoggerFactory.getLogger(S3AvatarStorage.class);
+
     /** Generous enough for a face photo, small enough that an abusive upload costs little. */
     static final long MAX_BYTES = 2L * 1024 * 1024;
 
@@ -42,12 +50,25 @@ public class S3AvatarStorage implements AvatarStorage {
     private static final Map<String, String> ALLOWED_TYPES =
             Map.of("image/png", "png", "image/jpeg", "jpg", "image/webp", "webp");
 
+    /**
+     * How long a presigned photo URL stays valid (ADR-101).
+     *
+     * <p>Long enough that a page which renders a dozen avatars does not have
+     * half of them expire while it loads, and short enough that a URL copied
+     * out of devtools stops working the same afternoon. The redirect that
+     * issues it is cached for less than this, so a browser never holds a
+     * redirect to an already-dead signature.
+     */
+    private static final java.time.Duration PRESIGN_TTL = java.time.Duration.ofMinutes(15);
+
     private final S3Client client;
+    private final S3Presigner presigner;
     private final String bucket;
     private final String publicBaseUrl;
 
-    public S3AvatarStorage(S3Client client, String bucket, String publicBaseUrl) {
+    public S3AvatarStorage(S3Client client, S3Presigner presigner, String bucket, String publicBaseUrl) {
         this.client = client;
+        this.presigner = presigner;
         this.bucket = bucket;
         // No trailing slash, so key-joining below never doubles one up.
         this.publicBaseUrl = publicBaseUrl.endsWith("/")
@@ -99,10 +120,65 @@ public class S3AvatarStorage implements AvatarStorage {
                             .build(),
                     RequestBody.fromBytes(bytes));
         } catch (S3Exception e) {
+            // The service answered and refused: wrong bucket, bad credentials,
+            // denied by policy, wrong region.
+            //
+            // LOGGED, because without this the refusal was invisible. The
+            // caller got "please try again" and the server recorded nothing at
+            // all, so the one fact that identifies the problem -- AccessDenied
+            // vs NoSuchBucket vs PermanentRedirect, each with a different fix
+            // -- was discarded at the moment it arrived. The message stays
+            // vague for the caller on purpose; the detail belongs in the log,
+            // not in an HTTP body.
+            log.error(
+                    "avatar upload refused by object storage: code={} status={} bucket={} endpoint={}",
+                    e.awsErrorDetails() == null ? "?" : e.awsErrorDetails().errorCode(),
+                    e.statusCode(),
+                    bucket,
+                    publicBaseUrl,
+                    e);
             throw ApiException.badRequest("photo upload failed — please try again");
+        } catch (SdkException e) {
+            // The service was never reached at all -- an endpoint pointing at
+            // nothing, DNS, a firewall. SdkClientException is NOT an
+            // S3Exception, so without this it escaped as an unhandled
+            // exception and the caller got "an unexpected error occurred",
+            // which says nothing and sent somebody looking at their photo
+            // instead of at app.storage.endpoint.
+            log.error("avatar upload could not reach object storage at {}", publicBaseUrl, e);
+            throw ApiException.badRequest(
+                    "photo upload is not working: this deployment cannot reach its object storage");
         }
 
         return publicBaseUrl + "/" + bucket + "/" + key;
+    }
+
+    /**
+     * A signed GET for one object, valid for {@link #PRESIGN_TTL}.
+     *
+     * <p>Empty rather than throwing when the signer refuses: a photo that
+     * cannot be signed should fall back to initials, not fail the request that
+     * was rendering a page around it.
+     */
+    @Override
+    public java.util.Optional<String> presign(String key) {
+        if (presigner == null || key == null || key.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            return java.util.Optional.of(presigner
+                    .presignGetObject(GetObjectPresignRequest.builder()
+                            .signatureDuration(PRESIGN_TTL)
+                            .getObjectRequest(GetObjectRequest.builder()
+                                    .bucket(bucket)
+                                    .key(key)
+                                    .build())
+                            .build())
+                    .url()
+                    .toString());
+        } catch (RuntimeException e) {
+            return java.util.Optional.empty();
+        }
     }
 
     @Override
@@ -115,9 +191,11 @@ public class S3AvatarStorage implements AvatarStorage {
         }
         try {
             client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());
-        } catch (S3Exception e) {
-            // Best-effort: the account row is the source of truth, and a
-            // dangling object left behind costs storage, not correctness.
+        } catch (SdkException e) {
+            // Best-effort, and now for an unreachable endpoint as well as a
+            // refusal: the account row is the source of truth, and a dangling
+            // object left behind costs storage, not correctness. Removing a
+            // photo must not fail because storage is misconfigured.
         }
     }
 

@@ -907,9 +907,18 @@ class AuthControllerTest {
                     new org.springframework.mock.web.MockMultipartFile(
                             "file", "photo.png", "image/png", new byte[] {1, 2, 3});
 
+            // Not the stored S3 URL (ADR-101): the API hands back its own
+            // avatar route, which redirects to a short-lived signed URL, so
+            // the bucket can stay private. Asserting the stored value here
+            // would re-pin the behaviour that required a public bucket.
             mvc.perform(multipart("/api/v1/auth/me/avatar").file(file).with(as(AppRole.USER)))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.avatarUrl").value(updated.avatarUrl()));
+                    .andExpect(jsonPath("$.avatarUrl").value(org.hamcrest.Matchers.startsWith("/api/v1/avatars/")))
+                    .andExpect(jsonPath("$.avatarUrl").value(org.hamcrest.Matchers.endsWith("/photo.png")))
+                    // And emphatically not the bucket address, which is the
+                    // whole point: that URL only loads from a public bucket.
+                    .andExpect(jsonPath("$.avatarUrl")
+                            .value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("s3.test"))));
         }
 
         @Test

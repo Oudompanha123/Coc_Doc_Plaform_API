@@ -66,6 +66,31 @@ public final class ApiDtos {
 
     private ApiDtos() {}
 
+    /**
+     * The address a client should load a profile photo from (ADR-101).
+     *
+     * <p>A self-uploaded photo is stored as {@code {endpoint}/{bucket}/avatars/
+     * {accountId}/{uuid}.{ext}} — a direct object URL that only works if the
+     * bucket is public. This rewrites it to this API's own avatar route, which
+     * redirects to a short-lived signed URL, so the bucket can stay closed.
+     *
+     * <p>Anything else is returned untouched: the identity provider's
+     * {@code picture} URL belongs to Google and is already a working address,
+     * and a null stays null so the client falls back to initials.
+     *
+     * <p>Pure string work, deliberately. These DTO factories are static and
+     * called from nine places; threading a storage bean through all of them to
+     * presign here would be a far larger change, and one that signed a URL per
+     * row of every account listing whether or not the browser ever fetched it.
+     */
+    static String avatarHref(String storedUrl) {
+        if (storedUrl == null) {
+            return null;
+        }
+        int at = storedUrl.indexOf("/avatars/");
+        return at < 0 ? storedUrl : "/api/v1/avatars/" + storedUrl.substring(at + "/avatars/".length());
+    }
+
     // -----------------------------------------------------------------------
     // Auth
     // -----------------------------------------------------------------------
@@ -205,7 +230,7 @@ public final class ApiDtos {
                     account.email(),
                     account.displayName(),
                     account.role().wire(),
-                    account.avatarUrl(),
+                    avatarHref(account.avatarUrl()),
                     true,
                     account.createdAt(),
                     lastSignInAt,
@@ -481,7 +506,7 @@ public final class ApiDtos {
                             .map(AppRole::wire)
                             .toList(),
                     account.mustChangePassword(),
-                    account.avatarUrl());
+                    avatarHref(account.avatarUrl()));
         }
     }
 
@@ -932,7 +957,7 @@ public final class ApiDtos {
                     usage.outputTokens(),
                     usage.totalTokens(),
                     usage.costUsd(),
-                    usage.avatarUrl(),
+                    avatarHref(usage.avatarUrl()),
                     usage.lastScanAt());
         }
     }
