@@ -44,7 +44,7 @@ class S3AvatarStorageTest {
 
     @Test
     void rejectsAnEmptyFile() {
-        S3AvatarStorage storage = new S3AvatarStorage(Mockito.mock(S3Client.class), "bucket", "https://s3.test");
+        S3AvatarStorage storage = new S3AvatarStorage(Mockito.mock(S3Client.class), null, "bucket", "https://s3.test");
         MockMultipartFile empty = new MockMultipartFile("file", "photo.png", "image/png", new byte[0]);
 
         assertThatThrownBy(() -> storage.upload(ACCOUNT_ID, empty))
@@ -54,7 +54,7 @@ class S3AvatarStorageTest {
 
     @Test
     void rejectsAFileOverTheSizeLimit() {
-        S3AvatarStorage storage = new S3AvatarStorage(Mockito.mock(S3Client.class), "bucket", "https://s3.test");
+        S3AvatarStorage storage = new S3AvatarStorage(Mockito.mock(S3Client.class), null, "bucket", "https://s3.test");
         byte[] tooLarge = new byte[(int) S3AvatarStorage.MAX_BYTES + 1];
         MockMultipartFile file = new MockMultipartFile("file", "photo.png", "image/png", tooLarge);
 
@@ -65,7 +65,7 @@ class S3AvatarStorageTest {
 
     @Test
     void rejectsAnUnsupportedContentType() {
-        S3AvatarStorage storage = new S3AvatarStorage(Mockito.mock(S3Client.class), "bucket", "https://s3.test");
+        S3AvatarStorage storage = new S3AvatarStorage(Mockito.mock(S3Client.class), null, "bucket", "https://s3.test");
         MockMultipartFile file = new MockMultipartFile(
                 "file", "photo.svg", "image/svg+xml", pngBytes());
 
@@ -81,7 +81,7 @@ class S3AvatarStorageTest {
      */
     @Test
     void rejectsBytesThatAreNotActuallyAnImage() {
-        S3AvatarStorage storage = new S3AvatarStorage(Mockito.mock(S3Client.class), "bucket", "https://s3.test");
+        S3AvatarStorage storage = new S3AvatarStorage(Mockito.mock(S3Client.class), null, "bucket", "https://s3.test");
         MockMultipartFile file = new MockMultipartFile(
                 "file", "photo.png", "image/png", "<script>alert(1)</script>".getBytes());
 
@@ -93,7 +93,7 @@ class S3AvatarStorageTest {
     @Test
     void neverCallsStorageForAnInvalidUpload() {
         S3Client client = Mockito.mock(S3Client.class);
-        S3AvatarStorage storage = new S3AvatarStorage(client, "bucket", "https://s3.test");
+        S3AvatarStorage storage = new S3AvatarStorage(client, null, "bucket", "https://s3.test");
         MockMultipartFile badFile = new MockMultipartFile("file", "photo.png", "image/png", new byte[0]);
 
         assertThatThrownBy(() -> storage.upload(ACCOUNT_ID, badFile)).isInstanceOf(ApiException.class);
@@ -104,7 +104,7 @@ class S3AvatarStorageTest {
     @Test
     void uploadsAValidPhotoAndReturnsAUrlUnderTheAccountsOwnPrefix() {
         S3Client client = Mockito.mock(S3Client.class);
-        S3AvatarStorage storage = new S3AvatarStorage(client, "bucket", "https://s3.test");
+        S3AvatarStorage storage = new S3AvatarStorage(client, null, "bucket", "https://s3.test");
         MockMultipartFile file = new MockMultipartFile("file", "photo.png", "image/png", pngBytes());
 
         String url = storage.upload(ACCOUNT_ID, file);
@@ -118,7 +118,7 @@ class S3AvatarStorageTest {
     @Test
     void deleteIsANoOpForAUrlThisStorageDidNotCreate() {
         S3Client client = Mockito.mock(S3Client.class);
-        S3AvatarStorage storage = new S3AvatarStorage(client, "bucket", "https://s3.test");
+        S3AvatarStorage storage = new S3AvatarStorage(client, null, "bucket", "https://s3.test");
 
         // The identity provider's own picture URL — never one of ours.
         storage.delete("https://lh3.googleusercontent.com/a/example");
@@ -129,7 +129,7 @@ class S3AvatarStorageTest {
     @Test
     void deleteRemovesAnObjectThisStorageCreated() {
         S3Client client = Mockito.mock(S3Client.class);
-        S3AvatarStorage storage = new S3AvatarStorage(client, "bucket", "https://s3.test");
+        S3AvatarStorage storage = new S3AvatarStorage(client, null, "bucket", "https://s3.test");
 
         storage.delete("https://s3.test/bucket/avatars/" + ACCOUNT_ID + "/some-uuid.png");
 

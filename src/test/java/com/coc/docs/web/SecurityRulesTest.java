@@ -72,6 +72,11 @@ class SecurityRulesTest {
     // Stubbed because these tests are about who may reach a route, not what it
     // returns. A rule that admitted the wrong caller would be caught here even
     // if every service threw.
+    // AvatarController reads the account to confirm it actually holds the
+    // photo being signed for (ADR-101), so this slice needs the repository
+    // as well as the service.
+    @MockitoBean com.coc.docs.account.AccountRepository accountRepository;
+
     @MockitoBean PageService pageService;
     @MockitoBean AccountService accountService;
     @MockitoBean SessionService sessionService;
@@ -1095,6 +1100,16 @@ class SecurityRulesTest {
                             org.mockito.ArgumentMatchers.eq(java.time.LocalDate.of(2026, 9, 7)),
                             org.mockito.ArgumentMatchers.any()))
                     .thenReturn(emptyScopedReport());
+
+            // The @MockitoBean is shared across every nest in this class, and
+            // AdminAttendanceController's own tests call the same mock. Without
+            // this, verifyNoMoreInteractions below sees their calls and fails —
+            // but only depending on the order JUnit happens to run the nests
+            // in, so the test passed or failed according to what else existed
+            // in the file. Clearing immediately before the request under test
+            // makes the assertion mean what it says: nothing beyond THIS
+            // request touched the service.
+            org.mockito.Mockito.clearInvocations(hrmsNotificationService);
 
             mvc.perform(get("/api/v1/me/attendance")
                             .param("date", "2026-09-07")

@@ -117,6 +117,14 @@ public class SecurityConfig {
                         .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
 
                         // --- public: no session yet, by necessity -------------
+                        // Profile photos (ADR-101). Public because an <img> does
+                        // not reliably carry the session cookie across origins,
+                        // and a cookie that did would need SameSite=None — a
+                        // worse trade than relying on the random object key.
+                        // GET only: nothing here writes, and the route refuses
+                        // any key the named account does not actually hold.
+                        // // req: FR-AUTH-005, NFR-SEC-PII, ADR-101
+                        .requestMatchers(HttpMethod.GET, "/api/v1/avatars/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/nonce").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/google").permitAll()
                         // ADR-014: applying for an account, and signing in with one. Public

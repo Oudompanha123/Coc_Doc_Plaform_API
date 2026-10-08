@@ -34,4 +34,24 @@ public interface AvatarStorage {
      * not correctness.
      */
     void delete(String avatarUrl);
+
+    /**
+     * A short-lived URL a browser can fetch one stored object from (ADR-101).
+     *
+     * <p>Exists so the bucket itself can stay private. Without it the only way
+     * an {@code <img>} could load a photo was for every object to be world
+     * readable, which means a bucket with public access switched off entirely
+     * — and a misconfigured one is browsable, not merely readable.
+     *
+     * <p>Empty when this storage cannot presign, which keeps the default
+     * honest for any future implementation (a local-disk one, say) rather than
+     * making every implementor write a stub.
+     *
+     * @param key the object key, not a URL — the caller rebuilds it from the
+     *     request path, so nothing a client sends is ever used as a key
+     *     directly
+     */
+    default java.util.Optional<String> presign(String key) {
+        return java.util.Optional.empty();
+    }
 }
