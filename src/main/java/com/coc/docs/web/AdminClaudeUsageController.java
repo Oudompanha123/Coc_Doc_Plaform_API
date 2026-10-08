@@ -154,4 +154,10 @@ public class AdminClaudeUsageController {
     ApiDtos.ClaudeUsageMemberSummaryResponse remove(@PathVariable UUID id, @AuthenticationPrincipal CurrentUser actor) {
         return ApiDtos.ClaudeUsageMemberSummaryResponse.of(usage.remove(id, actor));
     }
+
+    /** Puts a removed member back on active tracking — the other direction of {@link #remove}. */
+    @PostMapping("/members/{id}/restore")
+    ApiDtos.ClaudeUsageMemberSummaryResponse restore(@PathVariable UUID id, @AuthenticationPrincipal CurrentUser actor) {
+        return ApiDtos.ClaudeUsageMemberSummaryResponse.of(usage.restore(id, actor));
+    }
 }
