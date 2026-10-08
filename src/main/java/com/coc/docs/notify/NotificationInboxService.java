@@ -1,5 +1,6 @@
 package com.coc.docs.notify;
 
+import com.coc.docs.account.AppRole;
 import com.coc.docs.auth.CurrentUser;
 import java.time.Clock;
 import java.util.List;
@@ -20,7 +21,14 @@ import org.springframework.transaction.annotation.Transactional;
  * never an id from a request. There is no method here that can name somebody
  * else (NFR-SEC-PII).
  *
- * <p>// req: FR-AUTH-008, NFR-SEC-PII, ADR-034
+ * <p><b>Registration rows are a super_admin's only, read as well as sent
+ * (ADR-099).</b> {@link NotificationService#notifyApprovers} writes them only
+ * for accounts holding {@code super_admin}, but a row outlives the role: an
+ * account demoted to {@code admin} would otherwise keep seeing, and counting,
+ * the approvals it can no longer act on. So they are left out of the list and
+ * the badge for anyone not holding {@code super_admin} now.
+ *
+ * <p>// req: FR-AUTH-008, NFR-SEC-PII, ADR-034, ADR-099
  */
 @Service
 public class NotificationInboxService {
@@ -66,17 +74,28 @@ public class NotificationInboxService {
         java.util.Map<UUID, Notification> merged = new java.util.LinkedHashMap<>();
         recent.forEach(n -> merged.put(n.id(), n));
         unread.forEach(n -> merged.putIfAbsent(n.id(), n));
-        if (merged.size() == recent.size()) {
+        boolean approver = isApprover(caller);
+        if (merged.size() == recent.size() && approver) {
             return recent;
         }
         return merged.values().stream()
+                .filter(n -> approver || !REGISTRATION.equals(n.type()))
                 .sorted(java.util.Comparator.comparing(Notification::createdAt).reversed())
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public int unreadCountFor(CurrentUser caller) {
-        return notifications.countUnread(caller.account().id());
+        UUID accountId = caller.account().id();
+        int unread = notifications.countUnread(accountId);
+        return isApprover(caller) ? unread : unread - notifications.countUnreadOfType(accountId, REGISTRATION);
+    }
+
+    private static final String REGISTRATION = NotificationType.NEW_REGISTRATION.key();
+
+    /** Held, not ranked — the same test {@code notifyApprovers} uses to pick recipients. */
+    private static boolean isApprover(CurrentUser caller) {
+        return caller.roles().contains(AppRole.SUPER_ADMIN);
     }
 
     /**

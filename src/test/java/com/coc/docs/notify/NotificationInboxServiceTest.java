@@ -57,4 +57,29 @@ class NotificationInboxServiceTest {
 
         assertThat(inbox.listFor(caller, 30)).containsExactly(unread, read);
     }
+
+    @Test
+    @DisplayName("an admin is not shown, or counted, registration rows; a super_admin is (ADR-099)")
+    void registrationsAreSuperAdminOnly() {
+        CurrentUser admin = TestCallers.user(AppRole.ADMIN);
+        CurrentUser superAdmin = TestCallers.user(AppRole.SUPER_ADMIN);
+        Notification registration = new Notification(
+                UUID.randomUUID(), admin.id(), "registration.pending", "acct", null, NOW, null);
+        Notification announcement = new Notification(
+                UUID.randomUUID(), admin.id(), "announcement.published", "a", null, NOW.minusSeconds(60), null);
+        when(repository.findFor(eq(admin.id()), anyInt())).thenReturn(List.of(registration, announcement));
+        when(repository.findUnreadFor(eq(admin.id()), anyInt())).thenReturn(List.of(registration, announcement));
+        when(repository.countUnread(admin.id())).thenReturn(2);
+        when(repository.countUnreadOfType(admin.id(), "registration.pending")).thenReturn(1);
+
+        assertThat(inbox.listFor(admin, 30)).containsExactly(announcement);
+        assertThat(inbox.unreadCountFor(admin)).isEqualTo(1);
+
+        when(repository.findFor(eq(superAdmin.id()), anyInt())).thenReturn(List.of(registration, announcement));
+        when(repository.findUnreadFor(eq(superAdmin.id()), anyInt())).thenReturn(List.of(registration, announcement));
+        when(repository.countUnread(superAdmin.id())).thenReturn(2);
+
+        assertThat(inbox.listFor(superAdmin, 30)).containsExactly(registration, announcement);
+        assertThat(inbox.unreadCountFor(superAdmin)).isEqualTo(2);
+    }
 }
