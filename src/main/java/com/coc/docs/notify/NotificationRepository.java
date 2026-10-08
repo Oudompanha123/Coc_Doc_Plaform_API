@@ -133,6 +133,16 @@ public class NotificationRepository {
         return count == null ? 0 : count;
     }
 
+    /** As {@link #countUnread}, for one {@link NotificationType#key()} only. */
+    public int countUnreadOfType(UUID accountId, String type) {
+        Integer count = jdbc.sql(
+                        "select count(*) from notification where account_id = ? and type = ? and read_at is null")
+                .params(accountId, type)
+                .query(Integer.class)
+                .single();
+        return count == null ? 0 : count;
+    }
+
     /**
      * Marks one of this account's own notifications read.
      *

@@ -385,7 +385,7 @@ class ClaudeUsageServiceTest {
         }
 
         @Test
-        @DisplayName("dashboardFor gives a user only themselves, and an admin the team")
+        @DisplayName("dashboardFor gives a user or an admin only themselves, and a super_admin the team")
         void dashboardForPicksTheScopeFromTheRole() {
             // The branch the other tests in this nest skip past: they call the
             // filter directly, so a dashboardFor that passed the wrong thing --
@@ -402,7 +402,11 @@ class ClaudeUsageServiceTest {
                     .isEmpty();
 
             assertThat(service.dashboardFor(TestCallers.user(AppRole.ADMIN), "day", 0).members())
-                    .as("an admin still sees the team")
+                    .as("an admin is scoped to their own row too (ADR-100)")
+                    .isEmpty();
+
+            assertThat(service.dashboardFor(TestCallers.user(AppRole.SUPER_ADMIN), "day", 0).members())
+                    .as("a super_admin sees the team")
                     .hasSize(2);
         }
 

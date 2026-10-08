@@ -387,6 +387,18 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/admin/audit/**")
                         .hasRole(AppRole.SUPER_ADMIN.name())
 
+                        // The team's HRMS clock-ins and its Claude Usage roster
+                        // (with each member's activity detail): both are data
+                        // about other people, the same personal-data boundary
+                        // as the accounts prefix, so the same floor (ADR-100).
+                        // Stated here rather than left to the /admin/** line
+                        // below, which would admit any admin.
+                        // // req: NFR-SEC-PII, ADR-100
+                        .requestMatchers("/api/v1/admin/attendance/**")
+                        .hasRole(AppRole.SUPER_ADMIN.name())
+                        .requestMatchers("/api/v1/admin/claude-usage/**")
+                        .hasRole(AppRole.SUPER_ADMIN.name())
+
                         // A task's title carries no other account's PII, unlike the
                         // two prefixes above — so the read side is open to any
                         // signed-in role, for the Member landing page's "Your
@@ -530,10 +542,11 @@ public class SecurityConfig {
                         //
                         // Not a hole in that floor. The response is scoped from
                         // the session inside ClaudeUsageService.dashboardFor --
-                        // admin and above see the team, everyone else sees only
-                        // themselves -- and there is no parameter on this route
-                        // that could widen it. The roster mutations stay under
-                        // /api/v1/admin/claude-usage and stay admin-only.
+                        // super_admin sees the team, everyone else (admin
+                        // included, ADR-100) sees only themselves -- and there is
+                        // no parameter on this route that could widen it. The
+                        // roster mutations stay under /api/v1/admin/claude-usage
+                        // at the super_admin floor above.
                         // // req: FR-USAGE-001, NFR-SEC-PII
                         .requestMatchers(HttpMethod.GET, "/api/v1/claude-usage")
                         .hasRole(AppRole.USER.name())
@@ -551,7 +564,7 @@ public class SecurityConfig {
                         // caller sees only the row naming them, and there is
                         // no parameter on this route that could widen it. The
                         // admin attendance.reports route stays unscoped and
-                        // admin-only, below.
+                        // super_admin only, above (ADR-100).
                         // // req: FR-OPS-001, NFR-SEC-PII
                         .requestMatchers(HttpMethod.GET, "/api/v1/me/attendance")
                         .hasRole(AppRole.USER.name())

@@ -724,11 +724,14 @@ class SecurityRulesTest {
         }
 
         @Test
-        void member_activity_refuses_a_plain_user_and_admits_an_admin() throws Exception {
-            // One colleague's day-by-day usage: an admin read, never a plain
-            // user's, even though the team dashboard itself admits them.
+        void member_activity_refuses_a_plain_user_and_an_admin_and_admits_a_super_admin() throws Exception {
+            // One colleague's day-by-day usage: a super_admin read (ADR-100),
+            // never a plain user's or an admin's, even though the team
+            // dashboard route itself admits them (scoped to their own row).
             java.util.UUID id = java.util.UUID.randomUUID();
             mvc.perform(get("/api/v1/admin/claude-usage/members/" + id + "/activity").with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+            mvc.perform(get("/api/v1/admin/claude-usage/members/" + id + "/activity").with(as(AppRole.ADMIN)))
                     .andExpect(status().isForbidden());
 
             org.mockito.Mockito.when(claudeUsageService.memberActivity(
@@ -741,7 +744,7 @@ class SecurityRulesTest {
                     .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageMemberActivity(
                             id, java.time.LocalDate.now(), java.time.LocalDate.now(), List.of()));
 
-            mvc.perform(get("/api/v1/admin/claude-usage/members/" + id + "/activity").with(as(AppRole.ADMIN)))
+            mvc.perform(get("/api/v1/admin/claude-usage/members/" + id + "/activity").with(as(AppRole.SUPER_ADMIN)))
                     .andExpect(status().isOk());
         }
 
@@ -768,8 +771,8 @@ class SecurityRulesTest {
 
         @Test
         void the_dashboard_admits_a_super_admin_too() throws Exception {
-            // Not a fixed floor above admin (unlike /admin/accounts) — both
-            // roles manage this roster.
+            // The one role that sees the whole team here (ADR-100); an admin
+            // is admitted above but scoped to their own row by the service.
             org.mockito.Mockito.when(claudeUsageService.dashboardFor(
                             org.mockito.ArgumentMatchers.any(),
                             org.mockito.ArgumentMatchers.any(),
@@ -1010,8 +1013,8 @@ class SecurityRulesTest {
 
         @Test
         void reports_for_date_refuses_a_plain_user() throws Exception {
-            // Falls through to the generic /api/v1/admin/** rule (admin
-            // floor), same as Claude Usage — no floor of its own.
+            // A super_admin floor of its own (ADR-100), ahead of the generic
+            // /api/v1/admin/** admin rule.
             mvc.perform(get("/api/v1/admin/attendance/reports")
                             .param("date", "2026-09-07")
                             .with(as(AppRole.USER)))
@@ -1019,14 +1022,13 @@ class SecurityRulesTest {
         }
 
         @Test
-        void reports_for_date_admits_an_admin() throws Exception {
-            org.mockito.Mockito.when(hrmsNotificationService.reportsForDate(java.time.LocalDate.of(2026, 9, 7)))
-                    .thenReturn(List.of());
-
+        void reports_for_date_refuses_an_admin() throws Exception {
+            // The team's clock-ins are other people's personal data, not
+            // editorial work — super_admin only (ADR-100).
             mvc.perform(get("/api/v1/admin/attendance/reports")
                             .param("date", "2026-09-07")
                             .with(as(AppRole.ADMIN)))
-                    .andExpect(status().isOk());
+                    .andExpect(status().isForbidden());
         }
 
         @Test

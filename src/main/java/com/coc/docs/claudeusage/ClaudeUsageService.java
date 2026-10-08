@@ -557,8 +557,8 @@ public class ClaudeUsageService {
     /**
      * The dashboard, scoped to what {@code caller} may see.
      *
-     * <p><b>An {@code admin} and above sees the team; everyone else sees only
-     * their own row.</b> A plain {@code user} is on this roster because they
+     * <p><b>A {@code super_admin} sees the team; everyone else, an
+     * {@code admin} included (ADR-100), sees only their own row.</b> A plain {@code user} is on this roster because they
      * ran the reporter, and their own tokens and cost are theirs to look at —
      * but what a colleague costs is not something this product decided to tell
      * them. That is the same shape {@code NotificationFeedService} already uses
@@ -577,7 +577,7 @@ public class ClaudeUsageService {
      * have no usage yet.
      */
     public ClaudeUsageDashboard dashboardFor(CurrentUser caller, String rawPeriod, int rawOffset) {
-        boolean wholeTeam = caller.role().isAtLeast(com.coc.docs.account.AppRole.ADMIN);
+        boolean wholeTeam = caller.role().isAtLeast(com.coc.docs.account.AppRole.SUPER_ADMIN);
         return dashboard(rawPeriod, rawOffset, LocalDate.now(REPORT_ZONE), wholeTeam ? null : caller.email());
     }
 
