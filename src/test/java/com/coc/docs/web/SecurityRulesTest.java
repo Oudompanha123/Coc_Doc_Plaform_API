@@ -1311,7 +1311,7 @@ class SecurityRulesTest {
 
         @Test
         void updating_a_preference_needs_a_session_and_nothing_more() throws Exception {
-            mvc.perform(put("/api/v1/notifications/preferences/registration.pending")
+            mvc.perform(put("/api/v1/notifications/preferences/announcement.published")
                             .with(as(AppRole.USER))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"enabled\":false}"))

@@ -1,7 +1,9 @@
 package com.coc.docs.web;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -102,8 +104,38 @@ class NotificationPreferenceControllerTest {
     @Test
     @DisplayName("turns a known type off for the caller")
     void turnsATypeOff() throws Exception {
+        mvc.perform(put("/api/v1/notifications/preferences/announcement.published")
+                        .with(asUser())
+                        .contentType("application/json")
+                        .content("{\"enabled\":false}"))
+                .andExpect(status().isNoContent());
+
+        verify(preferences).setEnabled(any(), eq(NotificationType.ANNOUNCEMENT_PUBLISHED), eq(false));
+    }
+
+    @Test
+    @DisplayName("a type the caller's role cannot receive is a 404, and nothing is stored")
+    void refusesATypeOutsideTheCallersRole() throws Exception {
         mvc.perform(put("/api/v1/notifications/preferences/registration.pending")
                         .with(asUser())
+                        .contentType("application/json")
+                        .content("{\"enabled\":false}"))
+                .andExpect(status().isNotFound());
+        mvc.perform(put("/api/v1/notifications/preferences/ax-renewal.run-ready")
+                        .with(asUser())
+                        .contentType("application/json")
+                        .content("{\"enabled\":false}"))
+                .andExpect(status().isNotFound());
+
+        verify(preferences, never()).setEnabled(any(), any(), anyBoolean());
+    }
+
+    @Test
+    @DisplayName("a super_admin can still turn registration.pending off")
+    void superAdminTurnsRegistrationOff() throws Exception {
+        mvc.perform(put("/api/v1/notifications/preferences/registration.pending")
+                        .with(SecurityMockMvcRequestPostProcessors.authentication(
+                                TestCallers.authentication(AppRole.SUPER_ADMIN)))
                         .contentType("application/json")
                         .content("{\"enabled\":false}"))
                 .andExpect(status().isNoContent());

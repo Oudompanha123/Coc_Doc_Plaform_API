@@ -35,7 +35,7 @@ public class NotificationPreferenceController {
         this.preferences = preferences;
     }
 
-    /** Every real notification type, with whether this caller currently hears about it. */
+    /** Every notification type this caller's role can receive, with whether they currently hear about it. */
     @Operation(summary = "The caller's own notification preferences")
     @GetMapping
     ApiDtos.NotificationPreferenceListResponse list(@AuthenticationPrincipal CurrentUser caller) {
@@ -47,7 +47,9 @@ public class NotificationPreferenceController {
      * Turns one notification type on or off for the caller.
      *
      * @param type {@link NotificationType#key()} — the same identifier the
-     *     list above returns, not the Java enum name.
+     *     list above returns, not the Java enum name. A type the caller's role
+     *     cannot receive is a 404, same as an unknown one: the list above never
+     *     offered it.
      */
     @Operation(summary = "Turn one notification type on or off for the caller")
     @PutMapping("/{type}")
@@ -56,7 +58,9 @@ public class NotificationPreferenceController {
             @RequestBody ApiDtos.UpdateNotificationPreferenceRequest body,
             @AuthenticationPrincipal CurrentUser caller) {
         NotificationType resolved =
-                NotificationType.fromKey(type).orElseThrow(() -> ApiException.notFound("notification type " + type));
+                NotificationType.fromKey(type)
+                        .filter(t -> t.isFor(caller.role()))
+                        .orElseThrow(() -> ApiException.notFound("notification type " + type));
         preferences.setEnabled(caller, resolved, body.enabled());
         return ResponseEntity.noContent().build();
     }

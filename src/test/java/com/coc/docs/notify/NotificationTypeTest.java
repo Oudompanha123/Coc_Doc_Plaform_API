@@ -2,6 +2,8 @@ package com.coc.docs.notify;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.coc.docs.account.AppRole;
+import java.util.Arrays;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -109,5 +111,35 @@ class NotificationTypeTest {
                 .isEqualTo("https://docs.example.com/home?announcement=a1");
         assertThat(NotificationType.ANNOUNCEMENT_PUBLISHED.body()).isEqualTo("There is a new announcement");
         assertThat(NotificationType.ANNOUNCEMENT_PUBLISHED.key()).isEqualTo("announcement.published");
+    }
+
+    private static java.util.List<String> keysFor(AppRole role) {
+        return Arrays.stream(NotificationType.values()).filter(t -> t.isFor(role)).map(NotificationType::key).toList();
+    }
+
+    @Test
+    @DisplayName("a normal user can receive only new-device sign-in and announcements")
+    void userGetsOnlyTheTwoEveryoneTypes() {
+        assertThat(keysFor(AppRole.USER)).containsExactly("auth.new-device", "announcement.published");
+    }
+
+    @Test
+    @DisplayName("a developer additionally gets the four AX Renewal types, not the approval queue")
+    void developerGetsAxRenewal() {
+        assertThat(keysFor(AppRole.DEVELOPER))
+                .containsExactly(
+                        "auth.new-device",
+                        "ax-renewal.member-added",
+                        "ax-renewal.run-ready",
+                        "ax-renewal.comment-added",
+                        "ax-renewal.run-reviewed",
+                        "announcement.published");
+        assertThat(keysFor(AppRole.ADMIN)).isEqualTo(keysFor(AppRole.DEVELOPER));
+    }
+
+    @Test
+    @DisplayName("only a super_admin gets registration.pending, since only they approve")
+    void superAdminGetsEverything() {
+        assertThat(keysFor(AppRole.SUPER_ADMIN)).hasSize(NotificationType.values().length);
     }
 }
