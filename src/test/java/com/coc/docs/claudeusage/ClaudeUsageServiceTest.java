@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.coc.docs.account.AppRole;
+import com.coc.docs.audit.AuditAction;
 import com.coc.docs.audit.AuditRepository;
 import com.coc.docs.auth.CurrentUser;
 import com.coc.docs.auth.TestCallers;
@@ -136,6 +137,55 @@ class ClaudeUsageServiceTest {
             when(members.findById(id)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.remove(id, ACTOR))
+                    .isInstanceOf(ApiException.class)
+                    .extracting(e -> ((ApiException) e).status())
+                    .isEqualTo(HttpStatus.NOT_FOUND);
+        }
+    }
+
+    @Nested
+    @DisplayName("restore (Enable)")
+    class Restore {
+
+        @Test
+        @DisplayName("sets a removed member back to active, and audits it")
+        void restoresRemovedMember() {
+            UUID id = UUID.randomUUID();
+            ClaudeUsageMember removed = new ClaudeUsageMember(
+                    id, "a@cocdocs.example", "A", ClaudeUsageMember.ROLE_MEMBER, ClaudeUsageMember.STATUS_REMOVED,
+                    null, null, Instant.now(), Instant.now());
+            ClaudeUsageMember active = new ClaudeUsageMember(
+                    id, "a@cocdocs.example", "A", ClaudeUsageMember.ROLE_MEMBER, ClaudeUsageMember.STATUS_ACTIVE,
+                    null, null, Instant.now(), Instant.now());
+            when(members.findById(id)).thenReturn(Optional.of(removed), Optional.of(active));
+
+            ClaudeUsageMember result = service.restore(id, ACTOR);
+
+            assertThat(result.status()).isEqualTo(ClaudeUsageMember.STATUS_ACTIVE);
+            verify(members).updateStatus(id, ClaudeUsageMember.STATUS_ACTIVE);
+            verify(audit).append(any(), any(), eq(AuditAction.CLAUDE_USAGE_MEMBER_RESTORE), any(), eq(id), any());
+        }
+
+        @Test
+        @DisplayName("is a no-op, and does not audit, on an already-active member")
+        void restoringAnActiveMemberIsANoOp() {
+            UUID id = UUID.randomUUID();
+            when(members.findById(id))
+                    .thenReturn(Optional.of(member("a@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null)));
+
+            service.restore(id, ACTOR);
+
+            verify(members, never()).updateStatus(any(), any());
+            verify(audit, never()).append(any(), any(), any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("404s for a member that does not exist")
+        void refusesMissingMember() {
+            UUID id = UUID.randomUUID();
+            when(members.findById(id)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.restore(id, ACTOR))
                     .isInstanceOf(ApiException.class)
                     .extracting(e -> ((ApiException) e).status())
                     .isEqualTo(HttpStatus.NOT_FOUND);
@@ -575,7 +625,7 @@ class ClaudeUsageServiceTest {
         }
 
         @Test
-        @DisplayName("a removed member never counts toward Near Limit even if over budget")
+        @DisplayName("a removed (disabled) member counts toward neither Near Limit nor Active Users")
         void removedMemberNeverCountsTowardNearLimit() {
             LocalDate day = LocalDate.of(2026, 9, 17);
             ClaudeUsageMember removedButOverBudget = member("gone@cocdocs.example", ClaudeUsageMember.STATUS_REMOVED, 100L);
@@ -588,9 +638,10 @@ class ClaudeUsageServiceTest {
 
             assertThat(dashboard.members().get(0).budgetPct()).isGreaterThan(100);
             assertThat(dashboard.nearLimit()).isZero();
-            // Removed is not excluded from Active Users -- that stat is purely
-            // period usage, matching the reference tool, which has no roster concept.
-            assertThat(dashboard.activeUsers()).isEqualTo(1);
+            assertThat(dashboard.activeUsers()).isZero();
+            // Still listed, with their usage intact -- disabling hides nothing from the data.
+            assertThat(dashboard.members()).hasSize(1);
+            assertThat(dashboard.members().get(0).totalTokens()).isEqualTo(1_000_000);
         }
     }
 

@@ -234,6 +234,31 @@ public class ClaudeUsageService {
         return require(id);
     }
 
+    /**
+     * Puts a removed member back on active tracking — the admin-chosen other
+     * direction of {@link #remove} (ADR-035: status moves only as an admin
+     * chooses, in either direction). Their history was never deleted, so it
+     * is all still there. A no-op, and not re-audited, on an active member.
+     */
+    public ClaudeUsageMember restore(UUID id, CurrentUser actor) {
+        ClaudeUsageMember member = require(id);
+        if (!ClaudeUsageMember.STATUS_REMOVED.equals(member.status())) {
+            return member;
+        }
+
+        members.updateStatus(id, ClaudeUsageMember.STATUS_ACTIVE);
+
+        audit.append(
+                actor.id(),
+                actor.email(),
+                AuditAction.CLAUDE_USAGE_MEMBER_RESTORE,
+                AuditAction.TARGET_CLAUDE_USAGE_MEMBER,
+                id,
+                json.createObjectNode().put("subject", member.email()));
+
+        return require(id);
+    }
+
     private ClaudeUsageMember require(UUID id) {
         return members.findById(id).orElseThrow(() -> ApiException.notFound("claude usage member " + id));
     }
@@ -638,10 +663,11 @@ public class ClaudeUsageService {
         ClaudeUsageTotals totals = totalsOf(memberUsages);
 
         // Reported any tokens in this exact period (ADR-035, reference tool
-        // parity) — deliberately period-scoped, not roster status: switching
-        // Day/Week/Month must change this number, the same way it changes
-        // every other figure on the dashboard.
+        // parity), so switching Day/Week/Month changes this number like every
+        // other figure on the dashboard. A disabled (removed) member is left
+        // out, same as Near Limit below; their usage rows are untouched.
         int activeUsers = (int) memberUsages.stream()
+                .filter(usage -> !ClaudeUsageMember.STATUS_REMOVED.equals(usage.member().status()))
                 .filter(usage -> usage.totalTokens() > 0)
                 .count();
         int nearLimit = (int) memberUsages.stream()

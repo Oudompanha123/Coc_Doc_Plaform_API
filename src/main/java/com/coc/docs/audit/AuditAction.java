@@ -129,6 +129,8 @@ public final class AuditAction {
     public static final String CLAUDE_USAGE_MEMBER_ROLE_CHANGE = "claude_usage_member.role_change";
     public static final String CLAUDE_USAGE_MEMBER_BUDGET_CHANGE = "claude_usage_member.budget_change";
     public static final String CLAUDE_USAGE_MEMBER_REMOVE = "claude_usage_member.remove";
+    /** An admin put a removed member back on active tracking (ADR-035: status moves only as an admin chooses). */
+    public static final String CLAUDE_USAGE_MEMBER_RESTORE = "claude_usage_member.restore";
 
     /** An account minted or revoked its own {@code /api/ingest} bearer token (V35, ADR-047). */
     public static final String CLAUDE_USAGE_INGEST_TOKEN_CREATE = "claude_usage_ingest_token.create";

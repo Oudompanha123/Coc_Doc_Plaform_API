@@ -721,6 +721,10 @@ class SecurityRulesTest {
             mvc.perform(post("/api/v1/admin/claude-usage/members/" + java.util.UUID.randomUUID() + "/remove")
                             .with(as(AppRole.USER)))
                     .andExpect(status().isForbidden());
+
+            mvc.perform(post("/api/v1/admin/claude-usage/members/" + java.util.UUID.randomUUID() + "/restore")
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
         }
 
         @Test

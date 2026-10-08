@@ -330,6 +330,7 @@ public class NotificationFeedService {
             case AuditAction.CLAUDE_USAGE_MEMBER_ROLE_CHANGE -> "Changed a Claude Usage member's role";
             case AuditAction.CLAUDE_USAGE_MEMBER_BUDGET_CHANGE -> "Changed a Claude Usage member's budget";
             case AuditAction.CLAUDE_USAGE_MEMBER_REMOVE -> "Removed a Claude Usage member";
+            case AuditAction.CLAUDE_USAGE_MEMBER_RESTORE -> "Re-enabled a Claude Usage member";
             // Added at merge time: feature/claude-usage-ingest-tokens introduced
             // both actions without a sentence, which the "every visible action
             // has one" guard catches — the feed would print the raw constant.
