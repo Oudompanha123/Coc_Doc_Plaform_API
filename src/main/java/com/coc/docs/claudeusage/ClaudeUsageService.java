@@ -24,6 +24,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -113,6 +114,7 @@ public class ClaudeUsageService {
     private final ClaudeUsageActivityRepository activities;
     private final AuditRepository audit;
     private final ObjectMapper json;
+    private final ClaudeUsageTrackingPauseRepository pauses;
 
     public ClaudeUsageService(
             ClaudeUsageMemberRepository members,
@@ -120,13 +122,15 @@ public class ClaudeUsageService {
             ClaudeUsageDailyModelRepository dailyModels,
             ClaudeUsageActivityRepository activities,
             AuditRepository audit,
-            ObjectMapper json) {
+            ObjectMapper json,
+            ClaudeUsageTrackingPauseRepository pauses) {
         this.members = members;
         this.daily = daily;
         this.dailyModels = dailyModels;
         this.activities = activities;
         this.audit = audit;
         this.json = json;
+        this.pauses = pauses;
     }
 
     // -----------------------------------------------------------------------
@@ -222,6 +226,8 @@ public class ClaudeUsageService {
         }
 
         members.updateStatus(id, ClaudeUsageMember.STATUS_REMOVED);
+        // The start of the window ingest refuses after Enable (ADR-105).
+        pauses.open(id, Instant.now());
 
         audit.append(
                 actor.id(),
@@ -247,6 +253,8 @@ public class ClaudeUsageService {
         }
 
         members.updateStatus(id, ClaudeUsageMember.STATUS_ACTIVE);
+        // The effective tracking-resumed time: the end of the window (ADR-105).
+        pauses.close(id, Instant.now());
 
         audit.append(
                 actor.id(),
@@ -257,6 +265,76 @@ public class ClaudeUsageService {
                 json.createObjectNode().put("subject", member.email()));
 
         return require(id);
+    }
+
+    /** The detail a disabled member's reporter prints, so the person knows why and that nothing was kept. */
+    public static final String TRACKING_DISABLED =
+            "Claude usage tracking is disabled for this account by an administrator. This report was not recorded";
+
+    /** {@code code} of the 403 above -- what the CLI matches on, never the wording. */
+    public static final String CODE_TRACKING_DISABLED = "tracking-disabled";
+
+    /** Detail of the 409 for a report from a period when tracking was disabled. */
+    public static final String DISABLED_PERIOD =
+            "This report is from a period when Claude usage tracking was disabled for this account. It will not be recorded";
+
+    /**
+     * {@code code} of that 409. A 409 and not a 403: the member is enabled,
+     * the credential is fine, and only this one record is refused -- for
+     * good, so the CLI skips it rather than retrying (an older CLI treats any
+     * 409 as final for the scan, and drops a queued scan log on it).
+     */
+    public static final String CODE_DISABLED_PERIOD = "disabled-period";
+
+    /**
+     * Refuses a usage day that falls in a disabled period (ADR-105): on or
+     * between the reporting day of the disable and the reporting day of the
+     * resume, both inclusive. A day is one total, so it cannot be split at the
+     * moment tracking stopped or resumed -- either boundary day would carry
+     * disabled-period usage, so both are refused. A row stored for the
+     * disable day before the disable is left as it was.
+     */
+    static void requireDayOutsidePauses(LocalDate date, List<ClaudeUsageTrackingPauseRepository.Pause> windows) {
+        for (ClaudeUsageTrackingPauseRepository.Pause window : windows) {
+            LocalDate first = window.disabledAt().atZone(REPORT_ZONE).toLocalDate();
+            LocalDate last = window.resumedAt() == null
+                    ? LocalDate.MAX
+                    : window.resumedAt().atZone(REPORT_ZONE).toLocalDate();
+            if (!date.isBefore(first) && !date.isAfter(last)) {
+                throw ApiException.withCode(HttpStatus.CONFLICT, CODE_DISABLED_PERIOD, DISABLED_PERIOD);
+            }
+        }
+    }
+
+    /**
+     * Refuses a scan that started while tracking was disabled -- a moment, so
+     * the window is exact: {@code [disabledAt, resumedAt)}.
+     */
+    static void requireMomentOutsidePauses(Instant at, List<ClaudeUsageTrackingPauseRepository.Pause> windows) {
+        for (ClaudeUsageTrackingPauseRepository.Pause window : windows) {
+            boolean afterStart = !at.isBefore(window.disabledAt());
+            boolean beforeEnd = window.resumedAt() == null || at.isBefore(window.resumedAt());
+            if (afterStart && beforeEnd) {
+                throw ApiException.withCode(HttpStatus.CONFLICT, CODE_DISABLED_PERIOD, DISABLED_PERIOD);
+            }
+        }
+    }
+
+    /**
+     * Refuses a report from a member an admin has disabled (ADR-105): usage,
+     * scan check-in and scan log alike. Applied here, in the service, rather
+     * than in the controller's credential check, so it holds for both
+     * credential shapes -- the unscoped shared secret as well as a
+     * per-account token -- and for any future caller. A 403, which the CLI
+     * treats as final rather than retrying.
+     *
+     * <p>Null (an email with no roster row yet) passes: reporting is what
+     * adds somebody (ADR-035 decision 3), and nobody new is disabled.
+     */
+    static void requireTrackingEnabled(ClaudeUsageMember member) {
+        if (member != null && ClaudeUsageMember.STATUS_REMOVED.equals(member.status())) {
+            throw ApiException.withCode(HttpStatus.FORBIDDEN, CODE_TRACKING_DISABLED, TRACKING_DISABLED);
+        }
     }
 
     private ClaudeUsageMember require(UUID id) {
@@ -316,6 +394,15 @@ public class ClaudeUsageService {
             ClaudeUsageDayActivity rawActivity) {
 
         String email = normalizeEmail(rawEmail);
+        // First, before any validation: a disabled member's report is refused
+        // whole, whatever is in it (ADR-105).
+        ClaudeUsageMember member = members.findByEmail(email).orElse(null);
+        requireTrackingEnabled(member);
+        // Enabled again, but this day fell in a disabled period: a retry the
+        // CLI kept from then, refused for good (ADR-105).
+        if (member != null && date != null) {
+            requireDayOutsidePauses(date, pauses.listFor(member.id()));
+        }
 
         if (date == null) {
             throw ApiException.badRequest("date is required");
@@ -346,7 +433,6 @@ public class ClaudeUsageService {
 
         ClaudeUsageDayActivity activity = normalizeActivity(rawActivity, input, output);
 
-        ClaudeUsageMember member = members.findByEmail(email).orElse(null);
         if (member == null) {
             // Reporting IS the opt-in this roster exists to record (ADR-035
             // decision 3) — nobody needs to have pre-invited this email.
@@ -361,8 +447,9 @@ public class ClaudeUsageService {
             // so it is already active. The branch that lifted an 'invited' row
             // went with the invite endpoint and the status itself (V36).
             //
-            // A removed member is never silently reactivated by a new report —
-            // status only ever changes in the direction an admin chose here.
+            // A removed (disabled) member never reaches this line -- the report
+            // was refused above -- so a report can never reactivate anyone:
+            // status only ever changes in the direction an admin chose.
             if (rawDisplayName != null && !rawDisplayName.isBlank()) {
                 members.touchDisplayName(member.id(), rawDisplayName.trim());
             }
@@ -403,6 +490,7 @@ public class ClaudeUsageService {
         if (member == null) {
             return new IngestOutcome(IngestOutcome.NOT_TRACKED);
         }
+        requireTrackingEnabled(member);
         members.touchLastScan(member.id());
         return new IngestOutcome(IngestOutcome.SCAN_RECORDED);
     }
@@ -650,35 +738,52 @@ public class ClaudeUsageService {
         Map<UUID, String> avatarUrls = members.avatarUrlsByMemberId();
         Map<UUID, Instant> lastScans = members.lastScanAtByMemberId();
 
+        // A disabled (removed) member is split off here, before anything is
+        // summed, the same way the scope above is applied: every figure below
+        // -- the member table, the chart, token and cost totals, Active Users,
+        // Near Limit, Last updated -- is derived from `memberUsages` and
+        // `activeRows`, so none of them can count a disabled member while
+        // another leaves them out. Their rows are only filtered out of this
+        // response, never deleted: re-enabling puts every one of them back.
+        // // req: FR-USAGE-001, ADR-035
+        Set<UUID> disabledIds = roster.stream()
+                .filter(member -> ClaudeUsageMember.STATUS_REMOVED.equals(member.status()))
+                .map(ClaudeUsageMember::id)
+                .collect(Collectors.toSet());
+        List<ClaudeUsageDaily> activeRows =
+                rows.stream().filter(row -> !disabledIds.contains(row.memberId())).toList();
+
         List<ClaudeUsageMemberUsage> memberUsages = new ArrayList<>();
+        List<ClaudeUsageMemberUsage> disabledUsages = new ArrayList<>();
         for (ClaudeUsageMember member : roster) {
-            memberUsages.add(rollupMember(
+            ClaudeUsageMemberUsage usage = rollupMember(
                     member, rowsByMember.getOrDefault(member.id(), List.of()), daysInRange, avatarUrls.get(member.id()),
-                    lastScans.get(member.id())));
+                    lastScans.get(member.id()));
+            (disabledIds.contains(member.id()) ? disabledUsages : memberUsages).add(usage);
         }
         memberUsages.sort((a, b) -> Long.compare(b.totalTokens(), a.totalTokens()));
+        disabledUsages.sort(java.util.Comparator.comparing(usage -> usage.member().displayName(), String.CASE_INSENSITIVE_ORDER));
 
-        List<ClaudeUsageDailyPoint> dailyPoints = rollupDaily(from, to, rows);
+        List<ClaudeUsageDailyPoint> dailyPoints = rollupDaily(from, to, activeRows);
 
         ClaudeUsageTotals totals = totalsOf(memberUsages);
 
         // Reported any tokens in this exact period (ADR-035, reference tool
         // parity), so switching Day/Week/Month changes this number like every
-        // other figure on the dashboard. A disabled (removed) member is left
-        // out, same as Near Limit below; their usage rows are untouched.
+        // other figure on the dashboard. Disabled members are already out of
+        // `memberUsages`, so neither count can include them.
         int activeUsers = (int) memberUsages.stream()
-                .filter(usage -> !ClaudeUsageMember.STATUS_REMOVED.equals(usage.member().status()))
                 .filter(usage -> usage.totalTokens() > 0)
                 .count();
         int nearLimit = (int) memberUsages.stream()
-                .filter(usage -> !ClaudeUsageMember.STATUS_REMOVED.equals(usage.member().status()))
                 .filter(usage -> !ClaudeUsageMemberUsage.STATUS_GREEN.equals(usage.budgetStatus()))
                 .count();
 
         Instant lastUpdated =
-                rows.stream().map(ClaudeUsageDaily::reportedAt).max(Instant::compareTo).orElse(null);
+                activeRows.stream().map(ClaudeUsageDaily::reportedAt).max(Instant::compareTo).orElse(null);
 
-        return new ClaudeUsageDashboard(period, from, to, memberUsages, dailyPoints, totals, activeUsers, nearLimit, lastUpdated);
+        return new ClaudeUsageDashboard(
+                period, from, to, memberUsages, dailyPoints, totals, activeUsers, nearLimit, lastUpdated, disabledUsages);
     }
 
     // -----------------------------------------------------------------------

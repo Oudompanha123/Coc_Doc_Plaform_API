@@ -38,8 +38,9 @@ class ClaudeUsageServiceTest {
     private final ClaudeUsageDailyModelRepository dailyModels = mock(ClaudeUsageDailyModelRepository.class);
     private final ClaudeUsageActivityRepository activities = mock(ClaudeUsageActivityRepository.class);
     private final AuditRepository audit = mock(AuditRepository.class);
+    private final InMemoryTrackingPauses pauses = new InMemoryTrackingPauses();
     private final ClaudeUsageService service =
-            new ClaudeUsageService(members, daily, dailyModels, activities, audit, new ObjectMapper());
+            new ClaudeUsageService(members, daily, dailyModels, activities, audit, new ObjectMapper(), pauses);
 
     private static final CurrentUser ACTOR = TestCallers.user(AppRole.ADMIN);
 
@@ -307,19 +308,75 @@ class ClaudeUsageServiceTest {
         }
 
         @Test
-        @DisplayName("never reactivates a removed member on a new report")
-        void doesNotReactivateRemovedMember() {
+        @DisplayName("refuses a disabled member's report with 403: nothing stored, and never reactivated (ADR-105)")
+        void refusesDisabledMember() {
             UUID id = UUID.randomUUID();
             ClaudeUsageMember removed = new ClaudeUsageMember(
                     id, "gone@cocdocs.example", "Gone", ClaudeUsageMember.ROLE_MEMBER, ClaudeUsageMember.STATUS_REMOVED,
                     null, null, Instant.now(), Instant.now());
             when(members.findByEmail("gone@cocdocs.example")).thenReturn(Optional.of(removed));
-            when(daily.upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any()))
-                    .thenReturn(false);
 
-            service.recordUsage("gone@cocdocs.example", null, LocalDate.now(), 10, 10, 0, 0, List.of(), Map.of());
+            assertThatThrownBy(() -> service.recordUsage(
+                            "Gone@CocDocs.example", null, LocalDate.now(), 10, 10, 0, 0, List.of(), Map.of()))
+                    .isInstanceOfSatisfying(ApiException.class, e -> {
+                        assertThat(e.status()).isEqualTo(HttpStatus.FORBIDDEN);
+                        assertThat(e.getMessage()).isEqualTo(ClaudeUsageService.TRACKING_DISABLED);
+                    });
 
             verify(members, never()).updateStatus(any(), any());
+            verify(members, never()).insert(any(), any(), any(), any(), any());
+            verify(members, never()).touchLastScan(any());
+            verify(daily, never()).upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any());
+            verify(dailyModels, never()).replaceDay(any(), any(), any());
+            verify(activities, never()).replaceDay(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("refuses a disabled member even when the payload is also invalid -- the status is checked first")
+        void disabledIsCheckedBeforeValidation() {
+            when(members.findByEmail("gone@cocdocs.example"))
+                    .thenReturn(Optional.of(member("gone@cocdocs.example", ClaudeUsageMember.STATUS_REMOVED, null)));
+
+            assertThatThrownBy(() -> service.recordUsage(
+                            "gone@cocdocs.example", null, LocalDate.now(), -1, 10, 0, 0, List.of(), Map.of()))
+                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.FORBIDDEN));
+        }
+
+        @Test
+        @DisplayName("once enabled again, the same member's reports are accepted")
+        void acceptsReportsAfterEnable() {
+            UUID id = UUID.randomUUID();
+            ClaudeUsageMember enabled = new ClaudeUsageMember(
+                    id, "back@cocdocs.example", "Back", ClaudeUsageMember.ROLE_MEMBER, ClaudeUsageMember.STATUS_ACTIVE,
+                    null, null, Instant.now(), Instant.now());
+            when(members.findByEmail("back@cocdocs.example")).thenReturn(Optional.of(enabled));
+            when(daily.upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any())).thenReturn(true);
+
+            service.recordUsage("back@cocdocs.example", null, LocalDate.now(), 10, 10, 0, 0, List.of(), Map.of());
+
+            verify(daily).upsert(eq(id), any(), eq(10L), eq(10L), anyLong(), anyLong(), any(), any());
+            verify(members).touchLastScan(id);
+        }
+
+        @Test
+        @DisplayName("a scan check-in from a disabled member is refused and does not move last scan (ADR-105)")
+        void refusesDisabledScan() {
+            ClaudeUsageMember removed = member("gone@cocdocs.example", ClaudeUsageMember.STATUS_REMOVED, null);
+            when(members.findByEmail("gone@cocdocs.example")).thenReturn(Optional.of(removed));
+
+            assertThatThrownBy(() -> service.recordScan("gone@cocdocs.example"))
+                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.FORBIDDEN));
+            verify(members, never()).touchLastScan(any());
+        }
+
+        @Test
+        @DisplayName("a scan check-in from an active member still moves last scan")
+        void acceptsActiveScan() {
+            ClaudeUsageMember active = member("here@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+            when(members.findByEmail("here@cocdocs.example")).thenReturn(Optional.of(active));
+
+            assertThat(service.recordScan("here@cocdocs.example").action()).isEqualTo(ClaudeUsageService.IngestOutcome.SCAN_RECORDED);
+            verify(members).touchLastScan(active.id());
         }
 
         @Test
@@ -640,12 +697,99 @@ class ClaudeUsageServiceTest {
 
             var dashboard = service.dashboard("day", 0, day);
 
-            assertThat(dashboard.members().get(0).budgetPct()).isGreaterThan(100);
             assertThat(dashboard.nearLimit()).isZero();
             assertThat(dashboard.activeUsers()).isZero();
-            // Still listed, with their usage intact -- disabling hides nothing from the data.
-            assertThat(dashboard.members()).hasSize(1);
-            assertThat(dashboard.members().get(0).totalTokens()).isEqualTo(1_000_000);
+            // Not in the member table any more, but still listed for Enable,
+            // with their usage intact -- disabling hides nothing from the data.
+            assertThat(dashboard.members()).isEmpty();
+            assertThat(dashboard.disabledMembers()).hasSize(1);
+            assertThat(dashboard.disabledMembers().get(0).budgetPct()).isGreaterThan(100);
+            assertThat(dashboard.disabledMembers().get(0).totalTokens()).isEqualTo(1_000_000);
+        }
+    }
+
+    /**
+     * Disable takes a member out of every dashboard figure at once, and Enable
+     * puts them back with their history -- because the rows are filtered out
+     * of the rollup, never deleted (ADR-035).
+     */
+    @Nested
+    @DisplayName("disabled members on the dashboard")
+    class DisabledMembers {
+
+        private static final LocalDate DAY = LocalDate.of(2026, 9, 22);
+        private final UUID goneId = UUID.randomUUID();
+        private final ClaudeUsageMember stays = member("stays@cocdocs.example", ClaudeUsageMember.STATUS_ACTIVE, null);
+
+        private ClaudeUsageMember gone(String status) {
+            return new ClaudeUsageMember(
+                    goneId, "gone@cocdocs.example", "Gone", ClaudeUsageMember.ROLE_MEMBER, status,
+                    null, null, Instant.now(), Instant.now());
+        }
+
+        private List<ClaudeUsageDaily> rows() {
+            return List.of(
+                    new ClaudeUsageDaily(UUID.randomUUID(), stays.id(), DAY, 100, 50, 0, 0,
+                            new BigDecimal("1.50"), "Sonnet 5", Instant.parse("2026-09-22T03:00:00Z")),
+                    // Newer than the active member's row: must not become "last updated" while disabled.
+                    new ClaudeUsageDaily(UUID.randomUUID(), goneId, DAY, 900, 100, 0, 0,
+                            new BigDecimal("9.00"), "Opus 5", Instant.parse("2026-09-22T09:00:00Z")));
+        }
+
+        @Test
+        @DisplayName("a disabled member is left out of the table, chart, token and cost totals, counters and last updated")
+        void excludedFromEveryFigure() {
+            when(members.list()).thenReturn(List.of(stays, gone(ClaudeUsageMember.STATUS_REMOVED)));
+            when(daily.listInRange(DAY, DAY)).thenReturn(rows());
+
+            var dashboard = service.dashboard("day", 0, DAY);
+
+            assertThat(dashboard.members()).extracting(u -> u.member().email()).containsExactly("stays@cocdocs.example");
+            assertThat(dashboard.totals().totalTokens()).isEqualTo(150);
+            assertThat(dashboard.totals().costUsd()).isEqualByComparingTo("1.50");
+            assertThat(dashboard.activeUsers()).isEqualTo(1);
+            assertThat(dashboard.daily()).hasSize(1);
+            assertThat(dashboard.daily().get(0).total()).isEqualTo(150);
+            assertThat(dashboard.daily().get(0).byMember()).containsOnlyKeys(stays.id());
+            assertThat(dashboard.lastUpdated()).isEqualTo(Instant.parse("2026-09-22T03:00:00Z"));
+
+            // Still findable, with this period's usage, so a super_admin can enable them.
+            assertThat(dashboard.disabledMembers()).extracting(u -> u.member().id()).containsExactly(goneId);
+            assertThat(dashboard.disabledMembers().get(0).totalTokens()).isEqualTo(1000);
+        }
+
+        @Test
+        @DisplayName("enabling puts them back in every figure with the same historical rows")
+        void enableRestoresWithHistory() {
+            when(members.list()).thenReturn(List.of(stays, gone(ClaudeUsageMember.STATUS_ACTIVE)));
+            when(daily.listInRange(DAY, DAY)).thenReturn(rows());
+
+            var dashboard = service.dashboard("day", 0, DAY);
+
+            assertThat(dashboard.members()).extracting(u -> u.member().id()).contains(goneId);
+            assertThat(dashboard.totals().totalTokens()).isEqualTo(1150);
+            assertThat(dashboard.totals().costUsd()).isEqualByComparingTo("10.50");
+            assertThat(dashboard.activeUsers()).isEqualTo(2);
+            assertThat(dashboard.daily().get(0).byMember()).containsKeys(stays.id(), goneId);
+            assertThat(dashboard.lastUpdated()).isEqualTo(Instant.parse("2026-09-22T09:00:00Z"));
+            assertThat(dashboard.disabledMembers()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("disable and enable change only the status: no usage row is touched")
+        void disableAndEnableNeverTouchUsage() {
+            when(members.findById(goneId))
+                    .thenReturn(Optional.of(gone(ClaudeUsageMember.STATUS_ACTIVE)),
+                            Optional.of(gone(ClaudeUsageMember.STATUS_REMOVED)),
+                            Optional.of(gone(ClaudeUsageMember.STATUS_REMOVED)),
+                            Optional.of(gone(ClaudeUsageMember.STATUS_ACTIVE)));
+
+            service.remove(goneId, ACTOR);
+            service.restore(goneId, ACTOR);
+
+            verify(members).updateStatus(goneId, ClaudeUsageMember.STATUS_REMOVED);
+            verify(members).updateStatus(goneId, ClaudeUsageMember.STATUS_ACTIVE);
+            org.mockito.Mockito.verifyNoInteractions(daily, dailyModels, activities);
         }
     }
 

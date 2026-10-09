@@ -42,9 +42,10 @@ class ClaudeUsageScanLogServiceTest {
 
     private final ClaudeUsageScanLogRepository logs = mock(ClaudeUsageScanLogRepository.class);
     private final ClaudeUsageMemberRepository members = mock(ClaudeUsageMemberRepository.class);
+    private final InMemoryTrackingPauses pauses = new InMemoryTrackingPauses();
     private final ObjectMapper json = JsonMapper.builder().findAndAddModules().build();
     private final ClaudeUsageScanLogService service =
-            new ClaudeUsageScanLogService(logs, members, json, Clock.fixed(NOW, ZoneOffset.UTC));
+            new ClaudeUsageScanLogService(logs, members, json, Clock.fixed(NOW, ZoneOffset.UTC), pauses);
 
     private static ClaudeUsageScanLog.Step step(String key, String status, String detail) {
         return new ClaudeUsageScanLog.Step(key, status, NOW.minusSeconds(5), detail);
@@ -80,6 +81,51 @@ class ClaudeUsageScanLogServiceTest {
     @Nested
     @DisplayName("record")
     class Record {
+
+        @Test
+        @DisplayName("after Enable, a scan log from while disabled is refused for good (409 disabled-period); a later one is stored")
+        void disabledPeriodScanLogIsRefused() {
+            UUID memberId = UUID.randomUUID();
+            when(members.findByEmail("dana@example.com")).thenReturn(Optional.of(new ClaudeUsageMember(
+                    memberId, "dana@example.com", "Dana", "member", ClaudeUsageMember.STATUS_ACTIVE, null, null, NOW, NOW)));
+            when(logs.insert(any(), anyString())).thenReturn(true);
+
+            // The report starts at NOW - 8s. A window covering it: refused.
+            pauses.add(memberId, NOW.minusSeconds(3600), NOW);
+            assertThatThrownBy(() -> service.record(report(allSuccessful(), "uploaded", null, null)))
+                    .isInstanceOfSatisfying(ApiException.class, e -> {
+                        assertThat(e.status()).isEqualTo(HttpStatus.CONFLICT);
+                        assertThat(e.code()).isEqualTo(ClaudeUsageService.CODE_DISABLED_PERIOD);
+                    });
+            verify(logs, never()).insert(any(), anyString());
+        }
+
+        @Test
+        @DisplayName("a scan log that started after the resume moment is stored")
+        void scanLogAfterResumeIsStored() {
+            UUID memberId = UUID.randomUUID();
+            when(members.findByEmail("dana@example.com")).thenReturn(Optional.of(new ClaudeUsageMember(
+                    memberId, "dana@example.com", "Dana", "member", ClaudeUsageMember.STATUS_ACTIVE, null, null, NOW, NOW)));
+            when(logs.insert(any(), anyString())).thenReturn(true);
+            pauses.add(memberId, NOW.minusSeconds(3600), NOW.minusSeconds(60));
+
+            assertThat(service.record(report(allSuccessful(), "uploaded", null, null)))
+                    .isEqualTo(ClaudeUsageScanLogService.RECORDED);
+        }
+
+        @Test
+        @DisplayName("a disabled member's scan log is refused with 403 and not stored (ADR-105)")
+        void refusesDisabledMember() {
+            when(members.findByEmail("dana@example.com")).thenReturn(Optional.of(new ClaudeUsageMember(
+                    UUID.randomUUID(), "dana@example.com", "Dana", "member", ClaudeUsageMember.STATUS_REMOVED, null, null, NOW, NOW)));
+
+            assertThatThrownBy(() -> service.record(report(allSuccessful(), "uploaded", null, null)))
+                    .isInstanceOfSatisfying(ApiException.class, e -> {
+                        assertThat(e.status()).isEqualTo(HttpStatus.FORBIDDEN);
+                        assertThat(e.getMessage()).isEqualTo(ClaudeUsageService.TRACKING_DISABLED);
+                    });
+            verify(logs, never()).insert(any(), anyString());
+        }
 
         @Test
         @DisplayName("an upload with every step successful is a success, matched to the roster by normalized email")

@@ -5,6 +5,7 @@ import com.coc.docs.notify.Notification;
 import com.coc.docs.notify.NotificationInboxService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
@@ -61,6 +62,39 @@ public class NotificationInboxController {
         List<Notification> items = inbox.listFor(caller, limit);
         return new ApiDtos.NotificationInboxResponse(
                 items.stream().map(ApiDtos.NotificationResponse::of).toList(),
+                inbox.unreadCountFor(caller));
+    }
+
+    /**
+     * One page of this account's notifications, newest first — what the bell
+     * loads as it is scrolled once "View all notifications" expands it (ADR-106).
+     *
+     * <p>Separate from {@link #list} rather than a {@code before} parameter on
+     * it: that one answers "what should the bell show" (the newest few plus
+     * every unread), this one walks the whole history in order. Keyset paging:
+     * pass the last row's {@code createdAt} and {@code id} to get the next page.
+     *
+     * @param limit clamped to 1–100, like {@link #list}
+     * @param before with {@code beforeId}, the last row already held; omit
+     *     both for the first page
+     * @param unread only notifications not yet seen
+     */
+    @Operation(summary = "One page of the caller's own notifications, newest first")
+    @GetMapping("/history")
+    ApiDtos.NotificationPageResponse history(
+            @RequestParam(required = false, defaultValue = "20") int limit,
+            @RequestParam(required = false)
+                    @org.springframework.format.annotation.DateTimeFormat(
+                            iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME)
+                    Instant before,
+            @RequestParam(required = false) UUID beforeId,
+            @RequestParam(required = false, defaultValue = "false") boolean unread,
+            @AuthenticationPrincipal CurrentUser caller) {
+
+        NotificationInboxService.Page page = inbox.pageFor(caller, before, beforeId, unread, limit);
+        return new ApiDtos.NotificationPageResponse(
+                page.items().stream().map(ApiDtos.NotificationResponse::of).toList(),
+                page.hasMore(),
                 inbox.unreadCountFor(caller));
     }
 

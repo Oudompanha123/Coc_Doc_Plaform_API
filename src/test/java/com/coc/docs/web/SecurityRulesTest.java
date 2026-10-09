@@ -837,7 +837,8 @@ class SecurityRulesTest {
                             new com.coc.docs.claudeusage.ClaudeUsageTotals(0, 0, 0, 0, java.math.BigDecimal.ZERO),
                             0,
                             0,
-                            null));
+                            null,
+                            List.of()));
 
             // Admitted, and then narrowed: ClaudeUsageService.dashboardFor
             // gives them their own row only. The filter chain's job is to let
@@ -905,7 +906,8 @@ class SecurityRulesTest {
                             new com.coc.docs.claudeusage.ClaudeUsageTotals(0, 0, 0, 0, java.math.BigDecimal.ZERO),
                             0,
                             0,
-                            null));
+                            null,
+                            List.of()));
 
             mvc.perform(get("/api/v1/claude-usage").with(as(AppRole.ADMIN)))
                     .andExpect(status().isOk());
@@ -928,7 +930,8 @@ class SecurityRulesTest {
                             new com.coc.docs.claudeusage.ClaudeUsageTotals(0, 0, 0, 0, java.math.BigDecimal.ZERO),
                             0,
                             0,
-                            null));
+                            null,
+                            List.of()));
 
             mvc.perform(get("/api/v1/claude-usage").with(as(AppRole.SUPER_ADMIN)))
                     .andExpect(status().isOk());

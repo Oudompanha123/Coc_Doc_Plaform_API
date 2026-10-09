@@ -205,6 +205,167 @@ class ClaudeUsageIngestControllerTest {
         }
     }
 
+    /**
+     * A disabled member's reporter is refused on every ingest route (ADR-105),
+     * whichever credential it holds. Wired with the real services over mocked
+     * repositories, so this proves the refusal itself rather than a mock's.
+     */
+    @Nested
+    @DisplayName("a disabled member is refused on every ingest route (ADR-105)")
+    class DisabledMember {
+
+        private final com.coc.docs.claudeusage.ClaudeUsageMemberRepository members =
+                mock(com.coc.docs.claudeusage.ClaudeUsageMemberRepository.class);
+        private final com.coc.docs.claudeusage.ClaudeUsageDailyRepository daily =
+                mock(com.coc.docs.claudeusage.ClaudeUsageDailyRepository.class);
+        private final com.coc.docs.claudeusage.ClaudeUsageScanLogRepository logs =
+                mock(com.coc.docs.claudeusage.ClaudeUsageScanLogRepository.class);
+        private final com.coc.docs.claudeusage.InMemoryTrackingPauses pauses =
+                new com.coc.docs.claudeusage.InMemoryTrackingPauses();
+        private final ClaudeUsageService realUsage = new ClaudeUsageService(
+                members,
+                daily,
+                mock(com.coc.docs.claudeusage.ClaudeUsageDailyModelRepository.class),
+                mock(com.coc.docs.claudeusage.ClaudeUsageActivityRepository.class),
+                mock(com.coc.docs.audit.AuditRepository.class),
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                pauses);
+        private final ClaudeUsageScanLogService realScanLogs = new ClaudeUsageScanLogService(
+                logs,
+                members,
+                com.fasterxml.jackson.databind.json.JsonMapper.builder().findAndAddModules().build(),
+                java.time.Clock.systemUTC(),
+                pauses);
+        private final com.coc.docs.account.Account owner = TestCallers.user(AppRole.USER).account();
+
+        private ClaudeUsageIngestController controller(String sharedSecret) {
+            return new ClaudeUsageIngestController(realUsage, new ClaudeUsageProperties(sharedSecret), tokens, realScanLogs);
+        }
+
+        private void memberIs(String status) {
+            when(members.findByEmail(owner.email().toLowerCase())).thenReturn(Optional.of(new com.coc.docs.claudeusage.ClaudeUsageMember(
+                    UUID.randomUUID(), owner.email().toLowerCase(), "Owner", "member", status, null, null, Instant.now(), Instant.now())));
+        }
+
+        private ApiDtos.ClaudeUsageScanLogRequest log() {
+            Instant start = Instant.now().minusSeconds(30);
+            return new ApiDtos.ClaudeUsageScanLogRequest(
+                    UUID.randomUUID(), owner.email(), "scheduled", "0.4.0", start, start.plusSeconds(8),
+                    1, 1, 0, 0L, 0, "not-needed", List.of(), null, null);
+        }
+
+        private static void isTrackingDisabled(Throwable e) {
+            assertThat(e).isInstanceOfSatisfying(ApiException.class, api -> {
+                assertThat(api.status()).isEqualTo(HttpStatus.FORBIDDEN);
+                assertThat(api.getMessage()).isEqualTo(ClaudeUsageService.TRACKING_DISABLED);
+            });
+        }
+
+        @Test
+        @DisplayName("with their own per-account token: /api/ingest, /scan and /scan-log all 403, nothing written")
+        void ownTokenRefusedEverywhere() {
+            memberIs(com.coc.docs.claudeusage.ClaudeUsageMember.STATUS_REMOVED);
+            when(tokens.resolve("coc_own")).thenReturn(Optional.of(owner));
+            ClaudeUsageIngestController controller = controller(null);
+
+            assertThatThrownBy(() -> controller.ingest("Bearer coc_own", request(owner.email())))
+                    .satisfies(DisabledMember::isTrackingDisabled);
+            assertThatThrownBy(() -> controller.scan("Bearer coc_own", new ApiDtos.ClaudeUsageScanRequest(owner.email())))
+                    .satisfies(DisabledMember::isTrackingDisabled);
+            assertThatThrownBy(() -> controller.scanLog("Bearer coc_own", log()))
+                    .satisfies(DisabledMember::isTrackingDisabled);
+
+            verify(daily, never()).upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any());
+            verify(members, never()).touchLastScan(any());
+            verify(members, never()).updateStatus(any(), any());
+            verify(logs, never()).insert(any(), anyString());
+        }
+
+        @Test
+        @DisplayName("the unscoped shared secret cannot bypass it either")
+        void sharedSecretRefusedEverywhere() {
+            memberIs(com.coc.docs.claudeusage.ClaudeUsageMember.STATUS_REMOVED);
+            ClaudeUsageIngestController controller = controller("s3cr3t");
+
+            assertThatThrownBy(() -> controller.ingest("Bearer s3cr3t", request(owner.email())))
+                    .satisfies(DisabledMember::isTrackingDisabled);
+            assertThatThrownBy(() -> controller.scan("Bearer s3cr3t", new ApiDtos.ClaudeUsageScanRequest(owner.email())))
+                    .satisfies(DisabledMember::isTrackingDisabled);
+            assertThatThrownBy(() -> controller.scanLog("Bearer s3cr3t", log()))
+                    .satisfies(DisabledMember::isTrackingDisabled);
+
+            verify(daily, never()).upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any());
+            verify(logs, never()).insert(any(), anyString());
+        }
+
+        @Test
+        @DisplayName("a bad credential is still 401 for a disabled member -- the credential is checked first")
+        void credentialStillCheckedFirst() {
+            memberIs(com.coc.docs.claudeusage.ClaudeUsageMember.STATUS_REMOVED);
+            when(tokens.resolve("garbage")).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> controller(null).ingest("Bearer garbage", request(owner.email())))
+                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.UNAUTHORIZED));
+        }
+
+        @Test
+        @DisplayName("enabled again: a retried report from the disabled period is 409 disabled-period on /api/ingest and /scan-log")
+        void disabledPeriodRetriesRefusedAfterEnable() {
+            memberIs(com.coc.docs.claudeusage.ClaudeUsageMember.STATUS_ACTIVE);
+            when(tokens.resolve("coc_own")).thenReturn(Optional.of(owner));
+            UUID memberId = members.findByEmail(owner.email().toLowerCase()).orElseThrow().id();
+            // Disabled until a minute ago, from two days back.
+            pauses.add(memberId, Instant.now().minus(java.time.Duration.ofDays(2)), Instant.now().minusSeconds(60));
+            ClaudeUsageIngestController controller = controller(null);
+            LocalDate yesterday = LocalDate.now(java.time.ZoneId.of("Asia/Phnom_Penh")).minusDays(1);
+
+            assertThatThrownBy(() -> controller.ingest("Bearer coc_own", new ApiDtos.ClaudeUsageIngestRequest(
+                            owner.email(), "Owner", yesterday, 100, 50, 0, 0, List.of(), null, null)))
+                    .isInstanceOfSatisfying(ApiException.class, e -> {
+                        assertThat(e.status()).isEqualTo(HttpStatus.CONFLICT);
+                        assertThat(e.code()).isEqualTo(ClaudeUsageService.CODE_DISABLED_PERIOD);
+                    });
+            Instant during = Instant.now().minus(java.time.Duration.ofDays(1));
+            assertThatThrownBy(() -> controller.scanLog("Bearer coc_own", new ApiDtos.ClaudeUsageScanLogRequest(
+                            UUID.randomUUID(), owner.email(), "scheduled", "0.4.0", during, during.plusSeconds(8),
+                            1, 1, 0, 0L, 0, "not-needed", List.of(), null, null)))
+                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo(ClaudeUsageService.CODE_DISABLED_PERIOD));
+
+            verify(daily, never()).upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any());
+            verify(logs, never()).insert(any(), anyString());
+        }
+
+        @Test
+        @DisplayName("the problem body carries the machine-readable code the CLI matches on")
+        void problemBodyCarriesCode() {
+            var problem = new ApiExceptionHandler().handleApi(ApiException.withCode(
+                    HttpStatus.FORBIDDEN, ClaudeUsageService.CODE_TRACKING_DISABLED, ClaudeUsageService.TRACKING_DISABLED));
+
+            assertThat(problem.getStatus()).isEqualTo(403);
+            assertThat(problem.getDetail()).isEqualTo(ClaudeUsageService.TRACKING_DISABLED);
+            assertThat(problem.getProperties()).containsEntry("code", "tracking-disabled");
+            assertThat(new ApiExceptionHandler().handleApi(ApiException.forbidden("x")).getProperties())
+                    .as("no code for an ordinary error")
+                    .isNull();
+        }
+
+        @Test
+        @DisplayName("enabled again: the same credential is accepted on all three routes")
+        void acceptedAfterEnable() {
+            memberIs(com.coc.docs.claudeusage.ClaudeUsageMember.STATUS_ACTIVE);
+            when(tokens.resolve("coc_own")).thenReturn(Optional.of(owner));
+            when(daily.upsert(any(), any(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any())).thenReturn(true);
+            when(logs.insert(any(), anyString())).thenReturn(true);
+            ClaudeUsageIngestController controller = controller(null);
+
+            assertThat(controller.ingest("Bearer coc_own", request(owner.email())).action())
+                    .isEqualTo(ClaudeUsageService.IngestOutcome.CREATED);
+            assertThat(controller.scan("Bearer coc_own", new ApiDtos.ClaudeUsageScanRequest(owner.email())).action())
+                    .isEqualTo(ClaudeUsageService.IngestOutcome.SCAN_RECORDED);
+            assertThat(controller.scanLog("Bearer coc_own", log()).action()).isEqualTo(ClaudeUsageScanLogService.RECORDED);
+        }
+    }
+
     @Test
     @DisplayName("missing Authorization header is rejected before either credential check runs")
     void missingAuthorizationHeaderIsUnauthorized() {
