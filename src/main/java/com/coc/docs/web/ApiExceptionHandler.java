@@ -33,6 +33,9 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(ApiException.class)
     ProblemDetail handleApi(ApiException e) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(e.status(), e.getMessage());
+        if (e.code() != null) {
+            problem.setProperty("code", e.code());
+        }
         if (!e.issues().isEmpty()) {
             // The editor UI anchors each message to a block using these paths, so
             // they are structured rather than concatenated into the detail.

@@ -30,14 +30,37 @@ public class ApiException extends RuntimeException {
      */
     private final transient List<ValidationIssue> issues;
 
+    /**
+     * A stable, machine-readable reason, sent as the problem body's
+     * {@code code} -- for a client that must act differently on two refusals
+     * with the same status (the usage CLI telling "tracking disabled by an
+     * administrator" from a bad credential, ADR-105). Null for most errors.
+     */
+    private final String code;
+
     public ApiException(HttpStatus status, String message) {
         this(status, message, List.of());
     }
 
     public ApiException(HttpStatus status, String message, List<ValidationIssue> issues) {
+        this(status, message, issues, null);
+    }
+
+    private ApiException(HttpStatus status, String message, List<ValidationIssue> issues, String code) {
         super(message);
         this.status = status;
         this.issues = List.copyOf(issues);
+        this.code = code;
+    }
+
+    /** As {@link #ApiException(HttpStatus, String)}, with a machine-readable {@link #code()}. */
+    public static ApiException withCode(HttpStatus status, String code, String message) {
+        return new ApiException(status, message, List.of(), code);
+    }
+
+    /** The machine-readable reason, or null. */
+    public String code() {
+        return code;
     }
 
     public HttpStatus status() {

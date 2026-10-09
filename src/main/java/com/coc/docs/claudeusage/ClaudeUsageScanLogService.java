@@ -76,13 +76,19 @@ public class ClaudeUsageScanLogService {
     private final ClaudeUsageMemberRepository members;
     private final ObjectMapper json;
     private final Clock clock;
+    private final ClaudeUsageTrackingPauseRepository pauses;
 
     public ClaudeUsageScanLogService(
-            ClaudeUsageScanLogRepository logs, ClaudeUsageMemberRepository members, ObjectMapper json, Clock clock) {
+            ClaudeUsageScanLogRepository logs,
+            ClaudeUsageMemberRepository members,
+            ObjectMapper json,
+            Clock clock,
+            ClaudeUsageTrackingPauseRepository pauses) {
         this.logs = logs;
         this.members = members;
         this.json = json;
         this.clock = clock;
+        this.pauses = pauses;
     }
 
     /** What the reporter sent, before validation. Counts are null when the scan never reached them. */
@@ -113,6 +119,15 @@ public class ClaudeUsageScanLogService {
     @Transactional
     public String record(Report report) {
         String email = normalizeEmail(report.email());
+        // A disabled member's scan log is refused too (ADR-105) -- checked
+        // first, so it is refused whatever the record holds.
+        ClaudeUsageMember member = members.findByEmail(email).orElse(null);
+        ClaudeUsageService.requireTrackingEnabled(member);
+        // Enabled again, but this scan ran while disabled: a record the CLI
+        // queued then, refused for good.
+        if (member != null && report.startedAt() != null) {
+            ClaudeUsageService.requireMomentOutsidePauses(report.startedAt(), pauses.listFor(member.id()));
+        }
         if (report.scanId() == null || report.startedAt() == null || report.finishedAt() == null) {
             throw ApiException.badRequest("scanId, startedAt and finishedAt are required");
         }
@@ -141,7 +156,7 @@ public class ClaudeUsageScanLogService {
 
         List<ClaudeUsageScanLog.Step> steps = normalizeSteps(report.steps());
         String trigger = TRIGGERS.contains(report.trigger()) ? report.trigger() : "manual";
-        UUID memberId = members.findByEmail(email).map(ClaudeUsageMember::id).orElse(null);
+        UUID memberId = member == null ? null : member.id();
 
         ClaudeUsageScanLog log = new ClaudeUsageScanLog(
                 null, report.scanId(), memberId, email, null, trigger, clip(report.cliVersion(), MAX_VERSION),

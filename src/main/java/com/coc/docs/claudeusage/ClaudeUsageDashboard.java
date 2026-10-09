@@ -13,8 +13,14 @@ import java.util.List;
  *     changes, unlike roster status.
  * @param nearLimit non-removed members whose {@link ClaudeUsageMemberUsage#budgetStatus()}
  *     is amber or red for this period (at or above the amber threshold).
- * @param lastUpdated the newest {@code reported_at} among rows in range, or
- *     null if nothing was reported in this window at all.
+ * @param members active members only. A disabled (removed) member is in
+ *     {@code disabledMembers} instead, and nothing else here counts them:
+ *     not the chart, the totals, either counter or {@code lastUpdated}.
+ * @param lastUpdated the newest {@code reported_at} among active members'
+ *     rows in range, or null if none reported in this window at all.
+ * @param disabledMembers members an admin has disabled, with their usage for
+ *     the period still rolled up -- listed only so they can be found and
+ *     enabled again, never counted (ADR-035).
  */
 public record ClaudeUsageDashboard(
         String period,
@@ -25,4 +31,5 @@ public record ClaudeUsageDashboard(
         ClaudeUsageTotals totals,
         int activeUsers,
         int nearLimit,
-        Instant lastUpdated) {}
+        Instant lastUpdated,
+        List<ClaudeUsageMemberUsage> disabledMembers) {}

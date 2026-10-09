@@ -994,7 +994,9 @@ public final class ApiDtos {
             ClaudeUsageTotalsResponse totals,
             int activeUsers,
             int nearLimit,
-            Instant lastUpdated) {
+            Instant lastUpdated,
+            /** Disabled members, never counted in anything above -- so they can be enabled again. */
+            List<ClaudeUsageMemberResponse> disabledMembers) {
 
         public static ClaudeUsageDashboardResponse of(ClaudeUsageDashboard dashboard) {
             return new ClaudeUsageDashboardResponse(
@@ -1006,7 +1008,8 @@ public final class ApiDtos {
                     ClaudeUsageTotalsResponse.of(dashboard.totals()),
                     dashboard.activeUsers(),
                     dashboard.nearLimit(),
-                    dashboard.lastUpdated());
+                    dashboard.lastUpdated(),
+                    dashboard.disabledMembers().stream().map(ClaudeUsageMemberResponse::of).toList());
         }
     }
 
