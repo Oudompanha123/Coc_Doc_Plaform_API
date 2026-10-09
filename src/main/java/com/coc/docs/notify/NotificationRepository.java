@@ -123,6 +123,56 @@ public class NotificationRepository {
                 .list();
     }
 
+    /**
+     * One page of this account's notifications for the full list, newest
+     * first (ADR-104).
+     *
+     * <p><b>Keyset, not offset.</b> The page continues after the row the client
+     * last saw — {@code (created_at, id)} strictly older than the cursor — so a
+     * notification arriving between two "load more" clicks neither repeats a
+     * row nor skips one. {@code id} breaks ties between rows written in the
+     * same instant (an announcement to everyone is one statement per
+     * recipient, but one recipient's rows can still share a timestamp).
+     *
+     * <p>Filters run in the query, not after it, so a page is never short
+     * because rows were dropped once fetched. Same ownership rule as every
+     * reader here.
+     *
+     * @param beforeCreatedAt with {@code beforeId}, the last row of the
+     *     previous page; both null for the first page
+     * @param excludedType a {@link NotificationType#key()} to leave out, or null
+     */
+    public List<Notification> findPage(
+            UUID accountId,
+            Instant beforeCreatedAt,
+            UUID beforeId,
+            boolean unreadOnly,
+            String excludedType,
+            int limit) {
+        StringBuilder sql = new StringBuilder("""
+                select id, account_id, type, target_id, payload, created_at, read_at
+                from notification
+                where account_id = ?
+                """);
+        List<Object> params = new java.util.ArrayList<>();
+        params.add(accountId);
+        if (beforeCreatedAt != null && beforeId != null) {
+            sql.append(" and (created_at, id) < (?, ?)");
+            params.add(OffsetDateTime.ofInstant(beforeCreatedAt, ZoneOffset.UTC));
+            params.add(beforeId);
+        }
+        if (unreadOnly) {
+            sql.append(" and read_at is null");
+        }
+        if (excludedType != null) {
+            sql.append(" and type <> ?");
+            params.add(excludedType);
+        }
+        sql.append(" order by created_at desc, id desc limit ?");
+        params.add(limit);
+        return jdbc.sql(sql.toString()).params(params).query(this::map).list();
+    }
+
     /** How many this account has not seen. Drives the badge. */
     public int countUnread(UUID accountId) {
         Integer count = jdbc.sql(
