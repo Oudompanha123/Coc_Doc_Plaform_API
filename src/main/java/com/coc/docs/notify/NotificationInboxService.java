@@ -3,6 +3,7 @@ package com.coc.docs.notify;
 import com.coc.docs.account.AppRole;
 import com.coc.docs.auth.CurrentUser;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -82,6 +83,36 @@ public class NotificationInboxService {
                 .filter(n -> approver || !REGISTRATION.equals(n.type()))
                 .sorted(java.util.Comparator.comparing(Notification::createdAt).reversed())
                 .toList();
+    }
+
+    /** One page of the full list, and whether another follows it. */
+    public record Page(List<Notification> items, boolean hasMore) {}
+
+    /**
+     * One page of the caller's notifications for the bell's expanded "View all" list, newest
+     * first (ADR-106).
+     *
+     * <p>Unlike {@link #listFor} there is no merging: the page walks the whole
+     * history in date order, so an older unread row is simply reached by
+     * paging, and the Unread filter is a query, not a filter over a capped list.
+     * One extra row is read to answer {@code hasMore} without a count.
+     *
+     * @param beforeCreatedAt with {@code beforeId}, the last row the client
+     *     holds; both null for the first page
+     */
+    @Transactional(readOnly = true)
+    public Page pageFor(
+            CurrentUser caller, Instant beforeCreatedAt, UUID beforeId, boolean unreadOnly, int limit) {
+        int bounded = Math.clamp(limit, 1, MAX_LIMIT);
+        List<Notification> rows = notifications.findPage(
+                caller.account().id(),
+                beforeCreatedAt,
+                beforeId,
+                unreadOnly,
+                isApprover(caller) ? null : REGISTRATION,
+                bounded + 1);
+        boolean hasMore = rows.size() > bounded;
+        return new Page(hasMore ? rows.subList(0, bounded) : rows, hasMore);
     }
 
     @Transactional(readOnly = true)

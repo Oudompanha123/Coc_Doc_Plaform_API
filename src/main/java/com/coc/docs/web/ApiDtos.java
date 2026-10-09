@@ -893,6 +893,14 @@ public final class ApiDtos {
     public record NotificationInboxResponse(List<NotificationResponse> items, int unreadCount) {}
 
     /**
+     * One page of the bell's expanded "View all" list (ADR-106). {@code hasMore}
+     * says whether to offer "Load more"; {@code unreadCount} is the same
+     * whole-inbox count the bell shows, so the page and the badge agree.
+     */
+    public record NotificationPageResponse(
+            List<NotificationResponse> items, boolean hasMore, int unreadCount) {}
+
+    /**
      * One of the caller's own notification preferences (ADR-042).
      *
      * <p>{@code enabled} always reflects the opt-out-by-absence default — the

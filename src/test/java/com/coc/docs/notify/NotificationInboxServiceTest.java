@@ -82,4 +82,44 @@ class NotificationInboxServiceTest {
         assertThat(inbox.listFor(superAdmin, 30)).containsExactly(registration, announcement);
         assertThat(inbox.unreadCountFor(superAdmin)).isEqualTo(2);
     }
+
+    @Test
+    @DisplayName("a history page reads one extra row to know whether another page follows (ADR-106)")
+    void pageReportsHasMore() {
+        Notification a = row(1, false);
+        Notification b = row(2, true);
+        Notification c = row(3, true);
+        when(repository.findPage(eq(caller.id()), eq(null), eq(null), eq(false), eq("registration.pending"), eq(3)))
+                .thenReturn(List.of(a, b, c));
+
+        NotificationInboxService.Page page = inbox.pageFor(caller, null, null, false, 2);
+
+        assertThat(page.items()).containsExactly(a, b);
+        assertThat(page.hasMore()).isTrue();
+    }
+
+    @Test
+    @DisplayName("the last history page says there is no more")
+    void lastPage() {
+        Notification a = row(5, true);
+        Instant cursorAt = NOW.minusSeconds(240);
+        UUID cursorId = UUID.randomUUID();
+        when(repository.findPage(eq(caller.id()), eq(cursorAt), eq(cursorId), eq(true), eq("registration.pending"), eq(21)))
+                .thenReturn(List.of(a));
+
+        NotificationInboxService.Page page = inbox.pageFor(caller, cursorAt, cursorId, true, 20);
+
+        assertThat(page.items()).containsExactly(a);
+        assertThat(page.hasMore()).isFalse();
+    }
+
+    @Test
+    @DisplayName("a super_admin's history page keeps registration rows; the limit is clamped (ADR-100, ADR-106)")
+    void pageForSuperAdminExcludesNothing() {
+        CurrentUser superAdmin = TestCallers.user(AppRole.SUPER_ADMIN);
+        when(repository.findPage(eq(superAdmin.id()), eq(null), eq(null), eq(false), eq(null), eq(101)))
+                .thenReturn(List.of());
+
+        assertThat(inbox.pageFor(superAdmin, null, null, false, 5000).items()).isEmpty();
+    }
 }
