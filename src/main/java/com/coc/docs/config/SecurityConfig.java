@@ -598,6 +598,33 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/announcements", "/api/v1/announcements/*")
                         .hasRole(AppRole.USER.name())
 
+                        // --- Legal pages (Terms of Service / Privacy Policy) -
+                        // Stated here, ahead of the general /admin/** floor
+                        // below, the same way the super_admin-only prefixes
+                        // above are: an admin may open this page and read it
+                        // (falls through to /admin/** = ADMIN), but every
+                        // write is narrowed to super_admin specifically —
+                        // the product decision in this feature's own task,
+                        // not something /admin/**'s default would give.
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/admin/legal/**")
+                        .hasRole(AppRole.SUPER_ADMIN.name())
+                        .requestMatchers(HttpMethod.POST, "/api/v1/admin/legal/**")
+                        .hasRole(AppRole.SUPER_ADMIN.name())
+
+                        // --- Sidebar kebab menu: delete is super_admin only --
+                        // Stated here ahead of the general /admin/** floor, same
+                        // pattern as Legal pages above: rename/move (PATCH items,
+                        // POST/PUT groups) fall through to the admin floor below,
+                        // but deleting a product or a custom group is narrowed to
+                        // super_admin specifically (task spec: "Delete endpoints
+                        // ... super_admin only; 403 for admin"). This also
+                        // tightens product delete, previously admin-reachable
+                        // under the general floor alone.
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/admin/nav/products/**")
+                        .hasRole(AppRole.SUPER_ADMIN.name())
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/admin/nav/groups/**")
+                        .hasRole(AppRole.SUPER_ADMIN.name())
+
                         // --- editorial writes and admin reads ----------------
                         .requestMatchers("/api/v1/admin/**").hasRole(AppRole.ADMIN.name())
 
@@ -620,6 +647,12 @@ public class SecurityConfig {
                         // same public sidebar/docs pages as docs-content above,
                         // so it carries the same public-read exception.
                         .requestMatchers(HttpMethod.GET, "/api/v1/nav/**").permitAll()
+
+                        // /terms and /privacy are landing-site pages, open to a
+                        // signed-out visitor the same way /docs-content is above
+                        // — deliberately below the `user` floor /api/v1/pages
+                        // carries, not an oversight of it.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/legal/**").permitAll()
 
                         // --- default deny ------------------------------------
                         // Deliberately the strictest role, not authenticated().

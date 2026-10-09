@@ -98,6 +98,50 @@ public class DocsContentRepository {
                 .update();
     }
 
+    /**
+     * Moves every saved row for a product onto its new key, on a product
+     * rename (task: "product rename: ... URL slug follows the new name").
+     * {@code product_key} carries no foreign key to {@code nav_product} (see
+     * {@code V13}'s own comment), so unlike {@code nav_item} this table is
+     * never updated by a cascade — a caller must do this itself, in the same
+     * transaction as the {@code nav_product} key change.
+     */
+    public int repointProductKey(String oldKey, String newKey) {
+        return jdbc.sql("update docs_content set product_key = ? where product_key = ?")
+                .params(newKey, oldKey)
+                .update();
+    }
+
+    /**
+     * Rewrites a stored {@code ctaHref} that still points at the product's
+     * OLD slug (e.g. {@code /docs/jex3-0/get-started}) onto the new one, for
+     * every row now under {@code newKey} (so this must run AFTER {@link
+     * #repointProductKey}). Ordinary page-to-page links are never stored —
+     * {@code frontend/lib/docs/nav-routing.ts}'s {@code hrefFor} computes
+     * them from the current key at read time — {@code ctaHref} is the one
+     * field proven to hold a literal path (see {@code
+     * V70__usage_overview_cta_setup_guide.sql}).
+     *
+     * <p>{@code oldKey} is interpolated straight into the regex rather than
+     * bound as a parameter — safe only because every product key this ever
+     * runs with already passed {@code NavService}'s kebab-case slug
+     * validation (lowercase letters, digits, hyphens), none of which are
+     * regex metacharacters.
+     */
+    public void rewriteCtaHrefPrefix(String oldKey, String newKey) {
+        String pattern = "^/docs/" + oldKey + "(/|$)";
+        jdbc.sql(
+                        """
+                        update docs_content
+                           set body = jsonb_set(body, '{ctaHref}', to_jsonb(regexp_replace(body ->> 'ctaHref', ?, ?))),
+                               updated_at = now()
+                         where product_key = ?
+                           and body ->> 'ctaHref' ~ ?
+                        """)
+                .params(pattern, "/docs/" + newKey + "\\1", newKey, pattern)
+                .update();
+    }
+
     public JsonNode upsert(String productKey, String slug, String kind, JsonNode body, UUID updatedBy) {
         return jdbc.sql("""
                         insert into docs_content (product_key, slug, kind, body, updated_by, updated_at)

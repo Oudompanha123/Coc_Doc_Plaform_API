@@ -112,10 +112,28 @@ public final class AuditAction {
     /** An admin saved a docs-content field (Hero/Steps/Sections) for a product's sub-item. */
     public static final String DOCS_CONTENT_SAVE = "docs_content.save";
 
+    /** A super_admin saved a Legal page (Terms of Service / Privacy Policy) draft. */
+    public static final String LEGAL_DRAFT_SAVE = "legal.draft_save";
+
+    public static final String LEGAL_PUBLISH = "legal.publish";
+
+    /** An old published/archived version was copied back into the current draft — never publishes directly. */
+    public static final String LEGAL_RESTORE = "legal.restore";
+
     public static final String NAV_PRODUCT_CREATE = "nav.product_create";
     public static final String NAV_PRODUCT_DELETE = "nav.product_delete";
+
+    /** A product was renamed — its label always, its URL slug too unless the
+     *  new label happened to slugify back to the same key. */
+    public static final String NAV_PRODUCT_RENAME = "nav.product_rename";
     public static final String NAV_ITEM_CREATE = "nav.item_create";
     public static final String NAV_ITEM_DELETE = "nav.item_delete";
+
+    /** An ADMINISTRATION-block item's label and/or group was overridden from the sidebar's kebab menu. */
+    public static final String NAV_ITEM_OVERRIDE_UPDATE = "nav.item_override_update";
+    public static final String NAV_GROUP_CREATE = "nav.group_create";
+    public static final String NAV_GROUP_RENAME = "nav.group_rename";
+    public static final String NAV_GROUP_DELETE = "nav.group_delete";
 
     /**
      * An admin invited a teammate onto the Claude Usage tracking roster (ADR-035).
@@ -259,6 +277,8 @@ public final class AuditAction {
 
     public static final String TARGET_NAV_PRODUCT = "nav_product";
     public static final String TARGET_NAV_ITEM = "nav_item";
+    public static final String TARGET_NAV_ITEM_OVERRIDE = "nav_item_override";
+    public static final String TARGET_NAV_GROUP = "nav_group";
 
     public static final String TARGET_CLAUDE_USAGE_MEMBER = "claude_usage_member";
 
@@ -267,4 +287,7 @@ public final class AuditAction {
     public static final String TARGET_CLAUDE_USAGE_CLI_AUTHORIZATION = "claude_usage_cli_authorization";
 
     public static final String TARGET_AX_RENEWAL_PROJECT = "ax_renewal_project";
+
+    /** No separate parent "legal page" row exists — target_id points at the legal_page_version row itself. */
+    public static final String TARGET_LEGAL_PAGE_VERSION = "legal_page_version";
 }

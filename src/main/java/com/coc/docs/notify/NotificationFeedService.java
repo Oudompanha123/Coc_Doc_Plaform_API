@@ -298,6 +298,9 @@ public class NotificationFeedService {
             case AuditAction.PAGE_DELETE -> "Deleted a page";
             case AuditAction.PAGE_REORDER -> "Reordered pages";
             case AuditAction.SECTION_DB_BACKED -> "Changed a section's content source";
+            case AuditAction.LEGAL_PUBLISH -> "Published a Legal page";
+            case AuditAction.LEGAL_DRAFT_SAVE -> "Saved a Legal page draft";
+            case AuditAction.LEGAL_RESTORE -> "Restored a Legal page version";
             case AuditAction.ACCOUNT_CREATE -> "Created an account";
             case AuditAction.ACCOUNT_ROLE_CHANGE -> "Changed an account's role";
             // Deliberately does not name the person or the HRMS name it was set
@@ -324,8 +327,13 @@ public class NotificationFeedService {
             case AuditAction.DOCS_CONTENT_SAVE -> "Saved a documentation section";
             case AuditAction.NAV_PRODUCT_CREATE -> "Added a product";
             case AuditAction.NAV_PRODUCT_DELETE -> "Removed a product";
+            case AuditAction.NAV_PRODUCT_RENAME -> "Renamed a product";
             case AuditAction.NAV_ITEM_CREATE -> "Added a navigation item";
             case AuditAction.NAV_ITEM_DELETE -> "Removed a navigation item";
+            case AuditAction.NAV_ITEM_OVERRIDE_UPDATE -> "Renamed or moved a navigation item";
+            case AuditAction.NAV_GROUP_CREATE -> "Created a navigation group";
+            case AuditAction.NAV_GROUP_RENAME -> "Renamed a navigation group";
+            case AuditAction.NAV_GROUP_DELETE -> "Deleted a navigation group";
             case AuditAction.CLAUDE_USAGE_MEMBER_INVITE -> "Invited someone to Claude Usage";
             case AuditAction.CLAUDE_USAGE_MEMBER_ROLE_CHANGE -> "Changed a Claude Usage member's role";
             case AuditAction.CLAUDE_USAGE_MEMBER_BUDGET_CHANGE -> "Changed a Claude Usage member's budget";

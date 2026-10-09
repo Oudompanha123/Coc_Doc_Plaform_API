@@ -183,6 +183,12 @@ class SecurityRulesTest {
     // what publishing does.
     @MockitoBean com.coc.docs.announcement.AnnouncementService announcementService;
 
+    // LegalController/AdminLegalController are in this slice too — mocked for
+    // the same reason as the rest: this class is about which routes the
+    // filter chain admits, not about what the editorial path or the
+    // publisher-name lookup actually does.
+    @MockitoBean com.coc.docs.legal.LegalPageService legalPageService;
+
     @TestConfiguration
     static class Beans {
 
@@ -476,6 +482,133 @@ class SecurityRulesTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"key\":\"x\",\"label\":\"X\",\"icon\":\"layers\"}"))
                     .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("renaming a product admits admin, refuses developer and user")
+        void productRenameAdmitsAdminRefusesDeveloperAndUser() throws Exception {
+            Mockito.when(navService.updateProduct(
+                            ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any()))
+                    .thenReturn(new NavService.ProductRenameResult(
+                            "jex3-0", new NavProduct("jex", "Jex", "layers", 1, "user", List.of())));
+
+            mvc.perform(put("/api/v1/admin/nav/products/jex3-0")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"label\":\"Jex\",\"icon\":\"layers\"}"))
+                    .andExpect(status().isOk());
+
+            mvc.perform(put("/api/v1/admin/nav/products/jex3-0")
+                            .with(as(AppRole.DEVELOPER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"label\":\"Jex\",\"icon\":\"layers\"}"))
+                    .andExpect(status().isForbidden());
+
+            mvc.perform(put("/api/v1/admin/nav/products/jex3-0")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"label\":\"Jex\",\"icon\":\"layers\"}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("the public by-old-slug redirect lookup is reachable without a session")
+        void byOldSlugLookupIsPublic() throws Exception {
+            mvc.perform(get("/api/v1/nav/products/by-old-slug/jex3-0")).andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("product delete is narrowed to super_admin — an admin, admitted by the general floor, is refused here specifically")
+        void productDeleteRefusesAnAdmin() throws Exception {
+            mvc.perform(delete("/api/v1/admin/nav/products/x").with(as(AppRole.ADMIN)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void productDeleteAdmitsASuperAdmin() throws Exception {
+            mvc.perform(delete("/api/v1/admin/nav/products/x").with(as(AppRole.SUPER_ADMIN)))
+                    .andExpect(status().isNoContent());
+        }
+
+        @Test
+        @DisplayName("sidebar kebab menu: the merged config GET refuses developer and user, admits admin")
+        void sidebarConfigRefusesDeveloperAndUser() throws Exception {
+            mvc.perform(get("/api/v1/admin/nav").with(as(AppRole.DEVELOPER))).andExpect(status().isForbidden());
+            mvc.perform(get("/api/v1/admin/nav").with(as(AppRole.USER))).andExpect(status().isForbidden());
+        }
+
+        @Test
+        void sidebarConfigAdmitsAnAdmin() throws Exception {
+            mvc.perform(get("/api/v1/admin/nav").with(as(AppRole.ADMIN))).andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("rename/move (PATCH an item override) admits admin, refuses developer and user")
+        void itemOverrideAdmitsAdminRefusesDeveloperAndUser() throws Exception {
+            Mockito.when(navService.upsertItemOverride(
+                            ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any()))
+                    .thenReturn(new com.coc.docs.nav.NavItemOverride("/legal-pages", "Legal", null, null));
+
+            mvc.perform(patch("/api/v1/admin/nav/items/legal-pages")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"label\":\"Legal\"}"))
+                    .andExpect(status().isOk());
+
+            mvc.perform(patch("/api/v1/admin/nav/items/legal-pages")
+                            .with(as(AppRole.DEVELOPER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"label\":\"Legal\"}"))
+                    .andExpect(status().isForbidden());
+
+            mvc.perform(patch("/api/v1/admin/nav/items/legal-pages")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"label\":\"Legal\"}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("creating/renaming a custom group admits admin, refuses developer and user")
+        void groupCreateAdmitsAdminRefusesDeveloperAndUser() throws Exception {
+            Mockito.when(navService.createGroup(ArgumentMatchers.any(), ArgumentMatchers.any()))
+                    .thenReturn(new com.coc.docs.nav.NavGroup(UUID.randomUUID(), "Legal Team", false, 3));
+
+            mvc.perform(post("/api/v1/admin/nav/groups")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Legal Team\"}"))
+                    .andExpect(status().isOk());
+
+            mvc.perform(post("/api/v1/admin/nav/groups")
+                            .with(as(AppRole.DEVELOPER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Legal Team\"}"))
+                    .andExpect(status().isForbidden());
+
+            mvc.perform(post("/api/v1/admin/nav/groups")
+                            .with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Legal Team\"}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("deleting a custom group is super_admin only — refuses admin, developer and user")
+        void groupDeleteRefusesEveryoneButSuperAdmin() throws Exception {
+            UUID id = UUID.randomUUID();
+            mvc.perform(delete("/api/v1/admin/nav/groups/" + id).with(as(AppRole.ADMIN)))
+                    .andExpect(status().isForbidden());
+            mvc.perform(delete("/api/v1/admin/nav/groups/" + id).with(as(AppRole.DEVELOPER)))
+                    .andExpect(status().isForbidden());
+            mvc.perform(delete("/api/v1/admin/nav/groups/" + id).with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void groupDeleteAdmitsASuperAdmin() throws Exception {
+            mvc.perform(delete("/api/v1/admin/nav/groups/" + UUID.randomUUID()).with(as(AppRole.SUPER_ADMIN)))
+                    .andExpect(status().isNoContent());
         }
     }
 
@@ -1061,6 +1194,16 @@ class SecurityRulesTest {
     @Nested
     @DisplayName("My Attendance (ADR-086)")
     class MyAttendancePath {
+
+        // hrmsNotificationService is shared with AttendancePath above, inside
+        // one cached Spring context — without this, an invocation left over
+        // from an admin-surface test that happens to run first (nested-class
+        // execution order is not something JUnit guarantees) makes
+        // verifyNoMoreInteractions below see a call this class never made.
+        @org.junit.jupiter.api.BeforeEach
+        void resetSharedMock() {
+            org.mockito.Mockito.reset(hrmsNotificationService);
+        }
 
         private com.coc.docs.notify.HrmsNotificationService.ScopedReport emptyScopedReport() {
             return new com.coc.docs.notify.HrmsNotificationService.ScopedReport(
@@ -2040,6 +2183,142 @@ class SecurityRulesTest {
             mvc.perform(post("/api/v1/ax-renewal/projects/" + UUID.randomUUID() + "/plan/stack_move/confirm")
                             .with(as(AppRole.USER)))
                     .andExpect(status().isForbidden());
+        }
+    }
+
+    @Nested
+    @DisplayName("legal pages (Terms of Service / Privacy Policy)")
+    class LegalPath {
+
+        private com.coc.docs.legal.LegalPageVersion stubVersion() {
+            return new com.coc.docs.legal.LegalPageVersion(
+                    UUID.randomUUID(),
+                    com.coc.docs.legal.LegalSlug.TERMS,
+                    com.coc.docs.page.VersionStatus.DRAFT,
+                    new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode(),
+                    1,
+                    null,
+                    null,
+                    null,
+                    Instant.now(),
+                    Instant.now());
+        }
+
+        @Test
+        void the_public_read_is_reachable_without_a_session() throws Exception {
+            Mockito.when(legalPageService.readPublished(com.coc.docs.legal.LegalSlug.TERMS))
+                    .thenReturn(stubVersion());
+
+            mvc.perform(get("/api/v1/legal/terms")).andExpect(status().isOk());
+        }
+
+        @Test
+        void the_draft_read_refuses_an_anonymous_caller() throws Exception {
+            mvc.perform(get("/api/v1/admin/legal/terms/draft")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void the_draft_read_refuses_a_user() throws Exception {
+            mvc.perform(get("/api/v1/admin/legal/terms/draft").with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void the_draft_read_admits_an_admin() throws Exception {
+            // An admin may open and read a Legal page draft, same floor as
+            // the rest of /admin/** — only the writes below are narrower.
+            Mockito.when(legalPageService.openForEdit(com.coc.docs.legal.LegalSlug.TERMS))
+                    .thenReturn(stubVersion());
+
+            mvc.perform(get("/api/v1/admin/legal/terms/draft").with(as(AppRole.ADMIN)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void saving_a_draft_refuses_an_admin() throws Exception {
+            // The product decision behind this feature: only a super_admin
+            // may edit Legal pages, unlike the general editorial floor
+            // (EditorialPath), which admits any admin.
+            mvc.perform(put("/api/v1/admin/legal/terms/draft")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"content\":{},\"versionNo\":1}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void saving_a_draft_admits_a_super_admin() throws Exception {
+            Mockito.when(legalPageService.saveDraft(
+                            ArgumentMatchers.eq(com.coc.docs.legal.LegalSlug.TERMS),
+                            ArgumentMatchers.any(),
+                            ArgumentMatchers.eq(1),
+                            ArgumentMatchers.any()))
+                    .thenReturn(stubVersion());
+
+            mvc.perform(put("/api/v1/admin/legal/terms/draft")
+                            .with(as(AppRole.SUPER_ADMIN))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"content\":{},\"versionNo\":1}"))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void publishing_refuses_an_admin() throws Exception {
+            mvc.perform(post("/api/v1/admin/legal/terms/publish").with(as(AppRole.ADMIN)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void publishing_admits_a_super_admin() throws Exception {
+            Mockito.when(legalPageService.publish(
+                            ArgumentMatchers.eq(com.coc.docs.legal.LegalSlug.TERMS), ArgumentMatchers.any(), ArgumentMatchers.any()))
+                    .thenReturn(stubVersion());
+
+            mvc.perform(post("/api/v1/admin/legal/terms/publish").with(as(AppRole.SUPER_ADMIN)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void restoring_refuses_an_admin() throws Exception {
+            mvc.perform(post("/api/v1/admin/legal/terms/versions/" + UUID.randomUUID() + "/restore")
+                            .with(as(AppRole.ADMIN)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void restoring_admits_a_super_admin() throws Exception {
+            Mockito.when(legalPageService.restore(
+                            ArgumentMatchers.eq(com.coc.docs.legal.LegalSlug.TERMS),
+                            ArgumentMatchers.any(),
+                            ArgumentMatchers.any()))
+                    .thenReturn(stubVersion());
+
+            mvc.perform(post("/api/v1/admin/legal/terms/versions/" + UUID.randomUUID() + "/restore")
+                            .with(as(AppRole.SUPER_ADMIN)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void the_versions_list_admits_an_admin() throws Exception {
+            // A read, not a write — an admin may see history even though
+            // only a super_admin may restore from it.
+            Mockito.when(legalPageService.history(com.coc.docs.legal.LegalSlug.TERMS))
+                    .thenReturn(List.of());
+
+            mvc.perform(get("/api/v1/admin/legal/terms/versions").with(as(AppRole.ADMIN)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void a_single_historical_version_admits_an_admin() throws Exception {
+            // The History panel's "Preview" — a read, same floor as the list.
+            Mockito.when(legalPageService.getHistoryVersion(
+                            ArgumentMatchers.eq(com.coc.docs.legal.LegalSlug.TERMS), ArgumentMatchers.any()))
+                    .thenReturn(stubVersion());
+
+            mvc.perform(get("/api/v1/admin/legal/terms/versions/" + UUID.randomUUID())
+                            .with(as(AppRole.ADMIN)))
+                    .andExpect(status().isOk());
         }
     }
 }

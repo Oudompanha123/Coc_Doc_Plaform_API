@@ -3,6 +3,7 @@ package com.coc.docs.nav;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -62,6 +63,81 @@ public class NavRepository {
     public boolean productExists(String key) {
         Integer count = jdbc.sql("select count(*) from nav_product where key = ?").param(key).query(Integer.class).single();
         return count != null && count > 0;
+    }
+
+    /** One product's own row, with no sub-items attached — the cheap read a
+     *  rename needs (its current label/icon/sortOrder/minRole), where {@link
+     *  #findAllWithItems} would do unnecessary work. */
+    public record ProductSnapshot(String key, String label, String icon, int sortOrder, String minRole) {}
+
+    public Optional<ProductSnapshot> findProduct(String key) {
+        return jdbc.sql("select key, label, icon, sort_order, min_role from nav_product where key = ?")
+                .param(key)
+                .query((rs, n) -> new ProductSnapshot(
+                        rs.getString("key"),
+                        rs.getString("label"),
+                        rs.getString("icon"),
+                        rs.getInt("sort_order"),
+                        rs.getString("min_role")))
+                .optional();
+    }
+
+    /** Whether {@code slug} is already spoken for — either a live product key
+     *  or one retired into {@code nav_product_slug_history} — so a rename's
+     *  slug-conflict check (and the "-2", "-3"... suffixing it drives) sees
+     *  the same hijack-prevention rule the history table's own primary key
+     *  enforces at write time. */
+    public boolean slugEverUsed(String slug) {
+        Integer count = jdbc.sql(
+                        """
+                        select count(*) from (
+                            select key as slug from nav_product
+                            union all
+                            select old_slug as slug from nav_product_slug_history
+                        ) taken where slug = ?
+                        """)
+                .param(slug)
+                .query(Integer.class)
+                .single();
+        return count != null && count > 0;
+    }
+
+    /** Records the slug a product is about to be renamed off of, keyed by
+     *  that old slug. Must run BEFORE {@link #renameProductKey} in the same
+     *  transaction — {@code product_key} here cascades forward on every
+     *  later rename only because it already points at the product by the
+     *  time that rename's {@code update ... set key = ...} runs (see
+     *  V79's own comment for why that makes a rename chain self-resolving). */
+    public void insertSlugHistory(String oldSlug, String productKey) {
+        jdbc.sql("insert into nav_product_slug_history (old_slug, product_key) values (?, ?)")
+                .params(oldSlug, productKey)
+                .update();
+    }
+
+    /** The product's current key, given any slug it has ever been known by —
+     *  resolves straight to the latest one even across several renames,
+     *  never a stale intermediate (see V79's cascade-chain comment). */
+    public Optional<String> findCurrentKeyByOldSlug(String oldSlug) {
+        return jdbc.sql("select product_key from nav_product_slug_history where old_slug = ?")
+                .param(oldSlug)
+                .query(String.class)
+                .optional();
+    }
+
+    /** The one statement a slug-following rename needs on {@code
+     *  nav_product} itself: {@code nav_item.product_key} and every {@code
+     *  nav_product_slug_history} row already pointing at {@code oldKey}
+     *  cascade to {@code newKey} as part of this same UPDATE (V79's {@code on
+     *  update cascade}) — {@code docs_content}, which has no foreign key
+     *  here, is the only thing a caller still has to repoint by hand (see
+     *  {@code DocsContentRepository#repointProductKey}). */
+    public void renameProductKey(String oldKey, String newKey, String label, String icon) {
+        int updated = jdbc.sql("update nav_product set key = ?, label = ?, icon = ?, updated_at = now() where key = ?")
+                .params(newKey, label, icon, oldKey)
+                .update();
+        if (updated == 0) {
+            throw new IllegalStateException("product \"" + oldKey + "\" vanished mid-rename");
+        }
     }
 
     public int productCount() {
