@@ -80,8 +80,8 @@ class RegistrationDecisionTest {
         when(accounts.findById(pending.id()))
                 .thenReturn(
                         Optional.of(pending),
-                        Optional.of(active),
-                        Optional.of(active),
+                        Optional.of(active
+                        Optional.of(active
                         Optional.of(active.withRoles(EnumSet.of(AppRole.REVIEWER))));
 
         service.approve(pending.id(), AppRole.REVIEWER, admin);
