@@ -205,6 +205,50 @@ class ClaudeUsageIngestControllerTest {
         }
     }
 
+    @Nested
+    @DisplayName("POST /api/ingest/scan-log/start — a scan has begun (ADR-107)")
+    class ScanStart {
+
+        private ApiDtos.ClaudeUsageScanStartRequest start(String email) {
+            return new ApiDtos.ClaudeUsageScanStartRequest(
+                    UUID.randomUUID(), email, "manual", "0.6.0", Instant.parse("2026-10-07T04:00:01Z"));
+        }
+
+        @Test
+        @DisplayName("own token, own email -> started, and no usage, scan time or result is written")
+        void recordsTheStartOnly() {
+            var owner = TestCallers.user(AppRole.ADMIN).account();
+            when(tokens.resolve("coc_abc")).thenReturn(Optional.of(owner));
+            when(scanLogs.recordStart(any())).thenReturn(ClaudeUsageScanLogService.STARTED);
+
+            ApiDtos.ClaudeUsageIngestResponse response =
+                    controllerWithSecret(null).scanStart("Bearer coc_abc", start(owner.email()));
+
+            assertThat(response.action()).isEqualTo("started");
+            verify(scanLogs, never()).record(any());
+            verify(usage, never()).recordScan(any());
+        }
+
+        @Test
+        @DisplayName("another account's email is forbidden, nothing recorded")
+        void tokenMayNotStartSomeoneElsesScan() {
+            var owner = TestCallers.user(AppRole.ADMIN).account();
+            when(tokens.resolve("coc_abc")).thenReturn(Optional.of(owner));
+
+            assertThatThrownBy(() -> controllerWithSecret(null).scanStart("Bearer coc_abc", start("someone-else@example.com")))
+                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.FORBIDDEN));
+            verify(scanLogs, never()).recordStart(any());
+        }
+
+        @Test
+        @DisplayName("no credential -> unauthorized, nothing recorded")
+        void missingCredentialIsUnauthorized() {
+            assertThatThrownBy(() -> controllerWithSecret("s3cr3t").scanStart(null, start("a@example.com")))
+                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(HttpStatus.UNAUTHORIZED));
+            verify(scanLogs, never()).recordStart(any());
+        }
+    }
+
     /**
      * A disabled member's reporter is refused on every ingest route (ADR-105),
      * whichever credential it holds. Wired with the real services over mocked

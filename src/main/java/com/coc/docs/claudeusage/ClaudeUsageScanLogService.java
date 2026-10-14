@@ -36,7 +36,20 @@ import org.springframework.transaction.annotation.Transactional;
  * new usage" is a successful step, so a scan that found nothing new is a
  * successful scan.
  *
- * <p>// req: FR-USAGE-002, ADR-099
+ * <p><b>Running scans (ADR-107).</b> A reporter from 0.6.0 also announces a
+ * scan as it starts ({@link #recordStart}); the row is {@code running} until
+ * the result completes it. One still running {@link #RESULT_TIMEOUT} after the
+ * server heard of it is read as {@code incomplete}: the server never got a
+ * result, which is all that can honestly be said. Nothing is rewritten — a
+ * result queued on the PC can still arrive and complete the row.
+ *
+ * <p><b>Two readers.</b> A super_admin reads every scan as stored
+ * ({@link #list}, {@link #detail}); any member reads only their own
+ * ({@link #listFor}, {@link #detailFor}), with error text cut to its first
+ * line and file paths removed. The page's plain-language diagnosis needs the
+ * message, not a stack trace or the PC's folder layout.
+ *
+ * <p>// req: FR-USAGE-002, ADR-099, ADR-107
  */
 @Service
 public class ClaudeUsageScanLogService {
@@ -49,6 +62,10 @@ public class ClaudeUsageScanLogService {
     public static final String SUCCESS = "success";
     public static final String WARNING = "warning";
     public static final String FAILED = "failed";
+    /** Stored while a scan has started and its result has not arrived (ADR-107). */
+    public static final String RUNNING = "running";
+    /** Read-time only: {@link #RUNNING} for longer than {@link #RESULT_TIMEOUT}. Never stored. */
+    public static final String INCOMPLETE = "incomplete";
     private static final String SKIPPED = "skipped";
     private static final Set<String> STEP_STATUSES = Set.of(SUCCESS, WARNING, FAILED, SKIPPED);
     private static final Set<String> UPLOAD_STATUSES = Set.of("uploaded", "not-needed", "failed", "not-attempted");
@@ -57,6 +74,16 @@ public class ClaudeUsageScanLogService {
     /** Outcome of {@link #record}, returned to the CLI as {@code action}. */
     public static final String RECORDED = "recorded";
     public static final String DUPLICATE = "duplicate";
+    /** Outcome of {@link #recordStart}. */
+    public static final String STARTED = "started";
+
+    /**
+     * How long a start may go without its result before the scan is read as
+     * {@link #INCOMPLETE}. A scan takes seconds to a few minutes; half an hour
+     * leaves room for a very large history without showing a dead scan as
+     * "In progress" for the rest of the day.
+     */
+    static final Duration RESULT_TIMEOUT = Duration.ofMinutes(30);
 
     static final Duration RETENTION = Duration.ofDays(90);
     static final int MAX_LIST_ROWS = 2000;
@@ -71,6 +98,14 @@ public class ClaudeUsageScanLogService {
     /** The CLI already redacts; this is the second line, in case an older or altered client did not. */
     private static final Pattern TOKEN = Pattern.compile("coc_[A-Za-z0-9_-]+");
     private static final Pattern BEARER = Pattern.compile("(?i)bearer\\s+\\S+");
+    /**
+     * A file path, for a member's own view: {@code C:\...}, {@code ~/...},
+     * {@code \\server\...}, {@code /usr/lib/...} — but not the path inside a
+     * URL, which the lookbehind leaves alone.
+     */
+    private static final Pattern PATH = Pattern.compile(
+            "(?:(?<![A-Za-z])[A-Za-z]:[\\\\/]|~[\\\\/]|\\\\\\\\)[^\\s'\"]*|(?<![\\w.:/])/(?:[\\w.@-]+/)+[\\w.@-]*");
+    private static final int MAX_MEMBER_TEXT = 200;
 
     private final ClaudeUsageScanLogRepository logs;
     private final ClaudeUsageMemberRepository members;
@@ -108,6 +143,9 @@ public class ClaudeUsageScanLogService {
             List<ClaudeUsageScanLog.Step> steps,
             String errorStep,
             String errorMessage) {}
+
+    /** A scan's start, as the reporter announced it (ADR-107). */
+    public record Start(UUID scanId, String email, String trigger, String cliVersion, Instant startedAt) {}
 
     /** A date range of logs. {@code truncated}: more than {@link #MAX_LIST_ROWS} started in it. */
     public record Page(LocalDate from, LocalDate to, List<ClaudeUsageScanLog> logs, boolean truncated) {}
@@ -176,6 +214,67 @@ public class ClaudeUsageScanLogService {
      */
     @Transactional(readOnly = true)
     public Page list(LocalDate from, LocalDate to) {
+        LocalDate[] range = range(from, to);
+        List<ClaudeUsageScanLog> rows = logs.list(
+                range[0].atStartOfDay(REPORT_ZONE).toInstant(),
+                range[1].plusDays(1).atStartOfDay(REPORT_ZONE).toInstant(),
+                MAX_LIST_ROWS + 1);
+        return page(range, rows, false);
+    }
+
+    /** {@link #list}, for one member's own scans, as a member may read them. */
+    @Transactional(readOnly = true)
+    public Page listFor(String email, LocalDate from, LocalDate to) {
+        LocalDate[] range = range(from, to);
+        List<ClaudeUsageScanLog> rows = logs.listForEmail(
+                normalizeEmail(email),
+                range[0].atStartOfDay(REPORT_ZONE).toInstant(),
+                range[1].plusDays(1).atStartOfDay(REPORT_ZONE).toInstant(),
+                MAX_LIST_ROWS + 1);
+        return page(range, rows, true);
+    }
+
+    /**
+     * Stores a scan's start as a {@code running} row (ADR-107). The same
+     * refusals as {@link #record} — a disabled member, a scan inside a
+     * disabled period — so a start is never stored where its result would not
+     * be. Idempotent on {@code scanId}; a start arriving after its result
+     * changes nothing.
+     */
+    @Transactional
+    public String recordStart(Start start) {
+        String email = normalizeEmail(start.email());
+        ClaudeUsageMember member = members.findByEmail(email).orElse(null);
+        ClaudeUsageService.requireTrackingEnabled(member);
+        if (start.scanId() == null || start.startedAt() == null) {
+            throw ApiException.badRequest("scanId and startedAt are required");
+        }
+        if (member != null) {
+            ClaudeUsageService.requireMomentOutsidePauses(start.startedAt(), pauses.listFor(member.id()));
+        }
+        Instant now = clock.instant();
+        if (start.startedAt().isAfter(now.plus(MAX_CLOCK_SKEW))) {
+            throw ApiException.badRequest("startedAt is in the future — check this PC's clock");
+        }
+        String trigger = TRIGGERS.contains(start.trigger()) ? start.trigger() : "manual";
+        ClaudeUsageScanLog log = new ClaudeUsageScanLog(
+                null, start.scanId(), member == null ? null : member.id(), email, null, trigger,
+                clip(start.cliVersion(), MAX_VERSION), start.startedAt(), null, now, RUNNING, "not-attempted",
+                null, null, null, null, null, null, null, List.of());
+        return logs.insertRunning(log) ? STARTED : DUPLICATE;
+    }
+
+    private Page page(LocalDate[] range, List<ClaudeUsageScanLog> rows, boolean forMember) {
+        boolean truncated = rows.size() > MAX_LIST_ROWS;
+        Instant now = clock.instant();
+        List<ClaudeUsageScanLog> shown = (truncated ? rows.subList(0, MAX_LIST_ROWS) : rows).stream()
+                .map(l -> asRead(l, now, forMember))
+                .toList();
+        return new Page(range[0], range[1], shown, truncated);
+    }
+
+    /** {@code {start, end}}, inclusive and validated. */
+    private LocalDate[] range(LocalDate from, LocalDate to) {
         if ((from == null) != (to == null)) {
             throw ApiException.badRequest("from and to must be given together");
         }
@@ -187,19 +286,57 @@ public class ClaudeUsageScanLogService {
         if (ChronoUnit.DAYS.between(start, end) + 1 > MAX_RANGE_DAYS) {
             throw ApiException.badRequest("a range can cover at most " + MAX_RANGE_DAYS + " days");
         }
-        List<ClaudeUsageScanLog> rows = logs.list(
-                start.atStartOfDay(REPORT_ZONE).toInstant(),
-                end.plusDays(1).atStartOfDay(REPORT_ZONE).toInstant(),
-                MAX_LIST_ROWS + 1);
-        boolean truncated = rows.size() > MAX_LIST_ROWS;
-        return new Page(start, end, truncated ? rows.subList(0, MAX_LIST_ROWS) : rows, truncated);
+        return new LocalDate[] {start, end};
     }
 
     /** One record with its steps. */
     @Transactional(readOnly = true)
     public ClaudeUsageScanLog detail(UUID id) {
         ClaudeUsageScanLog log = logs.findById(id).orElseThrow(() -> ApiException.notFound("scan log"));
-        return log.withSteps(readSteps(logs.stepsJson(id).orElse("[]")));
+        return asRead(log.withSteps(readSteps(logs.stepsJson(id).orElse("[]"))), clock.instant(), false);
+    }
+
+    /**
+     * {@link #detail}, for a member reading their own scan. Someone else's id
+     * is "not found" — the same answer as an id that does not exist — so the
+     * route cannot be used to learn which scans exist.
+     */
+    @Transactional(readOnly = true)
+    public ClaudeUsageScanLog detailFor(String email, UUID id) {
+        String own = normalizeEmail(email);
+        ClaudeUsageScanLog log = logs.findById(id)
+                .filter(l -> own.equals(l.email()))
+                .orElseThrow(() -> ApiException.notFound("scan log"));
+        return asRead(log.withSteps(readSteps(logs.stepsJson(id).orElse("[]"))), clock.instant(), true);
+    }
+
+    /** An overdue {@code running} reads as {@code incomplete}; a member's copy has its error text cut down. */
+    private static ClaudeUsageScanLog asRead(ClaudeUsageScanLog log, Instant now, boolean forMember) {
+        ClaudeUsageScanLog out = log;
+        if (RUNNING.equals(out.status()) && out.receivedAt().plus(RESULT_TIMEOUT).isBefore(now)) {
+            out = out.withStatus(INCOMPLETE);
+        }
+        if (forMember) {
+            out = out.withErrorMessage(forMember(out.errorMessage()))
+                    .withSteps(out.steps().stream()
+                            .map(s -> new ClaudeUsageScanLog.Step(s.key(), s.status(), s.at(), forMember(s.detail())))
+                            .toList());
+        }
+        return out;
+    }
+
+    /**
+     * What a member sees of an error or step text: its first line (the CLI's
+     * own one-line message; a stack trace, if an altered client sent one,
+     * starts on the second), file paths replaced, clipped short. Keeps what
+     * the page's diagnosis matches on — HTTP statuses and network error codes.
+     */
+    static String forMember(String text) {
+        if (text == null) {
+            return null;
+        }
+        String first = text.strip().lines().findFirst().orElse("");
+        return clip(PATH.matcher(first).replaceAll("[path]"), MAX_MEMBER_TEXT);
     }
 
     /** Failed beats warning beats success. An {@code errorStep} is a failure even if its step was not sent. */

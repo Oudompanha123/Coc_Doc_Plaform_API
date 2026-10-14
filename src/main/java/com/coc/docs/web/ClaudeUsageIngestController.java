@@ -122,6 +122,22 @@ public class ClaudeUsageIngestController {
         return new ApiDtos.ClaudeUsageIngestResponse(scanLogs.record(request.toReport()));
     }
 
+    /**
+     * A scan has started (ADR-107): the Scan Logs page shows it "In progress"
+     * until its {@link #scanLog} result completes the same row. Sent by
+     * reporters from 0.6.0, once, best-effort — never queued, since a late
+     * "started" says nothing the result does not. Same credential check as
+     * {@link #ingest}; writes no usage and does not move {@code last_scan_at}.
+     */
+    @PostMapping("/api/ingest/scan-log/start")
+    ApiDtos.ClaudeUsageIngestResponse scanStart(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @Valid @RequestBody ApiDtos.ClaudeUsageScanStartRequest request) {
+
+        authorize(authorization, request.email());
+        return new ApiDtos.ClaudeUsageIngestResponse(scanLogs.recordStart(request.toStart()));
+    }
+
     /** The wire DTO stays out of the service layer (ApiDtos.java's own stated rule) — this is the one conversion point. */
     private static Map<String, ClaudeUsageModelTokens> toDomain(Map<String, ApiDtos.ClaudeUsageModelTokensRequest> byModel) {
         if (byModel == null) {
