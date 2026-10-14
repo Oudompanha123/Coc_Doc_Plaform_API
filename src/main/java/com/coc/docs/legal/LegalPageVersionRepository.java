@@ -121,7 +121,7 @@ public class LegalPageVersionRepository {
         return jdbc.sql("""
                         insert into legal_page_version (slug, status, content, version_no)
                         values (?, 'draft', ?::jsonb, ?)
-                        returning """ + COLUMNS)
+                        returning\s""" + COLUMNS)
                 .params(slug.wire(), jsonb.write(content), versionNo)
                 .query(mapper)
                 .single();
@@ -137,7 +137,7 @@ public class LegalPageVersionRepository {
                         update legal_page_version
                         set content = ?::jsonb, version_no = version_no + 1, updated_at = now()
                         where id = ? and version_no = ? and status = 'draft'
-                        returning """ + COLUMNS)
+                        returning\s""" + COLUMNS)
                 .params(jsonb.write(content), versionId, expectedVersionNo)
                 .query(mapper)
                 .optional();
@@ -167,7 +167,7 @@ public class LegalPageVersionRepository {
                         update legal_page_version
                         set content = ?::jsonb, version_no = version_no + 1, updated_at = now()
                         where id = ? and status = 'draft'
-                        returning """ + COLUMNS)
+                        returning\s""" + COLUMNS)
                 .params(jsonb.write(content), draftId)
                 .query(mapper)
                 .optional();
@@ -180,7 +180,7 @@ public class LegalPageVersionRepository {
                         set status = 'published', published_at = now(), published_by = ?,
                             publish_note = ?, updated_at = now()
                         where id = ? and status = 'draft'
-                        returning """ + COLUMNS)
+                        returning\s""" + COLUMNS)
                 .params(publishedBy, publishNote, versionId)
                 .query(mapper)
                 .optional();

@@ -61,7 +61,7 @@ public class NavGroupRepository {
         return jdbc.sql("""
                         insert into nav_group (name, is_builtin, sort_order)
                         values (?, false, ?)
-                        returning """ + GROUP_COLUMNS)
+                        returning\s""" + GROUP_COLUMNS)
                 .params(name, sortOrder)
                 .query(NavGroupRepository::mapGroup)
                 .single();
@@ -144,7 +144,7 @@ public class NavGroupRepository {
                             sort_order = case when ? then excluded.sort_order else nav_item_override.sort_order end,
                             updated_at = now(),
                             updated_by = excluded.updated_by
-                        returning """ + OVERRIDE_COLUMNS)
+                        returning\s""" + OVERRIDE_COLUMNS)
                 .params(itemKey, label, groupId, sortOrder, updatedBy, hasLabel, hasGroup, hasGroup)
                 .query(NavGroupRepository::mapOverride)
                 .single();
