@@ -189,6 +189,9 @@ class SecurityRulesTest {
     // publisher-name lookup actually does.
     @MockitoBean com.coc.docs.legal.LegalPageService legalPageService;
 
+    // StoreController/AdminStoreController (ADR-108) — same reason.
+    @MockitoBean com.coc.docs.store.StoreService storeService;
+
     @TestConfiguration
     static class Beans {
 
@@ -678,6 +681,58 @@ class SecurityRulesTest {
             // The editorial floor, not super_admin: an announcement is content.
             mvc.perform(get("/api/v1/admin/announcements").with(as(AppRole.ADMIN))).andExpect(status().isOk());
             mvc.perform(delete("/api/v1/admin/announcements/" + java.util.UUID.randomUUID()).with(as(AppRole.ADMIN)))
+                    .andExpect(status().isNoContent());
+        }
+    }
+
+    @Nested
+    @DisplayName("store (ADR-108)")
+    class StorePath {
+
+        @Test
+        void a_plain_user_browses_the_store() throws Exception {
+            mvc.perform(get("/api/v1/store/apps").with(as(AppRole.USER))).andExpect(status().isOk());
+        }
+
+        @Test
+        void a_plain_user_opens_an_app_page() throws Exception {
+            java.time.Instant now = java.time.Instant.now();
+            org.mockito.Mockito.when(storeService.entryForReader(org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(new com.coc.docs.store.StoreService.CatalogEntry(
+                            new com.coc.docs.store.StoreApp(java.util.UUID.randomUUID(), 7, "App", "",
+                                    com.coc.docs.store.StorePlatform.ANDROID, true, null, null, now, now),
+                            java.util.List.of()));
+            mvc.perform(get("/api/v1/store/apps/7").with(as(AppRole.USER))).andExpect(status().isOk());
+        }
+
+        @Test
+        void a_caller_with_no_session_browses_nothing() throws Exception {
+            mvc.perform(get("/api/v1/store/apps")).andExpect(status().isUnauthorized());
+            mvc.perform(get("/api/v1/store/apps/7")).andExpect(status().isUnauthorized());
+            mvc.perform(get("/api/v1/store/releases/" + java.util.UUID.randomUUID() + "/download"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void a_logo_needs_no_session() throws Exception {
+            // Public for the <img> reason (ADR-101); a missing one is a plain 404, not a 401.
+            org.mockito.Mockito.when(storeService.logo(org.mockito.ArgumentMatchers.any()))
+                    .thenThrow(ApiException.notFound("logo"));
+            mvc.perform(get("/api/v1/store/apps/" + java.util.UUID.randomUUID() + "/logo"))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void a_plain_user_cannot_manage_it() throws Exception {
+            mvc.perform(get("/api/v1/admin/store/apps").with(as(AppRole.USER))).andExpect(status().isForbidden());
+            mvc.perform(delete("/api/v1/admin/store/apps/" + java.util.UUID.randomUUID()).with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void an_admin_manages_it() throws Exception {
+            mvc.perform(get("/api/v1/admin/store/apps").with(as(AppRole.ADMIN))).andExpect(status().isOk());
+            mvc.perform(delete("/api/v1/admin/store/apps/" + java.util.UUID.randomUUID()).with(as(AppRole.ADMIN)))
                     .andExpect(status().isNoContent());
         }
     }
