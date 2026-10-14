@@ -36,8 +36,25 @@ public class ClaudeUsageMemberRepository {
                 rs.getObject("updated_at", OffsetDateTime.class).toInstant());
     }
 
+    /**
+     * The name to show for a member: the platform account's own display name
+     * when one matches by email, so a rename on Settings → Account shows here
+     * too, else the name this table stored. {@code display_name} on this table
+     * is only what a reporter last sent (the CLI's saved login name, rewritten
+     * on every upload by {@link #touchDisplayName}), so it is the fallback for
+     * an email with no account, never the source of truth for one that has
+     * one. Matched by email like {@link #avatarUrlsByMemberId}; a scalar
+     * subquery, so a member never appears twice. Spelled with the table name,
+     * not an alias, so the same expression works in {@code returning}.
+     */
+    static final String DISPLAY_NAME = """
+            coalesce(
+              (select nullif(btrim(a.display_name), '') from account a
+                where lower(a.email) = lower(claude_usage_member.email) limit 1),
+              claude_usage_member.display_name) as display_name""";
+
     private static final String COLUMNS =
-            "id, email, display_name, team_role, status, budget_override_tokens, invited_by, created_at, updated_at";
+            "id, email, " + DISPLAY_NAME + ", team_role, status, budget_override_tokens, invited_by, created_at, updated_at";
 
     /** Every tracked member, newest invite first. Includes {@code removed} rows -- the dashboard shows them, badged. */
     public List<ClaudeUsageMember> list() {
@@ -115,7 +132,12 @@ public class ClaudeUsageMemberRepository {
                 .update();
     }
 
-    /** Last write wins for the display name, same reasoning the reference tool's rollup gives for a rename. */
+    /**
+     * Last write wins for the stored name, same reasoning the reference tool's
+     * rollup gives for a rename. Only shown for an email with no platform
+     * account -- one that has an account shows that account's name
+     * ({@link #DISPLAY_NAME}).
+     */
     public void touchDisplayName(UUID id, String displayName) {
         jdbc.sql("""
                         update claude_usage_member

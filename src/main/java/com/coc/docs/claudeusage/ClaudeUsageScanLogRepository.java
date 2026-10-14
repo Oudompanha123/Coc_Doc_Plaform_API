@@ -22,9 +22,18 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class ClaudeUsageScanLogRepository {
 
-    /** The display name comes from the roster at read time, so a rename shows on older logs too. */
+    /**
+     * The display name is worked out at read time, so a rename shows on older
+     * logs too: the platform account's name for that email, else the roster's
+     * stored one ({@link ClaudeUsageMemberRepository#DISPLAY_NAME}, same rule).
+     */
     private static final String SELECT = """
-            select l.id, l.client_scan_id, l.member_id, l.email, m.display_name, l.trigger, l.cli_version,
+            select l.id, l.client_scan_id, l.member_id, l.email,
+                   coalesce(
+                     (select nullif(btrim(a.display_name), '') from account a
+                       where lower(a.email) = lower(l.email) limit 1),
+                     m.display_name) as display_name,
+                   l.trigger, l.cli_version,
                    l.started_at, l.finished_at, l.received_at, l.status, l.upload_status, l.transcript_files,
                    l.responses, l.duplicates, l.new_tokens, l.days_uploaded, l.error_step, l.error_message
             from claude_usage_scan_log l
