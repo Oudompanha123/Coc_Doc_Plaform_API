@@ -1,9 +1,14 @@
 package com.coc.docs.web;
 
 import com.coc.docs.auth.CurrentUser;
+import com.coc.docs.claudeusage.ClaudeUsageScanLogService;
 import com.coc.docs.claudeusage.ClaudeUsageService;
+import java.time.LocalDate;
+import java.util.UUID;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -27,16 +32,22 @@ import org.springframework.web.bind.annotation.RestController;
  * (ADR-044) — a second, differently-floored meaning under the same prefix
  * would be confusing to read in {@code SecurityConfig}.
  *
- * <p>// req: FR-USAGE-005, ADR-052, ADR-058
+ * <p>Also the caller's own scan logs (ADR-107): the same Scan Logs a
+ * super_admin reads team-wide, narrowed to the session's email and with error
+ * text cut down for a member's eyes ({@link ClaudeUsageScanLogService#listFor}).
+ *
+ * <p>// req: FR-USAGE-005, FR-USAGE-002, ADR-052, ADR-058, ADR-107
  */
 @RestController
 @RequestMapping("/api/v1/claude-usage")
 public class ClaudeUsageMeController {
 
     private final ClaudeUsageService usage;
+    private final ClaudeUsageScanLogService scanLogs;
 
-    public ClaudeUsageMeController(ClaudeUsageService usage) {
+    public ClaudeUsageMeController(ClaudeUsageService usage, ClaudeUsageScanLogService scanLogs) {
         this.usage = usage;
+        this.scanLogs = scanLogs;
     }
 
     /**
@@ -53,5 +64,24 @@ public class ClaudeUsageMeController {
     ApiDtos.ClaudeUsageMyDashboardResponse me(
             @AuthenticationPrincipal CurrentUser actor, @RequestParam(defaultValue = "7") int days) {
         return ApiDtos.ClaudeUsageMyDashboardResponse.of(usage.myDashboard(actor, days));
+    }
+
+    /**
+     * The caller's own scans that started on {@code from}..{@code to} (ISO
+     * dates, both or neither — neither is the last 7 days), newest first.
+     * Whose scans comes from the session, never a parameter.
+     */
+    @GetMapping("/me/scan-logs")
+    ApiDtos.ClaudeUsageScanLogListResponse myScanLogs(
+            @AuthenticationPrincipal CurrentUser actor,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return ApiDtos.ClaudeUsageScanLogListResponse.of(scanLogs.listFor(actor.account().email(), from, to));
+    }
+
+    /** One of the caller's own scans with its steps; anyone else's is a 404. */
+    @GetMapping("/me/scan-logs/{id}")
+    ApiDtos.ClaudeUsageScanLogDetailResponse myScanLog(@AuthenticationPrincipal CurrentUser actor, @PathVariable UUID id) {
+        return ApiDtos.ClaudeUsageScanLogDetailResponse.of(scanLogs.detailFor(actor.account().email(), id));
     }
 }

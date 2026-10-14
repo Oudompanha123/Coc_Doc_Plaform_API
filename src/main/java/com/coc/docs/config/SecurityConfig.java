@@ -293,6 +293,9 @@ public class SecurityConfig {
                         // And its scan-log sibling (ADR-099): same controller, same
                         // bearer check, records how one scan went.
                         .requestMatchers(HttpMethod.POST, "/api/ingest/scan-log").permitAll()
+                        // And the scan's start (ADR-107): same controller, same
+                        // bearer check, marks the scan "In progress" until its log.
+                        .requestMatchers(HttpMethod.POST, "/api/ingest/scan-log/start").permitAll()
 
                         // The claude-team-usage CLI's code exchange (ADR-060): a CLI
                         // has no session either. Protected by a one-time, two-minute
@@ -339,6 +342,14 @@ public class SecurityConfig {
                         // floor cannot let one account read another's usage.
                         // // req: FR-USAGE-005, ADR-052
                         .requestMatchers(HttpMethod.GET, "/api/v1/claude-usage/me").hasRole(AppRole.USER.name())
+                        // The caller's own scan logs (ADR-107), same reasoning:
+                        // ClaudeUsageMeController reads them by the session's
+                        // email, and someone else's scan id is a 404. The
+                        // team-wide scan logs stay under
+                        // /api/v1/admin/claude-usage at the super_admin floor.
+                        // // req: FR-USAGE-002, NFR-SEC-PII, ADR-107
+                        .requestMatchers(HttpMethod.GET, "/api/v1/claude-usage/me/scan-logs", "/api/v1/claude-usage/me/scan-logs/*")
+                        .hasRole(AppRole.USER.name())
 
                         // Liveness only. Carries no version, no configuration and
                         // no dependency status, so it discloses nothing.

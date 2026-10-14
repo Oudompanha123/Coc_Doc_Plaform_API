@@ -1507,7 +1507,24 @@ public final class ApiDtos {
 
     public record ClaudeUsageScanLogStepRequest(String key, String status, Instant at, @Size(max = 2000) String detail) {}
 
-    /** A row of the View Logs table — no steps; {@link ClaudeUsageScanLogDetailResponse} carries those. */
+    /** {@code POST /api/ingest/scan-log/start}: a scan has begun (ADR-107). Its result follows on {@code /scan-log}. */
+    public record ClaudeUsageScanStartRequest(
+            @NotNull UUID scanId,
+            @NotBlank @Email String email,
+            String trigger,
+            @Size(max = 40) String cliVersion,
+            @NotNull Instant startedAt) {
+
+        public ClaudeUsageScanLogService.Start toStart() {
+            return new ClaudeUsageScanLogService.Start(scanId, email, trigger, cliVersion, startedAt);
+        }
+    }
+
+    /**
+     * A row of the View Logs table — no steps; {@link ClaudeUsageScanLogDetailResponse} carries those.
+     * {@code status} is also {@code running} or {@code incomplete} (ADR-107), and then {@code finishedAt}
+     * and {@code durationMs} are null.
+     */
     public record ClaudeUsageScanLogSummaryResponse(
             UUID id,
             String scanRef,
@@ -1519,7 +1536,7 @@ public final class ApiDtos {
             Instant startedAt,
             Instant finishedAt,
             Instant receivedAt,
-            long durationMs,
+            Long durationMs,
             String status,
             String uploadStatus,
             Integer transcriptFiles,

@@ -28,33 +28,29 @@ import org.springframework.transaction.annotation.Transactional;
 public class LegalPageService {
 
     private final LegalPageVersionRepository versions;
-    private final LegalContentValidator legacyValidator;
     private final LegalDocumentValidator documentValidator;
     private final AuditRepository audit;
     private final ObjectMapper json;
 
     public LegalPageService(
             LegalPageVersionRepository versions,
-            LegalContentValidator legacyValidator,
             LegalDocumentValidator documentValidator,
             AuditRepository audit,
             ObjectMapper json) {
         this.versions = versions;
-        this.legacyValidator = legacyValidator;
         this.documentValidator = documentValidator;
         this.audit = audit;
         this.json = json;
     }
 
     /**
-     * Terms moved to the new plain-document shape (task "Admin 'Legal pages'
-     * editor ONLY"); Privacy deliberately kept the original highlights/CTA
-     * shape and its public page — see the ADR note in {@code
-     * V75__legal_pages_revert_privacy_shape.sql}. One validator per slug
-     * until (if ever) Privacy makes the same move.
+     * Both slugs share one shape since V81 — title, byline and one Markdown
+     * body — so one validator. {@code slug} stays in the signature because a
+     * per-slug rule is the likeliest next change.
      */
+    @SuppressWarnings("unused")
     private ValidationResult validate(LegalSlug slug, JsonNode content) {
-        return slug == LegalSlug.TERMS ? documentValidator.validate(content) : legacyValidator.validate(content);
+        return documentValidator.validate(content);
     }
 
     // -----------------------------------------------------------------------

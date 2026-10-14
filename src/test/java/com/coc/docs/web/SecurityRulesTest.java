@@ -983,6 +983,33 @@ class SecurityRulesTest {
         }
 
         @Test
+        void ingest_scan_start_is_reachable_without_a_session() throws Exception {
+            // Same permitAll() as /api/ingest/scan-log (ADR-107).
+            mvc.perform(post("/api/ingest/scan-log/start")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"scanId\":\"" + java.util.UUID.randomUUID() + "\",\"email\":\"a@example.com\","
+                                    + "\"startedAt\":\"2026-10-07T04:00:00Z\"}"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void my_scan_logs_need_a_session_and_admit_a_plain_user() throws Exception {
+            // ADR-107: every member reads their own scans; the team-wide read stays super_admin.
+            org.mockito.Mockito.when(claudeUsageScanLogService.listFor(
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(new com.coc.docs.claudeusage.ClaudeUsageScanLogService.Page(
+                            java.time.LocalDate.now(), java.time.LocalDate.now(), List.of(), false));
+
+            mvc.perform(get("/api/v1/claude-usage/me/scan-logs")).andExpect(status().isUnauthorized());
+            mvc.perform(get("/api/v1/claude-usage/me/scan-logs").with(as(AppRole.USER))).andExpect(status().isOk());
+            mvc.perform(get("/api/v1/claude-usage/me/scan-logs").with(as(AppRole.ADMIN))).andExpect(status().isOk());
+            mvc.perform(get("/api/v1/claude-usage/me/scan-logs/" + java.util.UUID.randomUUID()))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
         void scan_logs_are_admin_only() throws Exception {
             mvc.perform(get("/api/v1/admin/claude-usage/scan-logs")).andExpect(status().isUnauthorized());
             mvc.perform(get("/api/v1/admin/claude-usage/scan-logs").with(as(AppRole.USER)))

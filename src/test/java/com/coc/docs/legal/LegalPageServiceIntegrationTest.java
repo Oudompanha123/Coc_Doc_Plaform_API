@@ -25,13 +25,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * against a real PostgreSQL — the {@code legal_page_version} analogue of
  * {@code PageServiceIntegrationTest}.
  *
- * <p>Terms and Privacy are validated differently since the task "Admin
- * 'Legal pages' editor ONLY" moved Terms to the new plain-document shape
- * ({@link LegalDocumentValidator}) while Privacy kept the original
- * highlights/CTA shape ({@link LegalContentValidator}) — see {@link
- * LegalPageService#validate}. Tests here use whichever shape matches the
- * slug they exercise: {@code termsContent} for Terms, {@code
- * privacyContent} for Privacy.
+ * <p>Terms and Privacy share one shape since V81 — title, byline and one
+ * Markdown body ({@link LegalDocumentValidator}). {@code termsContent} and
+ * {@code privacyContent} build the same shape; the two names only say which
+ * slug a test exercises.
  */
 class LegalPageServiceIntegrationTest extends PostgresTestBase {
 
@@ -57,51 +54,18 @@ class LegalPageServiceIntegrationTest extends PostgresTestBase {
         editor = new CurrentUser(account, accounts.findPermissions(account.id()), new byte[] {1});
     }
 
-    /** Terms' new plain-document shape. */
+    /** The one legal-page shape (V81): sections are the body's `##` headings. */
     private JsonNode termsContent(String title) {
-        var node = json.createObjectNode()
+        return json.createObjectNode()
                 .put("title", title)
                 .put("subtitle", "Coc Docs Platform · Legal Information")
-                .put("status", "draft")
                 .put("lastUpdated", "2026-10-01")
                 .put("updatedBy", "the Platform Team")
-                .put("endNote", "*Subject to change.*");
-        node.set("sections", json.createArrayNode().add(termsSection("s1", "Section One")));
-        return node;
+                .put("body", "## Section One\n\nsome paragraph text");
     }
 
-    private JsonNode termsSection(String id, String title) {
-        return json.createObjectNode().put("id", id).put("title", title).put("body", "some paragraph text");
-    }
-
-    /** Privacy's original highlights/CTA shape. */
     private JsonNode privacyContent(String title) {
-        var node = json.createObjectNode()
-                .put("title", title)
-                .put("lead", "lead line")
-                .put("lastUpdated", "2026-10-01")
-                .put("status", "draft")
-                .put("bulletStyle", "circle");
-        node.set("highlights", json.createArrayNode()
-                .add(highlight("person", "H1"))
-                .add(highlight("document", "H2"))
-                .add(highlight("ban", "H3")));
-        node.put("plainLanguage", "some plain-language text");
-        node.set("sections", json.createArrayNode().add(privacySection("s1", "Section One")));
-        node.set("cta", json.createObjectNode().put("title", "Have a question?").put("text", "We can help."));
-        return node;
-    }
-
-    private JsonNode highlight(String icon, String title) {
-        return json.createObjectNode().put("icon", icon).put("title", title).put("text", "some text");
-    }
-
-    private JsonNode privacySection(String id, String title) {
-        return json.createObjectNode()
-                .put("id", id)
-                .put("title", title)
-                .put("icon", "document")
-                .put("body", "some paragraph text");
+        return termsContent(title);
     }
 
     // -----------------------------------------------------------------------
@@ -218,15 +182,14 @@ class LegalPageServiceIntegrationTest extends PostgresTestBase {
     void invalid_content_is_refused_before_persistence() {
         legal.openForEdit(LegalSlug.TERMS);
 
-        // No sections at all — required by LegalDocumentValidator.
-        var noSections = json.createObjectNode()
+        // No body at all — required by LegalDocumentValidator.
+        var noBody = json.createObjectNode()
                 .put("title", "Terms")
                 .put("lastUpdated", "2026-10-01")
-                .put("status", "draft")
-                .put("updatedBy", "the Platform Team");
-        noSections.set("sections", json.createArrayNode());
+                .put("updatedBy", "the Platform Team")
+                .put("body", "   ");
 
-        assertThatThrownBy(() -> legal.saveDraft(LegalSlug.TERMS, noSections, 1, editor))
+        assertThatThrownBy(() -> legal.saveDraft(LegalSlug.TERMS, noBody, 1, editor))
                 .isInstanceOf(ApiException.class)
                 .satisfies(e -> assertThat(((ApiException) e).status())
                         .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY))
