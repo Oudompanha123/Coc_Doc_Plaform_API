@@ -125,6 +125,12 @@ public class SecurityConfig {
                         // any key the named account does not actually hold.
                         // // req: FR-AUTH-005, NFR-SEC-PII, ADR-101
                         .requestMatchers(HttpMethod.GET, "/api/v1/avatars/**").permitAll()
+                        // Store app logos (ADR-108): public for the same <img>
+                        // reason as profile photos just above. A logo is only a
+                        // picture, addressed by a random app id; nothing about
+                        // an app's builds is reachable without a session.
+                        // // req: ADR-108
+                        .requestMatchers(HttpMethod.GET, "/api/v1/store/apps/*/logo").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/nonce").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/google").permitAll()
                         // ADR-014: applying for an account, and signing in with one. Public
@@ -607,6 +613,17 @@ public class SecurityConfig {
                         // for a draft, so nothing an admin has in progress leaks.
                         // // req: ADR-098
                         .requestMatchers(HttpMethod.GET, "/api/v1/announcements", "/api/v1/announcements/*")
+                        .hasRole(AppRole.USER.name())
+
+                        // --- Store, read side (ADR-108) -----------------------
+                        // Same shape as Announcements just above: every
+                        // signed-in role browses and downloads, GET only, and
+                        // the writes live under /api/v1/admin/store at the
+                        // admin floor. Not a hole in it: StoreService lists
+                        // public apps only and answers 404 for a private app's
+                        // build unless the caller is an admin.
+                        // // req: ADR-108
+                        .requestMatchers(HttpMethod.GET, "/api/v1/store/**")
                         .hasRole(AppRole.USER.name())
 
                         // --- Legal pages (Terms of Service / Privacy Policy) -

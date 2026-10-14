@@ -119,6 +119,23 @@ class NavServiceTest {
     }
 
     @Test
+    @DisplayName("refuses the Store's listing and every Store app page as a product key (ADR-108)")
+    void refusesStoreRoutes() {
+        for (String key : List.of("store", "store-1", "store-42")) {
+            assertThatThrownBy(() -> service.createProduct(key, "X", "layers", EDITOR))
+                    .as(key)
+                    .isInstanceOf(ApiException.class)
+                    .extracting(e -> ((ApiException) e).status())
+                    .isEqualTo(HttpStatus.BAD_REQUEST);
+        }
+        verify(repository, never()).insertProduct(any(), any(), any(), org.mockito.ArgumentMatchers.anyInt());
+
+        // Only the exact store-<digits> shape is taken.
+        assertThat(NavService.isReservedKey("store-front")).isFalse();
+        assertThat(NavService.isReservedKey("store-1a")).isFalse();
+    }
+
+    @Test
     @DisplayName("refuses a product key that is not kebab-case")
     void refusesMalformedKey() {
         assertThatThrownBy(() -> service.createProduct("Not Valid!", "X", "layers", EDITOR))

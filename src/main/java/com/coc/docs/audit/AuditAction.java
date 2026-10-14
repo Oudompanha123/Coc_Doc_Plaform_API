@@ -254,6 +254,17 @@ public final class AuditAction {
     public static final String ANNOUNCEMENT_UNPUBLISH = "announcement.unpublish";
     public static final String ANNOUNCEMENT_DELETE = "announcement.delete";
 
+    /**
+     * The Store page's apps and their builds (ADR-108). A build is audited
+     * against its app, with the version and environment in the detail — "who
+     * put this file on the Store" is one query on the app.
+     */
+    public static final String STORE_APP_CREATE = "store.app_create";
+    public static final String STORE_APP_UPDATE = "store.app_update";
+    public static final String STORE_APP_DELETE = "store.app_delete";
+    public static final String STORE_RELEASE_UPLOAD = "store.release_upload";
+    public static final String STORE_RELEASE_DELETE = "store.release_delete";
+
     /** Target types, for the {@code target_type} column. */
     public static final String TARGET_PAGE = "page";
 
@@ -290,4 +301,6 @@ public final class AuditAction {
 
     /** No separate parent "legal page" row exists — target_id points at the legal_page_version row itself. */
     public static final String TARGET_LEGAL_PAGE_VERSION = "legal_page_version";
+
+    public static final String TARGET_STORE_APP = "store_app";
 }
