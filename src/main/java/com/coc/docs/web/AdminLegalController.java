@@ -76,11 +76,23 @@ public class AdminLegalController {
         return respond(legal.publish(LegalController.parseSlug(slug), note, editor));
     }
 
-    /** Published/archived versions, newest first — no content, so the list stays light. */
+    /**
+     * Published/archived versions, newest first — no content, so the list
+     * stays light. Each row carries its publisher's name and photo.
+     *
+     * <p>A row with no publisher is either the version V68 seeded with the
+     * table (no account existed yet) or one whose publisher's account was
+     * later deleted ({@code on delete set null}) — publishing from the editor
+     * always records the person. The seeded row is always a page's earliest
+     * version, so only that one is flagged {@code initialVersion}; any other
+     * row without a publisher is not passed off as seeded.
+     */
     @GetMapping("/{slug}/versions")
     List<ApiDtos.LegalVersionSummaryResponse> versions(@PathVariable String slug) {
-        return legal.history(LegalController.parseSlug(slug)).stream()
-                .map(v -> ApiDtos.LegalVersionSummaryResponse.of(v, publisherName(v)))
+        List<LegalPageVersion> history = legal.history(LegalController.parseSlug(slug));
+        UUID earliest = history.isEmpty() ? null : history.get(history.size() - 1).id();
+        return history.stream()
+                .map(v -> ApiDtos.LegalVersionSummaryResponse.of(v, publisher(v), v.id().equals(earliest)))
                 .toList();
     }
 
@@ -105,9 +117,15 @@ public class AdminLegalController {
     }
 
     private String publisherName(LegalPageVersion version) {
+        Account publisher = publisher(version);
+        return publisher == null ? null : publisher.displayName();
+    }
+
+    /** Whoever published this version, or null — none recorded, or their account is gone. */
+    private Account publisher(LegalPageVersion version) {
         if (version.publishedBy() == null) {
             return null;
         }
-        return accounts.findById(version.publishedBy()).map(Account::displayName).orElse(null);
+        return accounts.findById(version.publishedBy()).orElse(null);
     }
 }
