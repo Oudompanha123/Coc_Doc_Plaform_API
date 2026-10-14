@@ -22,18 +22,18 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The Store page, as every signed-in user reads it (ADR-108).
+ * The Store page, as every signed-in user reads it (ADR-108, ADR-111).
  *
  * <p>{@code SecurityConfig} puts this prefix at the {@code user} floor, except
  * the logo, which is public for the same reason profile photos are
- * (ADR-101). Which apps a caller may see or download is
+ * (ADR-101). Which apps and builds a caller may reach is
  * {@link StoreService}'s answer: public ones, plus private ones for an admin.
  *
- * <p>// req: ADR-108
+ * <p>// req: ADR-108, ADR-111
  */
 @RestController
 @RequestMapping("/api/v1/store")
-@Tag(name = "Store", description = "The team's downloadable apps")
+@Tag(name = "Store", description = "The team's apps and their downloadable builds")
 public class StoreController {
 
     private final StoreService store;
@@ -42,7 +42,7 @@ public class StoreController {
         this.store = store;
     }
 
-    @Operation(summary = "Every public app that has at least one build, with its builds newest first")
+    @Operation(summary = "Every public app, alphabetically, with its builds newest first")
     @GetMapping("/apps")
     List<StoreDtos.AppResponse> apps() {
         return store.publicCatalog().stream().map(StoreDtos.AppResponse::of).toList();
@@ -50,7 +50,7 @@ public class StoreController {
 
     @Operation(
             summary = "One app, by the number in its page URL (/store-<number>)",
-            description = "404 for a private app, or one with no builds, unless the caller is an admin.")
+            description = "404 for a private app unless the caller is an admin.")
     @GetMapping("/apps/{number:\\d+}")
     StoreDtos.AppResponse app(@PathVariable long number, @AuthenticationPrincipal CurrentUser caller) {
         return StoreDtos.AppResponse.of(store.entryForReader(number, caller));
@@ -58,8 +58,9 @@ public class StoreController {
 
     @Operation(
             summary = "Download one build",
-            description = "Always an attachment. 404 for a private app's build unless the caller is an admin.")
-    @GetMapping("/releases/{id}/download")
+            description = "Always an attachment. 404 for a removed build, and for a private app's build unless the "
+                    + "caller is an admin.")
+    @GetMapping("/builds/{id}/download")
     ResponseEntity<Resource> download(@PathVariable UUID id, @AuthenticationPrincipal CurrentUser caller) {
         StoreService.Download file = store.download(id, caller);
         return ResponseEntity.ok()

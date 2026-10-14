@@ -4,10 +4,10 @@ import java.util.Locale;
 import java.util.Optional;
 
 /**
- * Which build of a version a release is. Mirrors
- * {@code store_app_release.environment}'s check constraint (V82).
+ * Which server a build is for — the "Server Type" of the Next version form.
+ * Mirrors {@code store_build.environment}'s check constraint (V85).
  *
- * <p>// req: ADR-108
+ * <p>// req: ADR-111
  */
 public enum StoreEnvironment {
     PRODUCTION,

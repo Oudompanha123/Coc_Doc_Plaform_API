@@ -127,8 +127,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/avatars/**").permitAll()
                         // Store app logos (ADR-108): public for the same <img>
                         // reason as profile photos just above. A logo is only a
-                        // picture, addressed by a random app id; nothing about
-                        // an app's builds is reachable without a session.
+                        // picture, addressed by a random app id; nothing else
+                        // about an app is reachable without a session.
                         // // req: ADR-108
                         .requestMatchers(HttpMethod.GET, "/api/v1/store/apps/*/logo").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/nonce").permitAll()
@@ -615,14 +615,14 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/announcements", "/api/v1/announcements/*")
                         .hasRole(AppRole.USER.name())
 
-                        // --- Store, read side (ADR-108) -----------------------
+                        // --- Store, read side (ADR-108, ADR-111) --------------
                         // Same shape as Announcements just above: every
                         // signed-in role browses and downloads, GET only, and
                         // the writes live under /api/v1/admin/store at the
                         // admin floor. Not a hole in it: StoreService lists
                         // public apps only and answers 404 for a private app's
-                        // build unless the caller is an admin.
-                        // // req: ADR-108
+                        // page or build unless the caller is an admin.
+                        // // req: ADR-108, ADR-111
                         .requestMatchers(HttpMethod.GET, "/api/v1/store/**")
                         .hasRole(AppRole.USER.name())
 

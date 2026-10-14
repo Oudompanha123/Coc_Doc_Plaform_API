@@ -1,25 +1,26 @@
 package com.coc.docs.store;
 
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 
 /**
- * The platforms the Store page offers, and which install files each accepts.
- * Mirrors {@code store_app.platform}'s check constraint (V82).
+ * The platforms a Store build can be for, and the install files each takes.
+ * Mirrors {@code store_build.platform}'s check constraint (V85).
  *
- * <p>The extension list is what keeps an upload an install file rather than
- * anything at all: the download route sends every file as an attachment, so
- * nothing here is ever rendered, but a Store that offered a {@code .html}
- * under an Android icon would still be wrong.
+ * <p>An app is not tied to a platform (ADR-111): an uploaded file's type says
+ * which platform it is for — {@link #ofFile}. The extension sets do not
+ * overlap, so a file name names at most one platform. A {@code .zip} is not
+ * accepted: it would fit Windows and macOS alike.
  *
- * <p>// req: ADR-108
+ * <p>// req: ADR-108, ADR-111
  */
 public enum StorePlatform {
     ANDROID(Set.of("apk", "aab")),
     IOS(Set.of("ipa")),
-    WINDOWS(Set.of("exe", "msi", "msix", "appx", "zip")),
-    MACOS(Set.of("dmg", "pkg", "zip"));
+    WINDOWS(Set.of("exe", "msi", "msix", "appx")),
+    MACOS(Set.of("dmg", "pkg"));
 
     private final Set<String> extensions;
 
@@ -27,7 +28,7 @@ public enum StorePlatform {
         this.extensions = extensions;
     }
 
-    /** As stored and as sent on the wire: lower case. */
+    /** As stored, as sent on the wire, and as the folder name on disk: lower case. */
     public String wire() {
         return name().toLowerCase(Locale.ROOT);
     }
@@ -36,9 +37,27 @@ public enum StorePlatform {
         return extensions;
     }
 
-    public boolean accepts(String fileName) {
+    /** The platform an install file is for, from its extension; empty for any other file. */
+    public static Optional<StorePlatform> ofFile(String fileName) {
+        if (fileName == null) {
+            return Optional.empty();
+        }
         int dot = fileName.lastIndexOf('.');
-        return dot >= 0 && extensions.contains(fileName.substring(dot + 1).toLowerCase(Locale.ROOT));
+        if (dot < 0) {
+            return Optional.empty();
+        }
+        String extension = fileName.substring(dot + 1).toLowerCase(Locale.ROOT);
+        return Arrays.stream(values()).filter(p -> p.extensions.contains(extension)).findFirst();
+    }
+
+    /** Every accepted extension, for an error message: ".aab, .apk, .appx, ...". */
+    public static String allExtensions() {
+        return Arrays.stream(values())
+                .flatMap(p -> p.extensions.stream())
+                .sorted()
+                .map(e -> "." + e)
+                .reduce((a, b) -> a + ", " + b)
+                .orElse("");
     }
 
     public static Optional<StorePlatform> parse(String value) {

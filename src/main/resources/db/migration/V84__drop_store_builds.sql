@@ -1,0 +1,33 @@
+-- Coc Docs Platform -- Store: the build feature is removed (ADR-110)
+--
+-- WHY
+-- The Store no longer holds install files ("builds"). An app is now its
+-- name, logo, description, platform and visibility only; there is nothing to
+-- upload, download, version or remove per environment. store_app_release
+-- held exactly that and nothing else, so it goes.
+--
+-- WHAT IS DROPPED
+-- store_app_release, created by V82 and extended by V83, and with it:
+--   - its primary key and the partial unique index store_app_release_live_key
+--     (V83, which replaced V82's unique (app_id, version, environment))
+--   - store_app_release_app_idx (V82)
+--   - its check constraints (version, environment, notes, size, sha256)
+--   - its foreign keys to store_app (on delete cascade) and to account
+--     (created_by, removed_by; on delete set null)
+-- Nothing references store_app_release, so no other table, view or
+-- constraint is affected. store_app -- every app, its app_no, name, logo and
+-- visibility -- is kept as is.
+--
+-- WHAT IS NOT TOUCHED
+-- - V82 and V83 are not edited: both may already be applied, and Flyway
+--   refuses an applied migration whose content changed.
+-- - audit_log rows written for builds (store.release_upload,
+--   store.release_delete) stay: the log is append-only (V1) and retained.
+-- - The build files on disk are not deleted by this migration -- a database
+--   migration does not reach the file system. They sit under the store root
+--   as {platform}/{version}/{environment}/{app id}/{file}; nothing reads
+--   them any more. App logos (logos/{app id}.{ext}) are still in use.
+--
+-- // req: ADR-110
+
+drop table store_app_release;

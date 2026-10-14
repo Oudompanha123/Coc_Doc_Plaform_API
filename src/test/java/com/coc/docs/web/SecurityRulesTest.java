@@ -686,8 +686,23 @@ class SecurityRulesTest {
     }
 
     @Nested
-    @DisplayName("store (ADR-108)")
+    @DisplayName("store (ADR-108, ADR-111)")
     class StorePath {
+
+        private com.coc.docs.store.StoreService.CatalogEntry entry(long number) {
+            java.time.Instant now = java.time.Instant.now();
+            return new com.coc.docs.store.StoreService.CatalogEntry(
+                    new com.coc.docs.store.StoreApp(java.util.UUID.randomUUID(), number, "App", "", com.coc.docs.store.StoreCategory.MOBILE, true, null, null,
+                            now, now),
+                    java.util.List.of());
+        }
+
+        /** A build upload's body: 4-byte big-endian length, UTF-8 JSON header, then the file. */
+        private byte[] framed(String headerJson, byte[] file) {
+            byte[] header = headerJson.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            return java.nio.ByteBuffer.allocate(4 + header.length + file.length)
+                    .putInt(header.length).put(header).put(file).array();
+        }
 
         @Test
         void a_plain_user_browses_the_store() throws Exception {
@@ -696,12 +711,8 @@ class SecurityRulesTest {
 
         @Test
         void a_plain_user_opens_an_app_page() throws Exception {
-            java.time.Instant now = java.time.Instant.now();
             org.mockito.Mockito.when(storeService.entryForReader(org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.any()))
-                    .thenReturn(new com.coc.docs.store.StoreService.CatalogEntry(
-                            new com.coc.docs.store.StoreApp(java.util.UUID.randomUUID(), 7, "App", "",
-                                    com.coc.docs.store.StorePlatform.ANDROID, true, null, null, now, now),
-                            java.util.List.of()));
+                    .thenReturn(entry(7));
             mvc.perform(get("/api/v1/store/apps/7").with(as(AppRole.USER))).andExpect(status().isOk());
         }
 
@@ -709,8 +720,60 @@ class SecurityRulesTest {
         void a_caller_with_no_session_browses_nothing() throws Exception {
             mvc.perform(get("/api/v1/store/apps")).andExpect(status().isUnauthorized());
             mvc.perform(get("/api/v1/store/apps/7")).andExpect(status().isUnauthorized());
-            mvc.perform(get("/api/v1/store/releases/" + java.util.UUID.randomUUID() + "/download"))
+            mvc.perform(get("/api/v1/store/builds/" + java.util.UUID.randomUUID() + "/download"))
                     .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void a_plain_user_cannot_upload_or_remove_builds() throws Exception {
+            String app = java.util.UUID.randomUUID().toString();
+            mvc.perform(post("/api/v1/admin/store/apps/" + app + "/builds").with(as(AppRole.USER))
+                            .contentType(MediaType.APPLICATION_OCTET_STREAM).content(new byte[] {1}))
+                    .andExpect(status().isForbidden());
+            mvc.perform(delete("/api/v1/admin/store/apps/" + app + "/builds/" + java.util.UUID.randomUUID())
+                            .with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void an_admin_uploads_the_next_version_as_header_then_file() throws Exception {
+            java.util.concurrent.atomic.AtomicReference<byte[]> received = new java.util.concurrent.atomic.AtomicReference<>();
+            org.mockito.Mockito.when(storeService.uploadBuild(
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.eq("1.2.2"),
+                            org.mockito.ArgumentMatchers.eq(java.util.List.of("production", "development")),
+                            org.mockito.ArgumentMatchers.eq("새 기능 — fixes"),
+                            org.mockito.ArgumentMatchers.eq("app.apk"),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(invocation -> {
+                        received.set(invocation.<java.io.InputStream>getArgument(5).readAllBytes());
+                        return entry(8);
+                    });
+            byte[] body = framed("""
+                    {"version":"1.2.2","environments":["production","development"],"notes":"새 기능 — fixes","fileName":"app.apk"}
+                    """, new byte[] {9, 8, 7});
+
+            mvc.perform(post("/api/v1/admin/store/apps/" + java.util.UUID.randomUUID() + "/builds")
+                            .with(as(AppRole.ADMIN))
+                            .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                            .content(body))
+                    .andExpect(status().isCreated());
+            org.assertj.core.api.Assertions.assertThat(received.get()).containsExactly(9, 8, 7);
+        }
+
+        @Test
+        void a_malformed_upload_header_is_a_bad_request() throws Exception {
+            String path = "/api/v1/admin/store/apps/" + java.util.UUID.randomUUID() + "/builds";
+            byte[] tooLong = java.nio.ByteBuffer.allocate(8).putInt(1 << 20).putInt(0).array();
+            mvc.perform(post(path).with(as(AppRole.ADMIN)).contentType(MediaType.APPLICATION_OCTET_STREAM).content(tooLong))
+                    .andExpect(status().isBadRequest());
+            mvc.perform(post(path).with(as(AppRole.ADMIN)).contentType(MediaType.APPLICATION_OCTET_STREAM)
+                            .content(framed("not json", new byte[] {1})))
+                    .andExpect(status().isBadRequest());
+            mvc.perform(post(path).with(as(AppRole.ADMIN)).contentType(MediaType.APPLICATION_OCTET_STREAM)
+                            .content(new byte[] {0, 0}))
+                    .andExpect(status().isBadRequest());
         }
 
         @Test

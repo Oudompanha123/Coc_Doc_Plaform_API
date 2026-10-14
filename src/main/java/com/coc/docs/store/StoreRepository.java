@@ -11,22 +11,24 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Reads and writes {@code store_app} and {@code store_app_release} rows (V82).
- * Knows nothing about the files on disk — {@link StoreFileStorage} does.
+ * Reads and writes {@code store_app} (V82, V85) and {@code store_build} (V85)
+ * rows. Knows nothing about the files on disk — {@link StoreFileStorage} does.
  *
- * <p>// req: ADR-108
+ * <p>// req: ADR-108, ADR-111, ADR-112
  */
 @Repository
 public class StoreRepository {
 
     private static final String APP_SELECT = """
-            select id, app_no, name, description, platform, is_public, logo_path, logo_type, created_at, updated_at
+            select id, app_no, name, description, category, is_public, logo_path, logo_type, created_at, updated_at
             from store_app
             """;
 
-    private static final String RELEASE_SELECT = """
-            select id, app_id, version, environment, notes, file_name, file_path, size_bytes, sha256, created_at
-            from store_app_release
+    private static final String BUILD_SELECT = """
+            select id, app_id, platform, version, environment, notes, file_name, file_path, size_bytes, sha256,
+                   created_at, removed_at,
+                   (select a.display_name from account a where a.id = store_build.created_by) as uploaded_by
+            from store_build
             """;
 
     private final JdbcClient jdbc;
@@ -41,7 +43,7 @@ public class StoreRepository {
                 rs.getLong("app_no"),
                 rs.getString("name"),
                 rs.getString("description"),
-                StorePlatform.parse(rs.getString("platform")).orElseThrow(),
+                StoreCategory.parse(rs.getString("category")).orElseThrow(),
                 rs.getBoolean("is_public"),
                 rs.getString("logo_path"),
                 rs.getString("logo_type"),
@@ -49,10 +51,11 @@ public class StoreRepository {
                 instant(rs, "updated_at"));
     }
 
-    private static StoreRelease mapRelease(ResultSet rs, int rowNum) throws SQLException {
-        return new StoreRelease(
+    private static StoreBuild mapBuild(ResultSet rs, int rowNum) throws SQLException {
+        return new StoreBuild(
                 rs.getObject("id", UUID.class),
                 rs.getObject("app_id", UUID.class),
+                StorePlatform.parse(rs.getString("platform")).orElseThrow(),
                 rs.getString("version"),
                 StoreEnvironment.parse(rs.getString("environment")).orElseThrow(),
                 rs.getString("notes"),
@@ -60,13 +63,17 @@ public class StoreRepository {
                 rs.getString("file_path"),
                 rs.getLong("size_bytes"),
                 rs.getString("sha256"),
-                instant(rs, "created_at"));
+                instant(rs, "created_at"),
+                instant(rs, "removed_at"),
+                rs.getString("uploaded_by"));
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {
         OffsetDateTime value = rs.getObject(column, OffsetDateTime.class);
         return value == null ? null : value.toInstant();
     }
+
+    // --- apps -------------------------------------------------------------------
 
     /** Every app, or only the public ones — alphabetical, as the page lists them. */
     public List<StoreApp> findApps(boolean publicOnly) {
@@ -85,47 +92,24 @@ public class StoreRepository {
         return jdbc.sql(APP_SELECT + " where app_no = ?").param(number).query(StoreRepository::mapApp).optional();
     }
 
-    /** Every release of the given apps, newest first. */
-    public List<StoreRelease> findReleases(List<UUID> appIds) {
-        if (appIds.isEmpty()) {
-            return List.of();
-        }
-        return jdbc.sql(RELEASE_SELECT + " where app_id = any(?) order by created_at desc")
-                .param(appIds.toArray(UUID[]::new))
-                .query(StoreRepository::mapRelease)
-                .list();
-    }
-
-    public Optional<StoreRelease> findRelease(UUID id) {
-        return jdbc.sql(RELEASE_SELECT + " where id = ?").param(id).query(StoreRepository::mapRelease).optional();
-    }
-
-    public boolean releaseExists(UUID appId, String version, StoreEnvironment environment) {
-        return jdbc.sql("select exists (select 1 from store_app_release where app_id = ? and version = ? and environment = ?)")
-                .params(appId, version, environment.wire())
-                .query(Boolean.class)
-                .single();
-    }
-
-    public UUID insertApp(String name, String description, StorePlatform platform, boolean isPublic, UUID actor) {
+    public UUID insertApp(String name, String description, StoreCategory category, boolean isPublic, UUID actor) {
         return jdbc.sql("""
-                        insert into store_app (name, description, platform, is_public, created_by, updated_by)
+                        insert into store_app (name, description, category, is_public, created_by, updated_by)
                         values (?, ?, ?, ?, ?, ?)
                         returning id
                         """)
-                .params(name, description, platform.wire(), isPublic, actor, actor)
+                .params(name, description, category.wire(), isPublic, actor, actor)
                 .query(UUID.class)
                 .single();
     }
 
-    /** Platform is fixed once set: its releases sit in that platform's folder. */
-    public boolean updateApp(UUID id, String name, String description, boolean isPublic, UUID actor) {
+    public boolean updateApp(UUID id, String name, String description, StoreCategory category, boolean isPublic, UUID actor) {
         return jdbc.sql("""
                         update store_app
-                        set name = ?, description = ?, is_public = ?, updated_at = now(), updated_by = ?
+                        set name = ?, description = ?, category = ?, is_public = ?, updated_at = now(), updated_by = ?
                         where id = ?
                         """)
-                .params(name, description, isPublic, actor, id)
+                .params(name, description, category.wire(), isPublic, actor, id)
                 .update() == 1;
     }
 
@@ -139,13 +123,66 @@ public class StoreRepository {
                 .update();
     }
 
-    /** Releases go with it (on delete cascade). */
+    /** Its builds go with it (on delete cascade). */
     public boolean deleteApp(UUID id) {
         return jdbc.sql("delete from store_app where id = ?").param(id).update() == 1;
     }
 
-    public UUID insertRelease(
+    /** Touches the app so "last updated" moves when a build is added or removed. */
+    public void touchApp(UUID id, UUID actor) {
+        jdbc.sql("update store_app set updated_at = now(), updated_by = ? where id = ?")
+                .params(actor, id)
+                .update();
+    }
+
+    /**
+     * Whether another app already has this name, ignoring case and
+     * surrounding spaces. An app spans platforms (ADR-111), so a name is
+     * unique across the whole Store.
+     */
+    public boolean appNameTaken(String name, UUID excludeId) {
+        return jdbc.sql("""
+                        select exists (select 1 from store_app
+                                       where lower(btrim(name)) = lower(btrim(?))
+                                         and (?::uuid is null or id <> ?::uuid))
+                        """)
+                .params(name, excludeId, excludeId)
+                .query(Boolean.class)
+                .single();
+    }
+
+    // --- builds -----------------------------------------------------------------
+
+    /** Every build of the given apps, removed ones included, newest first. */
+    public List<StoreBuild> findBuilds(List<UUID> appIds) {
+        if (appIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql(BUILD_SELECT + " where app_id = any(?) order by created_at desc")
+                .param(appIds.toArray(UUID[]::new))
+                .query(StoreRepository::mapBuild)
+                .list();
+    }
+
+    public Optional<StoreBuild> findBuild(UUID id) {
+        return jdbc.sql(BUILD_SELECT + " where id = ?").param(id).query(StoreRepository::mapBuild).optional();
+    }
+
+    /** Whether a live build of this platform and version exists in this environment. A removed one does not count. */
+    public boolean liveBuildExists(UUID appId, StorePlatform platform, String version, StoreEnvironment environment) {
+        return jdbc.sql("""
+                        select exists (select 1 from store_build
+                                       where app_id = ? and platform = ? and version = ? and environment = ?
+                                         and removed_at is null)
+                        """)
+                .params(appId, platform.wire(), version, environment.wire())
+                .query(Boolean.class)
+                .single();
+    }
+
+    public UUID insertBuild(
             UUID appId,
+            StorePlatform platform,
             String version,
             StoreEnvironment environment,
             String notes,
@@ -155,24 +192,26 @@ public class StoreRepository {
             String sha256,
             UUID actor) {
         return jdbc.sql("""
-                        insert into store_app_release
-                          (app_id, version, environment, notes, file_name, file_path, size_bytes, sha256, created_by)
-                        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        insert into store_build
+                          (app_id, platform, version, environment, notes, file_name, file_path, size_bytes, sha256,
+                           created_by)
+                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         returning id
                         """)
-                .params(appId, version, environment.wire(), notes, fileName, filePath, sizeBytes, sha256, actor)
+                .params(appId, platform.wire(), version, environment.wire(), notes, fileName, filePath, sizeBytes,
+                        sha256, actor)
                 .query(UUID.class)
                 .single();
     }
 
-    public boolean deleteRelease(UUID id) {
-        return jdbc.sql("delete from store_app_release where id = ?").param(id).update() == 1;
-    }
-
-    /** Touches the app so "last updated" moves when a build is added or removed. */
-    public void touchApp(UUID id, UUID actor) {
-        jdbc.sql("update store_app set updated_at = now(), updated_by = ? where id = ?")
+    /**
+     * Marks a live build removed. The row stays so the history can say
+     * "Removed"; the caller deletes the file. False if it was already removed —
+     * two admins removing at once produce one removal.
+     */
+    public boolean markBuildRemoved(UUID id, UUID actor) {
+        return jdbc.sql("update store_build set removed_at = now(), removed_by = ? where id = ? and removed_at is null")
                 .params(actor, id)
-                .update();
+                .update() == 1;
     }
 }

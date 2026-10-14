@@ -7,17 +7,19 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryNotEmptyException;
-import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.DigestOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,16 +28,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 /**
- * The Store's files on the backend's local disk (ADR-108):
+ * The Store's files on the backend's local disk (ADR-108, ADR-111):
  *
  * <pre>
- * {root}/{platform}/{version}/{environment}/{app id}/{file name}   an install file
+ * {root}/{platform}/{version}/{environment}/{app id}/{file name}   a build
  * {root}/logos/{app id}.{png|jpg|webp}                             an app's logo
  * </pre>
- *
- * <p>The app id level under the environment keeps two apps on the same
- * platform and version from sharing a folder — the layout the PM asked for
- * (platform, version, environment) stays the first three levels.
  *
  * <p><b>Every path is built here, from validated parts, and checked to stay
  * under the root.</b> A version is held to {@link #VERSION} and a file name is
@@ -49,14 +47,20 @@ import org.springframework.stereotype.Component;
  * be hundreds of megabytes — and are moved into place only once the size cap
  * and the content checks have passed.
  *
- * <p>// req: ADR-108
+ * <p><b>One upload, one or two environments.</b> A file published as both
+ * Production and Development is written once and placed in both environment
+ * folders — hard-linked where the file system allows it, copied otherwise —
+ * so each build owns its own path and can be removed without touching the
+ * other.
+ *
+ * <p>// req: ADR-108, ADR-111
  */
 @Component
 public class StoreFileStorage {
 
     private static final Logger log = LoggerFactory.getLogger(StoreFileStorage.class);
 
-    /** Mirrors {@code store_app_release.version}'s check constraint (V82). */
+    /** Mirrors {@code store_build.version}'s check constraint (V85). */
     static final Pattern VERSION = Pattern.compile("^[0-9A-Za-z]([0-9A-Za-z._+-]{0,62}[0-9A-Za-z])?$");
 
     static final int MAX_FILE_NAME = 120;
@@ -91,8 +95,11 @@ public class StoreFileStorage {
         return maxFileBytes;
     }
 
-    /** What was written: where (relative to the root), how big, and its SHA-256. */
-    public record StoredFile(String relativePath, long sizeBytes, String sha256) {}
+    /** A logo as written: where (relative to the root) and how big. */
+    public record StoredFile(String relativePath, long sizeBytes) {}
+
+    /** A build as written: its path per environment, its size and its SHA-256. */
+    public record StoredBuild(Map<StoreEnvironment, String> paths, long sizeBytes, String sha256) {}
 
     public static boolean isValidVersion(String version) {
         return version != null && VERSION.matcher(version).matches();
@@ -119,51 +126,77 @@ public class StoreFileStorage {
     }
 
     /**
-     * Streams an install file to
-     * {@code {platform}/{version}/{environment}/{appId}/{fileName}}.
-     * {@code fileName} must already be {@link #safeFileName safe}.
+     * Streams a build to {@code {platform}/{version}/{environment}/{appId}/{fileName}}
+     * for each of {@code environments}. {@code fileName} must already be
+     * {@link #safeFileName safe}.
      *
-     * <p>An existing file at that path is never replaced blindly — it may be a
-     * build someone has already downloaded. {@code existingIsStale} is asked
-     * only when one is there, and answers whether it is debris (no release row
-     * points at it, e.g. from a crash between the write and the insert) that
-     * may be overwritten; otherwise the upload is refused with 409.
+     * <p>An existing file at a target path is never replaced blindly — it may
+     * be a build someone has already downloaded. {@code existingIsStale} is
+     * asked only when one is there, and answers whether it is debris (no live
+     * build row points at it, e.g. from a crash between the write and the
+     * insert) that may be overwritten; otherwise the upload is refused with 409
+     * and nothing is written.
      */
-    public StoredFile storeRelease(
+    public StoredBuild storeBuild(
             StorePlatform platform,
             String version,
-            StoreEnvironment environment,
+            List<StoreEnvironment> environments,
             UUID appId,
             String fileName,
             InputStream body,
-            BooleanSupplier existingIsStale) {
+            Predicate<StoreEnvironment> existingIsStale) {
         if (!isValidVersion(version)) {
             throw ApiException.badRequest("the version may use letters, digits, '.', '_', '+' and '-' only");
         }
         if (!safeFileName(fileName).equals(fileName)) {
             throw new IllegalArgumentException("file name not sanitised: " + fileName);
         }
-        String relative = String.join("/", platform.wire(), version, environment.wire(), appId.toString(), fileName);
-        Path target = resolve(relative);
-        Written written = write(target, body, maxFileBytes, "the file is larger than the Store allows");
+        if (environments.isEmpty()) {
+            throw new IllegalArgumentException("no environment");
+        }
+        Map<StoreEnvironment, String> paths = new LinkedHashMap<>();
+        for (StoreEnvironment environment : environments) {
+            String relative = String.join("/", platform.wire(), version, environment.wire(), appId.toString(), fileName);
+            if (Files.exists(resolve(relative)) && !existingIsStale.test(environment)) {
+                throw ApiException.conflict("this app already has a " + platform.wire() + " " + environment.wire()
+                        + " build of version " + version);
+            }
+            paths.put(environment, relative);
+        }
+
+        Path first = resolve(paths.values().iterator().next());
+        Written written = write(first, body, maxFileBytes, "the file is larger than the Store allows");
         if (written.size() == 0) {
             deleteQuietly(written.temp());
             throw ApiException.badRequest("the file is empty");
         }
+        List<Path> placed = new ArrayList<>();
         try {
-            Files.move(written.temp(), target);
-        } catch (FileAlreadyExistsException e) {
-            if (!existingIsStale.getAsBoolean()) {
-                deleteQuietly(written.temp());
-                throw ApiException.conflict(
-                        "this app already has a " + environment.wire() + " build of version " + version);
+            commit(written.temp(), first);
+            placed.add(first);
+            for (String relative : paths.values()) {
+                Path target = resolve(relative);
+                if (target.equals(first)) {
+                    continue;
+                }
+                Files.createDirectories(target.getParent());
+                Files.deleteIfExists(target);
+                try {
+                    Files.createLink(target, first);
+                } catch (UnsupportedOperationException | IOException e) {
+                    Files.copy(first, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+                placed.add(target);
             }
-            commit(written.temp(), target);
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            placed.forEach(StoreFileStorage::deleteQuietly);
             deleteQuietly(written.temp());
-            throw new UncheckedIOException("Could not move the uploaded file into place", e);
+            if (e instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw new UncheckedIOException("Could not place the uploaded file", (IOException) e);
         }
-        return new StoredFile(relative, written.size(), written.sha256());
+        return new StoredBuild(paths, written.size(), written.sha256());
     }
 
     /**
@@ -179,13 +212,9 @@ public class StoreFileStorage {
         String relative = "logos/" + appId + "." + extension;
         Path target = resolve(relative);
         Written written = write(target, body, MAX_LOGO_BYTES, "a logo must be 2 MB or smaller");
-        try {
-            if (!matchesMagic(written.temp(), contentType)) {
-                throw ApiException.badRequest("the logo's content is not the image type it claims to be");
-            }
-        } catch (ApiException e) {
+        if (!matchesMagic(written.temp(), contentType)) {
             deleteQuietly(written.temp());
-            throw e;
+            throw ApiException.badRequest("the logo's content is not the image type it claims to be");
         }
         commit(written.temp(), target);
         // A logo replaced by one of another type leaves its old file behind otherwise.
@@ -194,7 +223,7 @@ public class StoreFileStorage {
                 deleteQuietly(resolve("logos/" + appId + "." + other));
             }
         }
-        return new StoredFile(relative, written.size(), written.sha256());
+        return new StoredFile(relative, written.size());
     }
 
     /** The absolute path of a stored file, refusing anything that would leave the root. */
@@ -208,8 +237,9 @@ public class StoreFileStorage {
 
     /**
      * Removes a stored file and then any folders it leaves empty, up to (not
-     * including) the root — so deleting the last build of a version does not
-     * leave an empty {@code android/1.2.0/production/} tree behind.
+     * including) the root — so removing the last build of a version does not
+     * leave an empty {@code android/1.2.0/production/} tree behind. A missing
+     * file is not an error.
      */
     public void delete(String relativePath) {
         Path file = resolve(relativePath);

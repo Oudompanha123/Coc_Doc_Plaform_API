@@ -255,15 +255,19 @@ public final class AuditAction {
     public static final String ANNOUNCEMENT_DELETE = "announcement.delete";
 
     /**
-     * The Store page's apps and their builds (ADR-108). A build is audited
-     * against its app, with the version and environment in the detail — "who
-     * put this file on the Store" is one query on the app.
+     * The Store page's apps and their builds (ADR-108, ADR-111). A build is
+     * audited against its app, with platform, version and environment in the
+     * detail — "who put this file on the Store" is one query on the app.
+     *
+     * <p>{@code store.release_upload} / {@code store.release_delete} were the
+     * names under the first build design (ADR-108, removed by ADR-110); rows
+     * written with them stay in the append-only log, readable as raw text.
      */
     public static final String STORE_APP_CREATE = "store.app_create";
     public static final String STORE_APP_UPDATE = "store.app_update";
     public static final String STORE_APP_DELETE = "store.app_delete";
-    public static final String STORE_RELEASE_UPLOAD = "store.release_upload";
-    public static final String STORE_RELEASE_DELETE = "store.release_delete";
+    public static final String STORE_BUILD_UPLOAD = "store.build_upload";
+    public static final String STORE_BUILD_REMOVE = "store.build_remove";
 
     /** Target types, for the {@code target_type} column. */
     public static final String TARGET_PAGE = "page";
