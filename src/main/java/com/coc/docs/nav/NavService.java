@@ -36,7 +36,16 @@ public class NavService {
     private static final Set<String> RESERVED_PRODUCT_KEYS = Set.of(
             "login", "register", "overview", "settings", "users-roles", "content", "welcome", "claude-usage",
             "forgot-password", "reset-password", "create-password", "docs", "auth", "api", "idea", "workflow",
-            "ax-renewal", "attendance", "home", "meeting", "my-claude-usage");
+            "ax-renewal", "attendance", "home", "meeting", "my-claude-usage", "store");
+
+    /** {@code /store-<number>} is a Store app's page (ADR-108) — the frontend
+     *  middleware rewrites every such path before product routing sees it, so
+     *  a product with a key like this could never be opened. */
+    private static final Pattern STORE_APP_PAGE = Pattern.compile("store-\\d+");
+
+    static boolean isReservedKey(String key) {
+        return RESERVED_PRODUCT_KEYS.contains(key) || STORE_APP_PAGE.matcher(key).matches();
+    }
 
     /** The ADMINISTRATION-block items a rename/move override may target —
      *  every other key is refused rather than left to accumulate junk rows
@@ -193,7 +202,7 @@ public class NavService {
 
     public NavProduct createProduct(String key, String label, String icon, CurrentUser editor) {
         validateKey(key, "product key");
-        if (RESERVED_PRODUCT_KEYS.contains(key)) {
+        if (isReservedKey(key)) {
             throw ApiException.badRequest("\"" + key + "\" is already a route in this app and can't be used as a product key");
         }
         if (repository.productExists(key)) {
@@ -293,7 +302,7 @@ public class NavService {
         if (base.equals(currentKey)) {
             return currentKey;
         }
-        if (RESERVED_PRODUCT_KEYS.contains(base)) {
+        if (isReservedKey(base)) {
             base = withinSlugLimit(base + "-docs");
         }
         if (!slugConflicts(base, currentKey)) {
