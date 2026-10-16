@@ -8,8 +8,6 @@ import com.coc.docs.web.ApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -19,8 +17,11 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * The Store page (ADR-108, ADR-111): apps, their builds, and the files
@@ -46,6 +47,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class StoreService {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(StoreService.class);
+
     static final int MAX_NAME = 80;
     static final int MAX_TEXT = 2000;
 
@@ -53,11 +56,11 @@ public class StoreService {
     static final int MAX_NOTES = 1500;
 
     private final StoreRepository store;
-    private final StoreFileStorage files;
+    private final StoreFiles files;
     private final AuditRepository audit;
     private final ObjectMapper json;
 
-    public StoreService(StoreRepository store, StoreFileStorage files, AuditRepository audit, ObjectMapper json) {
+    public StoreService(StoreRepository store, StoreFiles files, AuditRepository audit, ObjectMapper json) {
         this.store = store;
         this.files = files;
         this.audit = audit;
@@ -68,7 +71,10 @@ public class StoreService {
     public record CatalogEntry(StoreApp app, List<StoreBuild> builds) {}
 
     /** A file to send: where it is on disk, what to call it, and its content type. */
-    public record Download(Path path, String fileName, String contentType) {}
+    public record Download(StoreFiles.Delivery delivery, String fileName, String contentType) {}
+
+    /** A logo to send: its bytes and content type. */
+    public record Logo(Resource body, String contentType) {}
 
     /** Every public app — what a signed-in user sees. */
     @Transactional(readOnly = true)
@@ -83,17 +89,23 @@ public class StoreService {
     }
 
     /**
-     * One app's page ({@code /store-<number>}). A user gets a public app and a
-     * 404 for anything else, so a private app's number cannot be confirmed by
+     * One app's page ({@code /store/app-<number>}). Anyone, signed in or not
+     * ({@code caller} is null without a session), gets a public app and a 404
+     * for anything else, so a private app's number cannot be confirmed by
      * trying it. An admin sees every app.
      */
     @Transactional(readOnly = true)
     public CatalogEntry entryForReader(long number, CurrentUser caller) {
         StoreApp app = store.findAppByNumber(number).orElseThrow(() -> ApiException.notFound("app"));
-        if (!app.isPublic() && !caller.role().isAtLeast(AppRole.ADMIN)) {
+        if (!app.isPublic() && !isAdmin(caller)) {
             throw ApiException.notFound("app");
         }
         return new CatalogEntry(app, store.findBuilds(List.of(app.id())));
+    }
+
+    /** A visitor with no session arrives as a null caller; they are never an admin. */
+    private static boolean isAdmin(CurrentUser caller) {
+        return caller != null && caller.role().isAtLeast(AppRole.ADMIN);
     }
 
     private List<CatalogEntry> catalog(List<StoreApp> apps) {
@@ -173,7 +185,7 @@ public class StoreService {
     public CatalogEntry uploadLogo(UUID id, String contentType, InputStream body, CurrentUser caller) {
         app(id);
         String type = contentType == null ? "" : contentType.split(";")[0].trim().toLowerCase(Locale.ROOT);
-        StoreFileStorage.StoredFile stored = files.storeLogo(id, type, body);
+        StoreFiles.StoredFile stored = files.storeLogo(id, type, body);
         store.setLogo(id, stored.relativePath(), type, caller.id());
         return entry(id);
     }
@@ -200,7 +212,7 @@ public class StoreService {
             CurrentUser caller) {
         StoreApp app = app(appId);
         String cleanVersion = version == null ? "" : version.trim();
-        if (!StoreFileStorage.isValidVersion(cleanVersion)) {
+        if (!StoreFileRules.isValidVersion(cleanVersion)) {
             throw ApiException.badRequest(
                     "the version must start and end with a letter or digit and use only letters, digits, '.', '_', '+' and '-'");
         }
@@ -213,7 +225,7 @@ public class StoreService {
             throw ApiException.badRequest("choose Production, Development, or both");
         }
         String cleanNotes = cleanText(notes, "what's new", MAX_NOTES);
-        String fileName = StoreFileStorage.safeFileName(originalFileName);
+        String fileName = StoreFileRules.safeFileName(originalFileName);
         StorePlatform platform = StorePlatform.ofFile(fileName)
                 .orElseThrow(() -> ApiException.badRequest("the file must be an app installer: " + StorePlatform.allExtensions()));
         if (!app.category().includes(platform)) {
@@ -227,7 +239,7 @@ public class StoreService {
             }
         }
 
-        StoreFileStorage.StoredBuild stored = files.storeBuild(
+        StoreFiles.StoredBuild stored = files.storeBuild(
                 platform, cleanVersion, List.copyOf(envs), appId, fileName, body,
                 env -> !store.liveBuildExists(appId, platform, cleanVersion, env));
         List<UUID> inserted = new ArrayList<>();
@@ -273,8 +285,34 @@ public class StoreService {
                 .put("platform", build.platform().wire())
                 .put("version", build.version())
                 .put("environment", build.environment().wire()));
-        files.delete(build.filePath());
+        deleteFileAfterCommit(build);
         return entry(appId);
+    }
+
+    /**
+     * Frees the build's file once the "removed" mark is committed, so a failed
+     * commit never leaves a live row with no file behind it. A file that is
+     * already gone, or one that cannot be deleted, is logged and skipped: the
+     * removal itself stands, and a stray file costs storage, not correctness.
+     */
+    private void deleteFileAfterCommit(StoreBuild build) {
+        Runnable delete = () -> {
+            try {
+                files.delete(build.filePath());
+            } catch (RuntimeException e) {
+                log.warn("Build {} is removed but its file {} could not be deleted", build.id(), build.filePath(), e);
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    delete.run();
+                }
+            });
+        } else {
+            delete.run();
+        }
     }
 
     /**
@@ -287,14 +325,13 @@ public class StoreService {
         StoreBuild build = store.findBuild(buildId).filter(StoreBuild::isLive)
                 .orElseThrow(() -> ApiException.notFound("build"));
         StoreApp app = store.findApp(build.appId()).orElseThrow(() -> ApiException.notFound("build"));
-        if (!app.isPublic() && !caller.role().isAtLeast(AppRole.ADMIN)) {
+        if (!app.isPublic() && !isAdmin(caller)) {
             throw ApiException.notFound("build");
         }
-        Path path = files.resolve(build.filePath());
-        if (!Files.isRegularFile(path)) {
-            throw ApiException.notFound("build file");
-        }
-        return new Download(path, build.fileName(), contentType(build.fileName()));
+        return new Download(
+                files.deliver(build.filePath(), build.fileName(), contentType(build.fileName())),
+                build.fileName(),
+                contentType(build.fileName()));
     }
 
     /** Android installs an APK it is handed only when it is labelled as one. */
@@ -310,13 +347,9 @@ public class StoreService {
      * it answers by app id only and holds nothing but a picture.
      */
     @Transactional(readOnly = true)
-    public Download logo(UUID appId) {
+    public Logo logo(UUID appId) {
         StoreApp app = store.findApp(appId).filter(StoreApp::hasLogo).orElseThrow(() -> ApiException.notFound("logo"));
-        Path path = files.resolve(app.logoPath());
-        if (!Files.isRegularFile(path)) {
-            throw ApiException.notFound("logo");
-        }
-        return new Download(path, path.getFileName().toString(), app.logoType());
+        return new Logo(files.openLogo(app.logoPath()), app.logoType());
     }
 
     private StoreApp app(UUID id) {

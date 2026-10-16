@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.coc.docs.account.AccountService;
@@ -717,10 +719,17 @@ class SecurityRulesTest {
         }
 
         @Test
-        void a_caller_with_no_session_browses_nothing() throws Exception {
-            mvc.perform(get("/api/v1/store/apps")).andExpect(status().isUnauthorized());
-            mvc.perform(get("/api/v1/store/apps/7")).andExpect(status().isUnauthorized());
-            mvc.perform(get("/api/v1/store/builds/" + java.util.UUID.randomUUID() + "/download"))
+        void a_caller_with_no_session_reaches_the_public_store_reads() throws Exception {
+            org.mockito.Mockito.when(storeService.entryForReader(org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(entry(7));
+            mvc.perform(get("/api/v1/store/apps")).andExpect(status().isOk());
+            mvc.perform(get("/api/v1/store/apps/7")).andExpect(status().isOk());
+        }
+
+        @Test
+        void a_caller_with_no_session_writes_nothing() throws Exception {
+            mvc.perform(get("/api/v1/admin/store/apps")).andExpect(status().isUnauthorized());
+            mvc.perform(delete("/api/v1/admin/store/apps/" + java.util.UUID.randomUUID()))
                     .andExpect(status().isUnauthorized());
         }
 
@@ -774,6 +783,37 @@ class SecurityRulesTest {
             mvc.perform(post(path).with(as(AppRole.ADMIN)).contentType(MediaType.APPLICATION_OCTET_STREAM)
                             .content(new byte[] {0, 0}))
                     .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void a_visitor_with_no_session_gets_a_presigned_link_for_a_public_build() throws Exception {
+            java.util.UUID build = java.util.UUID.randomUUID();
+            org.mockito.Mockito.doReturn(
+                    new com.coc.docs.store.StoreService.Download(
+                            new com.coc.docs.store.StoreFiles.Delivery.Presigned(
+                                    java.net.URI.create("https://s3.example.com/bucket/key?X-Amz-Expires=300"),
+                                    java.time.Instant.parse("2026-10-16T10:00:00Z")),
+                            "app.apk", "application/vnd.android.package-archive"))
+                    .when(storeService).download(org.mockito.ArgumentMatchers.eq(build), org.mockito.ArgumentMatchers.any());
+
+            mvc.perform(get("/api/v1/store/builds/" + build + "/download-link"))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("no-store")))
+                    .andExpect(jsonPath("$.presigned").value(true))
+                    .andExpect(jsonPath("$.url").value("https://s3.example.com/bucket/key?X-Amz-Expires=300"));
+            // The plain route redirects to the same URL rather than streaming through the backend.
+            mvc.perform(get("/api/v1/store/builds/" + build + "/download"))
+                    .andExpect(status().isFound())
+                    .andExpect(header().string("Location", "https://s3.example.com/bucket/key?X-Amz-Expires=300"));
+        }
+
+        @Test
+        void a_private_or_removed_build_has_no_link_for_a_visitor() throws Exception {
+            java.util.UUID build = java.util.UUID.randomUUID();
+            org.mockito.Mockito.doThrow(ApiException.notFound("build"))
+                    .when(storeService).download(org.mockito.ArgumentMatchers.eq(build), org.mockito.ArgumentMatchers.any());
+            mvc.perform(get("/api/v1/store/builds/" + build + "/download-link"))
+                    .andExpect(status().isNotFound());
         }
 
         @Test

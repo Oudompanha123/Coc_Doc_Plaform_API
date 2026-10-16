@@ -45,6 +45,8 @@ public final class StoreDtos {
             Instant createdAt,
             /** Null while live; set once an admin removed it. */
             Instant removedAt,
+            /** "active" or "removed" — a removed build keeps its row for the history, but its file is gone. */
+            String status,
             /** Who uploaded it; null if that account no longer exists. */
             String uploadedBy,
             /** Null for a removed build — there is no file behind it any more. */
@@ -62,10 +64,14 @@ public final class StoreDtos {
                     b.sha256(),
                     b.createdAt(),
                     b.removedAt(),
+                    b.isLive() ? "active" : "removed",
                     b.uploadedBy(),
                     b.isLive() ? "/api/v1/store/builds/" + b.id() + "/download" : null);
         }
     }
+
+    /** Where to fetch a build from: a presigned S3 URL, or this API's own download route. */
+    public record DownloadLink(String url, boolean presigned, Instant expiresAt) {}
 
     public record AppResponse(
             UUID id,

@@ -2,16 +2,11 @@ package com.coc.docs.storage;
 
 import com.coc.docs.account.AvatarStorage;
 import com.coc.docs.config.AppProperties;
-import java.net.URI;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
-import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
-import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 /**
@@ -58,33 +53,15 @@ public class AvatarStorageConfig {
                     storage.region());
         }
 
-        S3Client client = S3Client.builder()
-                .endpointOverride(URI.create(storage.endpoint()))
-                .region(Region.of(storage.region()))
-                .credentialsProvider(StaticCredentialsProvider.create(
-                        AwsBasicCredentials.create(storage.accessKeyId(), storage.secretAccessKey())))
-                // Path-style (host/bucket/key), not virtual-hosted (bucket.host/key):
-                // the one addressing scheme every S3-compatible provider this
-                // system might eventually run against — MinIO included — is
-                // guaranteed to support, which matters precisely because the
-                // provider itself is still undecided.
-                .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())
-                .build();
-
-        // Built from the same endpoint, region and credentials as the client
-        // above, and with path-style for the same reason: a presigned URL is
-        // only valid for the addressing scheme it was signed under, so a
-        // presigner that disagreed with the client would produce URLs that
-        // 403 rather than ones that merely look different (ADR-101).
-        S3Presigner presigner = S3Presigner.builder()
-                .endpointOverride(URI.create(storage.endpoint()))
-                .region(Region.of(storage.region()))
-                .credentialsProvider(StaticCredentialsProvider.create(
-                        AwsBasicCredentials.create(storage.accessKeyId(), storage.secretAccessKey())))
-                .serviceConfiguration(S3Configuration.builder()
-                        .pathStyleAccessEnabled(true)
-                        .build())
-                .build();
+        // Built by S3Clients, shared with the Store (ADR-115): path-style, the
+        // one addressing scheme every S3-compatible provider this system might
+        // run against supports, which matters because the provider itself is
+        // still undecided. The presigner agrees with the client on endpoint,
+        // region, credentials and path-style, because a presigned URL is only
+        // valid for the addressing scheme it was signed under, so a presigner
+        // that disagreed would produce URLs that 403 (ADR-101).
+        S3Client client = S3Clients.client(storage);
+        S3Presigner presigner = S3Clients.presigner(storage);
 
         return new S3AvatarStorage(client, presigner, storage.bucket(), storage.endpoint());
     }
