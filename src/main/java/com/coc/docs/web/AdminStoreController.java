@@ -109,7 +109,7 @@ public class AdminStoreController {
     @Operation(
             summary = "Upload or replace an app's banner picture",
             description = "The wide picture behind the app in the Store's featured banner (ADR-117). Body: the image "
-                    + "bytes. Content-Type image/png, image/jpeg or image/webp; 5 MB at most.")
+                    + "bytes. Content-Type image/png, image/jpeg or image/webp; 25 MB at most.")
     @PutMapping("/{id}/banner")
     StoreDtos.AppResponse banner(
             @PathVariable UUID id,

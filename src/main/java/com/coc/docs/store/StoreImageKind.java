@@ -10,8 +10,8 @@ package com.coc.docs.store;
 public enum StoreImageKind {
     /** {@code logos/{appId}.{ext}}, 2 MB — an icon, not a photo album. */
     LOGO("logo", "logos", 2L * 1024 * 1024),
-    /** {@code banners/{appId}.{ext}}, 5 MB — a wide picture, still compressed for the web. */
-    BANNER("banner", "banners", 5L * 1024 * 1024);
+    /** {@code banners/{appId}.{ext}}, 25 MB — a wide, high-resolution picture (product owner, 2026-10-16; was 5 MB). */
+    BANNER("banner", "banners", 25L * 1024 * 1024);
 
     private final String noun;
     private final String folder;
@@ -36,7 +36,7 @@ public enum StoreImageKind {
         return maxBytes;
     }
 
-    /** "2 MB" / "5 MB". */
+    /** "2 MB" / "25 MB". */
     String maxLabel() {
         return (maxBytes / (1024 * 1024)) + " MB";
     }
