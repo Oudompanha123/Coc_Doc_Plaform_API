@@ -36,7 +36,9 @@ public class NavService {
     private static final Set<String> RESERVED_PRODUCT_KEYS = Set.of(
             "login", "register", "overview", "settings", "users-roles", "content", "welcome", "claude-usage",
             "forgot-password", "reset-password", "create-password", "docs", "auth", "api", "idea", "workflow",
-            "ax-renewal", "attendance", "home", "meeting", "my-claude-usage", "store");
+            "ax-renewal", "attendance", "home", "meeting", "my-claude-usage", "store",
+            // Locale URL prefixes (ADR-116) — /km/... is Khmer, never a product.
+            "en", "km", "kr");
 
     /** {@code /store-<number>} is a Store app's page (ADR-108) — the frontend
      *  middleware rewrites every such path before product routing sees it, so
