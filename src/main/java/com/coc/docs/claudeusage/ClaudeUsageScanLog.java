@@ -12,6 +12,7 @@ import java.util.UUID;
  *
  * @param memberId     the roster row the email matched when the log arrived, or null
  * @param displayName  the roster's display name, or null when the email has no roster row
+ * @param avatarUrl    the profile picture of the platform account with that email, or null (initials instead)
  * @param startedAt    the PC's own clock — it describes the scan; {@code receivedAt} is server time
  * @param finishedAt   the PC's own clock; null while the scan is {@code running} (ADR-107)
  * @param receivedAt   server time the latest message for this scan arrived — its start, then its result
@@ -29,6 +30,7 @@ public record ClaudeUsageScanLog(
         UUID memberId,
         String email,
         String displayName,
+        String avatarUrl,
         String trigger,
         String cliVersion,
         Instant startedAt,
@@ -67,19 +69,19 @@ public record ClaudeUsageScanLog(
     }
 
     public ClaudeUsageScanLog withSteps(List<Step> newSteps) {
-        return new ClaudeUsageScanLog(id, clientScanId, memberId, email, displayName, trigger, cliVersion, startedAt,
+        return new ClaudeUsageScanLog(id, clientScanId, memberId, email, displayName, avatarUrl, trigger, cliVersion, startedAt,
                 finishedAt, receivedAt, status, uploadStatus, transcriptFiles, responses, duplicates, newTokens,
                 daysUploaded, errorStep, errorMessage, newSteps);
     }
 
     public ClaudeUsageScanLog withStatus(String newStatus) {
-        return new ClaudeUsageScanLog(id, clientScanId, memberId, email, displayName, trigger, cliVersion, startedAt,
+        return new ClaudeUsageScanLog(id, clientScanId, memberId, email, displayName, avatarUrl, trigger, cliVersion, startedAt,
                 finishedAt, receivedAt, newStatus, uploadStatus, transcriptFiles, responses, duplicates, newTokens,
                 daysUploaded, errorStep, errorMessage, steps);
     }
 
     public ClaudeUsageScanLog withErrorMessage(String newErrorMessage) {
-        return new ClaudeUsageScanLog(id, clientScanId, memberId, email, displayName, trigger, cliVersion, startedAt,
+        return new ClaudeUsageScanLog(id, clientScanId, memberId, email, displayName, avatarUrl, trigger, cliVersion, startedAt,
                 finishedAt, receivedAt, status, uploadStatus, transcriptFiles, responses, duplicates, newTokens,
                 daysUploaded, errorStep, newErrorMessage, steps);
     }

@@ -1531,6 +1531,7 @@ public final class ApiDtos {
             UUID memberId,
             String email,
             String displayName,
+            String avatarUrl,
             String trigger,
             String cliVersion,
             Instant startedAt,
@@ -1549,7 +1550,7 @@ public final class ApiDtos {
 
         public static ClaudeUsageScanLogSummaryResponse of(ClaudeUsageScanLog log) {
             return new ClaudeUsageScanLogSummaryResponse(
-                    log.id(), log.scanRef(), log.memberId(), log.email(), log.displayName(), log.trigger(),
+                    log.id(), log.scanRef(), log.memberId(), log.email(), log.displayName(), log.avatarUrl(), log.trigger(),
                     log.cliVersion(), log.startedAt(), log.finishedAt(), log.receivedAt(), log.durationMs(),
                     log.status(), log.uploadStatus(), log.transcriptFiles(), log.responses(), log.duplicates(),
                     log.newTokens(), log.daysUploaded(), log.errorStep(), log.errorMessage());

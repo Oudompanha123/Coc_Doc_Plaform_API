@@ -284,7 +284,7 @@ class ClaudeUsageScanLogServiceTest {
     /** A stored row, as the repository reads it back. */
     private static ClaudeUsageScanLog row(String email, String status, Instant finishedAt, Instant receivedAt, String error) {
         return new ClaudeUsageScanLog(
-                UUID.randomUUID(), UUID.randomUUID(), null, email, null, "scheduled", "0.6.0",
+                UUID.randomUUID(), UUID.randomUUID(), null, email, null, null, "scheduled", "0.6.0",
                 NOW.minusSeconds(3600), finishedAt, receivedAt, status, "not-attempted",
                 null, null, null, null, null, error == null ? null : "upload", error, List.of());
     }
@@ -450,7 +450,7 @@ class ClaudeUsageScanLogServiceTest {
     @DisplayName("the scan ID is the start time in Phnom Penh plus four characters of the client id")
     void scanRef() {
         ClaudeUsageScanLog log = new ClaudeUsageScanLog(
-                UUID.randomUUID(), UUID.fromString("3f2a0000-0000-0000-0000-000000000000"), null, "a@example.com", null,
+                UUID.randomUUID(), UUID.fromString("3f2a0000-0000-0000-0000-000000000000"), null, "a@example.com", null, null,
                 "scheduled", "0.4.0", Instant.parse("2026-10-07T04:00:01Z"), Instant.parse("2026-10-07T04:00:09Z"), NOW,
                 "success", "uploaded", 1, 1, 0, 0L, 1, null, null, List.of());
         assertThat(log.scanRef()).isEqualTo("SCAN-20261007-110001-3F2A");

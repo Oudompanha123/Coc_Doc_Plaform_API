@@ -197,7 +197,7 @@ public class ClaudeUsageScanLogService {
         UUID memberId = member == null ? null : member.id();
 
         ClaudeUsageScanLog log = new ClaudeUsageScanLog(
-                null, report.scanId(), memberId, email, null, trigger, clip(report.cliVersion(), MAX_VERSION),
+                null, report.scanId(), memberId, email, null, null, trigger, clip(report.cliVersion(), MAX_VERSION),
                 report.startedAt(), report.finishedAt(), now, deriveStatus(steps, errorStep), uploadStatus,
                 report.transcriptFiles(), report.responses(), report.duplicates(), report.newTokens(),
                 report.daysUploaded(), errorStep, clip(redact(report.errorMessage()), MAX_ERROR), steps);
@@ -258,7 +258,7 @@ public class ClaudeUsageScanLogService {
         }
         String trigger = TRIGGERS.contains(start.trigger()) ? start.trigger() : "manual";
         ClaudeUsageScanLog log = new ClaudeUsageScanLog(
-                null, start.scanId(), member == null ? null : member.id(), email, null, trigger,
+                null, start.scanId(), member == null ? null : member.id(), email, null, null, trigger,
                 clip(start.cliVersion(), MAX_VERSION), start.startedAt(), null, now, RUNNING, "not-attempted",
                 null, null, null, null, null, null, null, List.of());
         return logs.insertRunning(log) ? STARTED : DUPLICATE;

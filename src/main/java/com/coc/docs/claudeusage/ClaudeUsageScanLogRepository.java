@@ -26,18 +26,29 @@ public class ClaudeUsageScanLogRepository {
      * The display name is worked out at read time, so a rename shows on older
      * logs too: the platform account's name for that email, else the roster's
      * stored one ({@link ClaudeUsageMemberRepository#DISPLAY_NAME}, same rule).
+     * The picture is that same account's, matched by email like
+     * {@link ClaudeUsageMemberRepository#avatarUrlsByMemberId}; null without one.
+     *
+     * <p>Name and picture come from one account row: {@code account.email} is
+     * unique only case-sensitively, so two rows can match {@code lower(email)},
+     * and reading each column separately could pair one account's name with
+     * another's face. The exact-case match wins, then the oldest account.
      */
     private static final String SELECT = """
             select l.id, l.client_scan_id, l.member_id, l.email,
-                   coalesce(
-                     (select nullif(btrim(a.display_name), '') from account a
-                       where lower(a.email) = lower(l.email) limit 1),
-                     m.display_name) as display_name,
+                   coalesce(nullif(btrim(a.display_name), ''), m.display_name) as display_name,
+                   a.avatar_url,
                    l.trigger, l.cli_version,
                    l.started_at, l.finished_at, l.received_at, l.status, l.upload_status, l.transcript_files,
                    l.responses, l.duplicates, l.new_tokens, l.days_uploaded, l.error_step, l.error_message
             from claude_usage_scan_log l
             left join claude_usage_member m on m.id = l.member_id
+            left join lateral (
+              select acc.display_name, acc.avatar_url from account acc
+               where lower(acc.email) = lower(l.email)
+               order by (acc.email = l.email) desc, acc.created_at
+               limit 1
+            ) a on true
             """;
 
     private final JdbcClient jdbc;
@@ -53,6 +64,7 @@ public class ClaudeUsageScanLogRepository {
                 rs.getObject("member_id", UUID.class),
                 rs.getString("email"),
                 rs.getString("display_name"),
+                rs.getString("avatar_url"),
                 rs.getString("trigger"),
                 rs.getString("cli_version"),
                 rs.getObject("started_at", OffsetDateTime.class).toInstant(),
