@@ -144,28 +144,30 @@ public class StoreFileStorage implements StoreFiles {
     }
 
     /**
-     * Streams a logo to {@code logos/{appId}.{ext}}, checking that the bytes
-     * really are the image type claimed — the logo route is public and sends
-     * that type back, so a mislabelled upload must not get through.
+     * Streams an app's picture — icon or banner — to {@code
+     * {folder}/{appId}.{ext}}, checking that the bytes really are the image
+     * type claimed: the picture routes are public and send that type back, so
+     * a mislabelled upload must not get through.
      */
     @Override
-    public StoredFile storeLogo(UUID appId, String contentType, InputStream body) {
+    public StoredFile storeImage(StoreImageKind kind, UUID appId, String contentType, InputStream body) {
         String extension = StoreFileRules.LOGO_TYPES.get(contentType);
         if (extension == null) {
-            throw ApiException.badRequest("a logo must be a PNG, JPEG or WebP image");
+            throw ApiException.badRequest("a " + kind.noun() + " must be a PNG, JPEG or WebP image");
         }
-        String relative = StoreFileRules.logoKey(appId, extension);
+        String relative = StoreFileRules.imageKey(kind, appId, extension);
         Path target = resolve(relative);
-        Written written = write(target, body, StoreFileRules.MAX_LOGO_BYTES, "a logo must be 2 MB or smaller");
+        Written written = write(
+                target, body, kind.maxBytes(), "a " + kind.noun() + " must be " + kind.maxLabel() + " or smaller");
         if (!matchesMagic(written.temp(), contentType)) {
             deleteQuietly(written.temp());
-            throw ApiException.badRequest("the logo's content is not the image type it claims to be");
+            throw ApiException.badRequest("the " + kind.noun() + "'s content is not the image type it claims to be");
         }
         commit(written.temp(), target);
-        // A logo replaced by one of another type leaves its old file behind otherwise.
+        // A picture replaced by one of another type leaves its old file behind otherwise.
         for (String other : StoreFileRules.LOGO_TYPES.values()) {
             if (!other.equals(extension)) {
-                deleteQuietly(resolve(StoreFileRules.logoKey(appId, other)));
+                deleteQuietly(resolve(StoreFileRules.imageKey(kind, appId, other)));
             }
         }
         return new StoredFile(relative, written.size());
@@ -181,10 +183,10 @@ public class StoreFileStorage implements StoreFiles {
     }
 
     @Override
-    public Resource openLogo(String relativePath) {
+    public Resource openImage(StoreImageKind kind, String relativePath) {
         Path path = resolve(relativePath);
         if (!Files.isRegularFile(path)) {
-            throw ApiException.notFound("logo");
+            throw ApiException.notFound(kind.noun());
         }
         return new FileSystemResource(path);
     }

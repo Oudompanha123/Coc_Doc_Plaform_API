@@ -248,31 +248,32 @@ public class S3StoreFiles implements StoreFiles {
     }
 
     @Override
-    public StoredFile storeLogo(UUID appId, String contentType, InputStream body) {
+    public StoredFile storeImage(StoreImageKind kind, UUID appId, String contentType, InputStream body) {
         String extension = StoreFileRules.LOGO_TYPES.get(contentType);
         if (extension == null) {
-            throw ApiException.badRequest("a logo must be a PNG, JPEG or WebP image");
+            throw ApiException.badRequest("a " + kind.noun() + " must be a PNG, JPEG or WebP image");
         }
         byte[] bytes;
         try {
-            bytes = body.readNBytes((int) StoreFileRules.MAX_LOGO_BYTES + 1);
+            bytes = body.readNBytes((int) kind.maxBytes() + 1);
         } catch (IOException e) {
-            throw new UncheckedIOException("Could not read the uploaded logo", e);
+            throw new UncheckedIOException("Could not read the uploaded " + kind.noun(), e);
         }
-        if (bytes.length > StoreFileRules.MAX_LOGO_BYTES) {
-            throw ApiException.withCode(HttpStatus.PAYLOAD_TOO_LARGE, "too_large", "a logo must be 2 MB or smaller");
+        if (bytes.length > kind.maxBytes()) {
+            throw ApiException.withCode(HttpStatus.PAYLOAD_TOO_LARGE, "too_large",
+                    "a " + kind.noun() + " must be " + kind.maxLabel() + " or smaller");
         }
         if (!StoreFileRules.matchesMagic(bytes, Math.min(bytes.length, 12), contentType)) {
-            throw ApiException.badRequest("the logo's content is not the image type it claims to be");
+            throw ApiException.badRequest("the " + kind.noun() + "'s content is not the image type it claims to be");
         }
-        String key = StoreFileRules.logoKey(appId, extension);
+        String key = StoreFileRules.imageKey(kind, appId, extension);
         s3.putObject(
                 PutObjectRequest.builder().bucket(bucket).key(key).contentType(contentType).build(),
                 RequestBody.fromBytes(bytes));
-        // A logo replaced by one of another type leaves its old object behind otherwise.
+        // A picture replaced by one of another type leaves its old object behind otherwise.
         for (String other : StoreFileRules.LOGO_TYPES.values()) {
             if (!other.equals(extension)) {
-                deleteQuietly(StoreFileRules.logoKey(appId, other));
+                deleteQuietly(StoreFileRules.imageKey(kind, appId, other));
             }
         }
         return new StoredFile(key, bytes.length);
@@ -307,13 +308,13 @@ public class S3StoreFiles implements StoreFiles {
     }
 
     @Override
-    public Resource openLogo(String relativePath) {
+    public Resource openImage(StoreImageKind kind, String relativePath) {
         try {
             return new ByteArrayResource(s3.getObjectAsBytes(
                             GetObjectRequest.builder().bucket(bucket).key(relativePath).build())
                     .asByteArray());
         } catch (NoSuchKeyException e) {
-            throw ApiException.notFound("logo");
+            throw ApiException.notFound(kind.noun());
         }
     }
 

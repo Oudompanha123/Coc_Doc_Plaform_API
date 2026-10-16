@@ -70,6 +70,12 @@ public final class StoreDtos {
         }
     }
 
+    /** Pin an app to the Store banner, or {@code null} for the latest automatically (ADR-117). */
+    public record FeaturedRequest(UUID appId) {}
+
+    /** The pinned app, or {@code null} when the banner shows the latest upload or update. */
+    public record FeaturedResponse(UUID appId) {}
+
     /** Where to fetch a build from: a presigned S3 URL, or this API's own download route. */
     public record DownloadLink(String url, boolean presigned, Instant expiresAt) {}
 
@@ -84,6 +90,8 @@ public final class StoreDtos {
             boolean isPublic,
             /** Null when there is no logo. Carries the update time so a replaced logo is not served from cache. */
             String logoUrl,
+            /** The wide picture for the Store banner (ADR-117); null when there is none. Cache-busted like logoUrl. */
+            String bannerUrl,
             Instant createdAt,
             Instant updatedAt,
             /** Every build, removed ones included, newest first. */
@@ -99,6 +107,7 @@ public final class StoreDtos {
                     a.category().wire(),
                     a.isPublic(),
                     a.hasLogo() ? "/api/v1/store/apps/" + a.id() + "/logo?v=" + a.updatedAt().toEpochMilli() : null,
+                    a.hasBanner() ? "/api/v1/store/apps/" + a.id() + "/banner?v=" + a.updatedAt().toEpochMilli() : null,
                     a.createdAt(),
                     a.updatedAt(),
                     entry.builds().stream().map(BuildResponse::of).toList());

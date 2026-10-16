@@ -20,7 +20,8 @@ import org.springframework.stereotype.Repository;
 public class StoreRepository {
 
     private static final String APP_SELECT = """
-            select id, app_no, name, description, category, is_public, logo_path, logo_type, created_at, updated_at
+            select id, app_no, name, description, category, is_public, logo_path, logo_type, banner_path, banner_type,
+                   created_at, updated_at
             from store_app
             """;
 
@@ -47,6 +48,8 @@ public class StoreRepository {
                 rs.getBoolean("is_public"),
                 rs.getString("logo_path"),
                 rs.getString("logo_type"),
+                rs.getString("banner_path"),
+                rs.getString("banner_type"),
                 instant(rs, "created_at"),
                 instant(rs, "updated_at"));
     }
@@ -120,6 +123,34 @@ public class StoreRepository {
                         where id = ?
                         """)
                 .params(logoPath, logoType, actor, id)
+                .update();
+    }
+
+    /** Sets or clears ({@code null}s) an app's banner picture (V87, ADR-117). */
+    public void setBanner(UUID id, String bannerPath, String bannerType, UUID actor) {
+        jdbc.sql("""
+                        update store_app
+                        set banner_path = ?, banner_type = ?, updated_at = now(), updated_by = ?
+                        where id = ?
+                        """)
+                .params(bannerPath, bannerType, actor, id)
+                .update();
+    }
+
+    // --- settings (V87) ---------------------------------------------------------
+
+    /** The app an admin chose for the Store's banner, or empty for "the latest automatically". */
+    public Optional<UUID> findFeaturedAppId() {
+        return jdbc.sql("select featured_app_id from store_settings")
+                .query((rs, rowNum) -> rs.getObject("featured_app_id", UUID.class))
+                .optional()
+                .flatMap(Optional::ofNullable);
+    }
+
+    /** {@code null} goes back to "the latest automatically". */
+    public void setFeaturedAppId(UUID appId, UUID actor) {
+        jdbc.sql("update store_settings set featured_app_id = ?, updated_at = now(), updated_by = ?")
+                .params(appId, actor)
                 .update();
     }
 

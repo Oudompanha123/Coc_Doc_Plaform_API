@@ -62,7 +62,12 @@ public final class StoreFileRules {
     }
 
     static String logoKey(java.util.UUID appId, String extension) {
-        return "logos/" + appId + "." + extension;
+        return imageKey(StoreImageKind.LOGO, appId, extension);
+    }
+
+    /** {@code logos/{appId}.{ext}} or {@code banners/{appId}.{ext}} (ADR-117). */
+    static String imageKey(StoreImageKind kind, java.util.UUID appId, String extension) {
+        return kind.folder() + "/" + appId + "." + extension;
     }
 
     /** Whether the first bytes really are the image type claimed. */

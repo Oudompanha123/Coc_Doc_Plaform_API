@@ -13,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -75,6 +76,9 @@ public class StoreService {
 
     /** A logo to send: its bytes and content type. */
     public record Logo(Resource body, String contentType) {}
+
+    /** A banner picture to send: its bytes and content type (ADR-117). */
+    public record Banner(Resource body, String contentType) {}
 
     /** Every public app — what a signed-in user sees. */
     @Transactional(readOnly = true)
@@ -180,6 +184,80 @@ public class StoreService {
         if (app.hasLogo()) {
             files.delete(app.logoPath());
         }
+        if (app.hasBanner()) {
+            files.delete(app.bannerPath());
+        }
+    }
+
+    // --- banner and featured app (ADR-117) --------------------------------------
+
+    /** Uploads or replaces an app's banner picture — the wide image behind it in the Store's featured slot. */
+    public CatalogEntry uploadBanner(UUID id, String contentType, InputStream body, CurrentUser caller) {
+        StoreApp app = app(id);
+        String type = contentType == null ? "" : contentType.split(";")[0].trim().toLowerCase(Locale.ROOT);
+        StoreFiles.StoredFile stored = files.storeImage(StoreImageKind.BANNER, id, type, body);
+        store.setBanner(id, stored.relativePath(), type, caller.id());
+        record(caller, AuditAction.STORE_BANNER_SET, id, detail(app.name()).put("bytes", stored.sizeBytes()));
+        return entry(id);
+    }
+
+    /** Removes an app's banner picture; the featured slot goes back to the blurred icon. */
+    @Transactional
+    public CatalogEntry removeBanner(UUID id, CurrentUser caller) {
+        StoreApp app = app(id);
+        if (!app.hasBanner()) {
+            return entry(id);
+        }
+        store.setBanner(id, null, null, caller.id());
+        record(caller, AuditAction.STORE_BANNER_REMOVE, id, detail(app.name()));
+        String path = app.bannerPath();
+        // After the commit: a rollback must not leave a row pointing at a deleted file.
+        runAfterCommit(() -> {
+            try {
+                files.delete(path);
+            } catch (RuntimeException e) {
+                log.warn("The banner of app {} is removed but its file {} could not be deleted", id, path, e);
+            }
+        });
+        return entry(id);
+    }
+
+    /**
+     * An app's banner picture. Public, like the logo and for the same {@code
+     * <img>} reason (ADR-101): by app id only, and nothing but a picture.
+     */
+    @Transactional(readOnly = true)
+    public Banner banner(UUID appId) {
+        StoreApp app = store.findApp(appId).filter(StoreApp::hasBanner).orElseThrow(() -> ApiException.notFound("banner"));
+        return new Banner(files.openImage(StoreImageKind.BANNER, app.bannerPath()), app.bannerType());
+    }
+
+    /**
+     * The app an admin pinned to the Store's banner, if the caller may see it:
+     * empty means "the latest automatically". A pinned private app reads as
+     * empty to everyone but an admin, so the banner never names an app the
+     * reader cannot open.
+     */
+    @Transactional(readOnly = true)
+    public Optional<UUID> featuredAppId(CurrentUser caller) {
+        return store.findFeaturedAppId()
+                .flatMap(store::findApp)
+                .filter(app -> app.isPublic() || isAdmin(caller))
+                .map(StoreApp::id);
+    }
+
+    /** Pins an app to the Store's banner, or ({@code null}) goes back to the latest automatically. */
+    @Transactional
+    public Optional<UUID> setFeaturedApp(UUID appId, CurrentUser caller) {
+        ObjectNode detail = json.createObjectNode();
+        if (appId == null) {
+            detail.putNull("name");
+        } else {
+            detail.put("name", app(appId).name());
+        }
+        store.setFeaturedAppId(appId, caller.id());
+        audit.append(caller.id(), caller.email(), AuditAction.STORE_FEATURED_SET, AuditAction.TARGET_STORE_APP, appId, detail);
+        return Optional.ofNullable(appId);
     }
 
     public CatalogEntry uploadLogo(UUID id, String contentType, InputStream body, CurrentUser caller) {
@@ -303,15 +381,20 @@ public class StoreService {
                 log.warn("Build {} is removed but its file {} could not be deleted", build.id(), build.filePath(), e);
             }
         };
+        runAfterCommit(delete);
+    }
+
+    /** Runs {@code action} once the current transaction commits, or now when there is none. */
+    private static void runAfterCommit(Runnable action) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    delete.run();
+                    action.run();
                 }
             });
         } else {
-            delete.run();
+            action.run();
         }
     }
 

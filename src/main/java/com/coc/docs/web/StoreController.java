@@ -100,6 +100,27 @@ public class StoreController {
         };
     }
 
+    @Operation(
+            summary = "The app an admin pinned to the Store banner",
+            description = "appId is null when the banner shows the latest upload or update — and for a pinned "
+                    + "private app, unless the caller is an admin (ADR-117).")
+    @GetMapping("/featured")
+    StoreDtos.FeaturedResponse featured(@AuthenticationPrincipal CurrentUser caller) {
+        return new StoreDtos.FeaturedResponse(store.featuredAppId(caller).orElse(null));
+    }
+
+    @Operation(summary = "An app's banner picture")
+    @GetMapping("/apps/{id}/banner")
+    ResponseEntity<Resource> banner(@PathVariable UUID id) {
+        StoreService.Banner banner = store.banner(id);
+        // Like the logo: the URL carries ?v=<updated time>, so a replaced
+        // banner is a new URL and a long cache is safe.
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(banner.contentType()))
+                .cacheControl(CacheControl.maxAge(Duration.ofDays(30)))
+                .body(banner.body());
+    }
+
     @Operation(summary = "An app's logo image")
     @GetMapping("/apps/{id}/logo")
     ResponseEntity<Resource> logo(@PathVariable UUID id) {

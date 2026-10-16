@@ -268,6 +268,10 @@ public final class AuditAction {
     public static final String STORE_APP_DELETE = "store.app_delete";
     public static final String STORE_BUILD_UPLOAD = "store.build_upload";
     public static final String STORE_BUILD_REMOVE = "store.build_remove";
+    /** An app's banner picture set or removed, and the Store banner's featured app changed (ADR-117). */
+    public static final String STORE_BANNER_SET = "store.banner_set";
+    public static final String STORE_BANNER_REMOVE = "store.banner_remove";
+    public static final String STORE_FEATURED_SET = "store.featured_set";
 
     /** Target types, for the {@code target_type} column. */
     public static final String TARGET_PAGE = "page";

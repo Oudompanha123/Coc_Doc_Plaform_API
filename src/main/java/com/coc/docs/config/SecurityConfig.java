@@ -131,13 +131,20 @@ public class SecurityConfig {
                         // about an app is reachable without a session.
                         // // req: ADR-108
                         .requestMatchers(HttpMethod.GET, "/api/v1/store/apps/*/logo").permitAll()
+                        // An app's banner picture (ADR-117): the same — only a
+                        // picture, addressed by the app's random id.
+                        // // req: ADR-117
+                        .requestMatchers(HttpMethod.GET, "/api/v1/store/apps/*/banner").permitAll()
                         // Public Store apps are viewable and downloadable without
                         // signing in. Still not a hole: StoreService answers 404
                         // for a private app or its build unless the caller is an
                         // admin, and a caller with no session is never one.
                         // // req: ADR-108, ADR-111
                         .requestMatchers(HttpMethod.GET, "/api/v1/store/apps", "/api/v1/store/apps/{number:\\d+}",
-                                "/api/v1/store/builds/*/download", "/api/v1/store/builds/*/download-link").permitAll()
+                                "/api/v1/store/builds/*/download", "/api/v1/store/builds/*/download-link",
+                                // Which app the banner features (ADR-117): the
+                                // same rule, a private pinned app reads as none.
+                                "/api/v1/store/featured").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/nonce").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/google").permitAll()
                         // ADR-014: applying for an account, and signing in with one. Public

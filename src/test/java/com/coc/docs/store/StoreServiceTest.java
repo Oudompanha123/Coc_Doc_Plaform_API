@@ -61,7 +61,7 @@ class StoreServiceTest {
     }
 
     private StoreApp app(long number, boolean isPublic) {
-        StoreApp app = new StoreApp(UUID.randomUUID(), number, "Change Impact Preview", "", StoreCategory.MOBILE, isPublic, null, null,
+        StoreApp app = new StoreApp(UUID.randomUUID(), number, "Change Impact Preview", "", StoreCategory.MOBILE, isPublic, null, null, null, null,
                 Instant.now(), Instant.now());
         when(repository.findAppByNumber(number)).thenReturn(Optional.of(app));
         when(repository.findApp(app.id())).thenReturn(Optional.of(app));
@@ -132,7 +132,7 @@ class StoreServiceTest {
         UUID id = UUID.randomUUID();
         when(repository.insertApp(eq("Change Impact Preview"), eq(""), eq(StoreCategory.MOBILE), eq(false), any())).thenReturn(id);
         when(repository.findApp(id)).thenReturn(Optional.of(new StoreApp(id, 394, "Change Impact Preview", "",
-                StoreCategory.MOBILE, false, null, null, Instant.now(), Instant.now())));
+                StoreCategory.MOBILE, false, null, null, null, null, Instant.now(), Instant.now())));
 
         assertThat(service.createApp(" Change Impact Preview ", null, "mobile", false, admin).app().number()).isEqualTo(394);
         verify(audit).append(any(), any(), eq(AuditAction.STORE_APP_CREATE), eq(AuditAction.TARGET_STORE_APP), eq(id), any());
@@ -288,5 +288,110 @@ class StoreServiceTest {
         verify(repository).deleteApp(app.id());
         verify(files).delete(live.filePath());
         verify(files, never()).delete(gone.filePath());
+    }
+
+    // --- banner and featured app (ADR-117) ---------------------------------------
+
+    private StoreApp withBanner(StoreApp app) {
+        StoreApp bannered = new StoreApp(app.id(), app.number(), app.name(), app.description(), app.category(),
+                app.isPublic(), null, null, "banners/" + app.id() + ".png", "image/png", app.createdAt(), app.updatedAt());
+        when(repository.findApp(app.id())).thenReturn(Optional.of(bannered));
+        return bannered;
+    }
+
+    @Test
+    void uploadingABannerStoresItAsABannerAndIsAudited() {
+        StoreApp app = app(20, true);
+        when(files.storeImage(eq(StoreImageKind.BANNER), eq(app.id()), eq("image/png"), any()))
+                .thenReturn(new StoreFiles.StoredFile("banners/" + app.id() + ".png", 10));
+
+        service.uploadBanner(app.id(), "image/png; charset=binary", new ByteArrayInputStream(new byte[] {1}), admin);
+
+        verify(repository).setBanner(eq(app.id()), eq("banners/" + app.id() + ".png"), eq("image/png"), any());
+        verify(audit).append(any(), any(), eq(AuditAction.STORE_BANNER_SET), eq(AuditAction.TARGET_STORE_APP), eq(app.id()), any());
+    }
+
+    @Test
+    void removingABannerClearsTheRowThenDeletesTheFile() {
+        StoreApp app = withBanner(app(21, true));
+
+        service.removeBanner(app.id(), admin);
+
+        verify(repository).setBanner(eq(app.id()), eq(null), eq(null), any());
+        verify(files).delete(app.bannerPath());
+        verify(audit).append(any(), any(), eq(AuditAction.STORE_BANNER_REMOVE), eq(AuditAction.TARGET_STORE_APP), eq(app.id()), any());
+    }
+
+    @Test
+    void removingABannerThatIsNotThereChangesNothing() {
+        StoreApp app = app(22, true);
+
+        service.removeBanner(app.id(), admin);
+
+        verify(repository, never()).setBanner(any(), any(), any(), any());
+        verifyNoInteractions(files, audit);
+    }
+
+    @Test
+    void anAppWithNoBannerHasNoBannerToServe() {
+        StoreApp app = app(23, true);
+        assertStatus(() -> service.banner(app.id()), HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void deletingAnAppRemovesItsBannerFileToo() {
+        StoreApp app = withBanner(app(24, true));
+        when(repository.findBuilds(List.of(app.id()))).thenReturn(List.of());
+
+        service.deleteApp(app.id(), admin);
+
+        verify(files).delete(app.bannerPath());
+    }
+
+    @Test
+    void aPinnedPublicAppIsFeaturedForEveryone() {
+        StoreApp app = app(25, true);
+        when(repository.findFeaturedAppId()).thenReturn(Optional.of(app.id()));
+
+        assertThat(service.featuredAppId(null)).contains(app.id());
+        assertThat(service.featuredAppId(user)).contains(app.id());
+    }
+
+    @Test
+    void aPinnedPrivateAppIsFeaturedOnlyForAnAdmin() {
+        StoreApp app = app(26, false);
+        when(repository.findFeaturedAppId()).thenReturn(Optional.of(app.id()));
+
+        assertThat(service.featuredAppId(user)).isEmpty();
+        assertThat(service.featuredAppId(null)).isEmpty();
+        assertThat(service.featuredAppId(admin)).contains(app.id());
+    }
+
+    @Test
+    void nothingPinnedMeansTheLatestAutomatically() {
+        when(repository.findFeaturedAppId()).thenReturn(Optional.empty());
+        assertThat(service.featuredAppId(admin)).isEmpty();
+    }
+
+    @Test
+    void pinningAnUnknownAppIsNotFoundAndChangesNothing() {
+        UUID unknown = UUID.randomUUID();
+        when(repository.findApp(unknown)).thenReturn(Optional.empty());
+
+        assertStatus(() -> service.setFeaturedApp(unknown, admin), HttpStatus.NOT_FOUND);
+        verify(repository, never()).setFeaturedAppId(any(), any());
+    }
+
+    @Test
+    void pinningAndUnpinningAreAudited() {
+        StoreApp app = app(27, true);
+
+        assertThat(service.setFeaturedApp(app.id(), admin)).contains(app.id());
+        assertThat(service.setFeaturedApp(null, admin)).isEmpty();
+
+        verify(repository).setFeaturedAppId(eq(app.id()), any());
+        verify(repository).setFeaturedAppId(eq(null), any());
+        verify(audit, org.mockito.Mockito.times(2))
+                .append(any(), any(), eq(AuditAction.STORE_FEATURED_SET), eq(AuditAction.TARGET_STORE_APP), any(), any());
     }
 }

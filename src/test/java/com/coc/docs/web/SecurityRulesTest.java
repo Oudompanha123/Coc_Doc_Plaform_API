@@ -694,7 +694,7 @@ class SecurityRulesTest {
         private com.coc.docs.store.StoreService.CatalogEntry entry(long number) {
             java.time.Instant now = java.time.Instant.now();
             return new com.coc.docs.store.StoreService.CatalogEntry(
-                    new com.coc.docs.store.StoreApp(java.util.UUID.randomUUID(), number, "App", "", com.coc.docs.store.StoreCategory.MOBILE, true, null, null,
+                    new com.coc.docs.store.StoreApp(java.util.UUID.randomUUID(), number, "App", "", com.coc.docs.store.StoreCategory.MOBILE, true, null, null, null, null,
                             now, now),
                     java.util.List.of());
         }
@@ -823,6 +823,33 @@ class SecurityRulesTest {
                     .thenThrow(ApiException.notFound("logo"));
             mvc.perform(get("/api/v1/store/apps/" + java.util.UUID.randomUUID() + "/logo"))
                     .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void a_banner_and_the_featured_app_need_no_session() throws Exception {
+            // ADR-117: the banner picture is public like the logo, and so is which app the banner features.
+            org.mockito.Mockito.when(storeService.banner(org.mockito.ArgumentMatchers.any()))
+                    .thenThrow(ApiException.notFound("banner"));
+            mvc.perform(get("/api/v1/store/apps/" + java.util.UUID.randomUUID() + "/banner"))
+                    .andExpect(status().isNotFound());
+            org.mockito.Mockito.when(storeService.featuredAppId(org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(java.util.Optional.empty());
+            mvc.perform(get("/api/v1/store/featured"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.appId").doesNotExist());
+        }
+
+        @Test
+        void only_an_admin_changes_the_banner() throws Exception {
+            String id = java.util.UUID.randomUUID().toString();
+            mvc.perform(put("/api/v1/admin/store/featured").with(as(AppRole.USER))
+                            .contentType(org.springframework.http.MediaType.APPLICATION_JSON).content("{\"appId\":null}"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(delete("/api/v1/admin/store/apps/" + id + "/banner").with(as(AppRole.USER)))
+                    .andExpect(status().isForbidden());
+            mvc.perform(put("/api/v1/admin/store/featured").with(as(AppRole.ADMIN))
+                            .contentType(org.springframework.http.MediaType.APPLICATION_JSON).content("{\"appId\":null}"))
+                    .andExpect(status().isOk());
         }
 
         @Test

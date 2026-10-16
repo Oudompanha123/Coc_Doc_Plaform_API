@@ -61,7 +61,17 @@ public interface StoreFiles {
             InputStream body,
             Predicate<StoreEnvironment> existingIsStale);
 
-    StoredFile storeLogo(UUID appId, String contentType, InputStream body);
+    /**
+     * Stores an app's picture — its icon or its banner (ADR-117) — at {@code
+     * {folder}/{appId}.{ext}}, checking the bytes really are the image type
+     * claimed, since the picture routes are public and send that type back.
+     * A picture replaced by one of another type leaves no old file behind.
+     */
+    StoredFile storeImage(StoreImageKind kind, UUID appId, String contentType, InputStream body);
+
+    default StoredFile storeLogo(UUID appId, String contentType, InputStream body) {
+        return storeImage(StoreImageKind.LOGO, appId, contentType, body);
+    }
 
     /** Removes a stored file. A file that is already gone is not an error. */
     void delete(String relativePath);
@@ -73,6 +83,10 @@ public interface StoreFiles {
      */
     Delivery deliver(String relativePath, String fileName, String contentType);
 
-    /** A logo's bytes (at most 2 MB). 404 when the file is not there. */
-    Resource openLogo(String relativePath);
+    /** A stored picture's bytes (at most its kind's cap). 404 when the file is not there. */
+    Resource openImage(StoreImageKind kind, String relativePath);
+
+    default Resource openLogo(String relativePath) {
+        return openImage(StoreImageKind.LOGO, relativePath);
+    }
 }

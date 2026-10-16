@@ -206,6 +206,30 @@ class StoreFileStorageTest {
         assertThat(Files.exists(root.resolve("logos/" + APP + ".png"))).isFalse();
     }
 
+    // --- banners (ADR-117) ------------------------------------------------------
+
+    @Test
+    void aBannerIsStoredBesideTheLogoWithoutTouchingIt() throws IOException {
+        StoreFileStorage files = storage(1024);
+        files.storeLogo(APP, "image/png", new ByteArrayInputStream(PNG));
+
+        StoreFiles.StoredFile banner = files.storeImage(StoreImageKind.BANNER, APP, "image/jpeg", new ByteArrayInputStream(JPEG));
+
+        assertThat(banner.relativePath()).isEqualTo("banners/" + APP + ".jpg");
+        assertThat(Files.exists(root.resolve("banners/" + APP + ".jpg"))).isTrue();
+        assertThat(Files.exists(root.resolve("logos/" + APP + ".png"))).isTrue();
+        assertThat(files.openImage(StoreImageKind.BANNER, banner.relativePath()).exists()).isTrue();
+    }
+
+    @Test
+    void aBannerMustBeTheImageTypeItClaims() {
+        StoreFileStorage files = storage(1024);
+        assertThatThrownBy(() -> files.storeImage(StoreImageKind.BANNER, APP, "image/png", new ByteArrayInputStream(JPEG)))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("banner");
+        assertThat(Files.exists(root.resolve("banners/" + APP + ".png"))).isFalse();
+    }
+
     @Test
     void resolveRefusesPathsOutsideTheRoot() {
         StoreFileStorage files = storage(1024);

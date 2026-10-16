@@ -106,6 +106,27 @@ public class AdminStoreController {
         }
     }
 
+    @Operation(
+            summary = "Upload or replace an app's banner picture",
+            description = "The wide picture behind the app in the Store's featured banner (ADR-117). Body: the image "
+                    + "bytes. Content-Type image/png, image/jpeg or image/webp; 5 MB at most.")
+    @PutMapping("/{id}/banner")
+    StoreDtos.AppResponse banner(
+            @PathVariable UUID id,
+            @RequestHeader(HttpHeaders.CONTENT_TYPE) String contentType,
+            HttpServletRequest request,
+            @AuthenticationPrincipal CurrentUser caller) throws IOException {
+        try (InputStream body = request.getInputStream()) {
+            return StoreDtos.AppResponse.of(store.uploadBanner(id, contentType, body, caller));
+        }
+    }
+
+    @Operation(summary = "Remove an app's banner picture", description = "The banner falls back to the app's icon.")
+    @DeleteMapping("/{id}/banner")
+    StoreDtos.AppResponse removeBanner(@PathVariable UUID id, @AuthenticationPrincipal CurrentUser caller) {
+        return StoreDtos.AppResponse.of(store.removeBanner(id, caller));
+    }
+
     /**
      * Uploads the next version of an app. The body is a 4-byte big-endian
      * length, then that many bytes of UTF-8 JSON ({@link
