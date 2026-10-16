@@ -76,6 +76,21 @@ public record AppProperties(
                     && accessKeyId != null && !accessKeyId.isBlank()
                     && secretAccessKey != null && !secretAccessKey.isBlank();
         }
+
+        /**
+         * Whether an endpoint and bucket are set, keys or not. The Store's S3
+         * backend (ADR-115) also runs with no keys at all, on an EC2 instance
+         * role, which {@link #configured()} would call "not configured".
+         */
+        public boolean bucketConfigured() {
+            return endpoint != null && !endpoint.isBlank() && bucket != null && !bucket.isBlank();
+        }
+
+        /** Both keys set — otherwise the AWS default credential chain (instance role) is used. */
+        public boolean hasStaticKeys() {
+            return accessKeyId != null && !accessKeyId.isBlank()
+                    && secretAccessKey != null && !secretAccessKey.isBlank();
+        }
     }
 
     /**

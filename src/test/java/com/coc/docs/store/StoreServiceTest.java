@@ -39,7 +39,7 @@ import org.springframework.http.HttpStatus;
 class StoreServiceTest {
 
     private StoreRepository repository;
-    private StoreFileStorage files;
+    private StoreFiles files;
     private AuditRepository audit;
     private StoreService service;
 
@@ -55,7 +55,7 @@ class StoreServiceTest {
     @BeforeEach
     void setUp() {
         repository = mock(StoreRepository.class);
-        files = mock(StoreFileStorage.class);
+        files = mock(StoreFiles.class);
         audit = mock(AuditRepository.class);
         service = new StoreService(repository, files, audit, new ObjectMapper());
     }
@@ -104,6 +104,14 @@ class StoreServiceTest {
     }
 
     @Test
+    void aVisitorWithNoSessionSeesAPublicAppButNotAPrivateOne() {
+        app(5, true);
+        app(6, false);
+        assertThat(service.entryForReader(5, null).app().number()).isEqualTo(5);
+        assertStatus(() -> service.entryForReader(6, null), HttpStatus.NOT_FOUND);
+    }
+
+    @Test
     void aRemovedBuildCannotBeDownloadedEvenByAnAdmin() {
         StoreApp app = app(3, true);
         StoreBuild gone = build(app, StorePlatform.ANDROID, "1.0", StoreEnvironment.PRODUCTION, Instant.now());
@@ -145,7 +153,7 @@ class StoreServiceTest {
         StoreApp app = app(5, true);
         when(files.storeBuild(eq(StorePlatform.ANDROID), eq("1.2.2"), eq(List.of(StoreEnvironment.PRODUCTION)),
                         eq(app.id()), eq("app-1.2.2.apk"), any(), any()))
-                .thenReturn(new StoreFileStorage.StoredBuild(
+                .thenReturn(new StoreFiles.StoredBuild(
                         Map.of(StoreEnvironment.PRODUCTION, "android/1.2.2/production/x/app-1.2.2.apk"), 1, "0".repeat(64)));
 
         upload(app, "1.2.2", List.of("production"), "app-1.2.2.apk");
@@ -163,7 +171,7 @@ class StoreServiceTest {
         StoreApp app = app(6, true);
         List<StoreEnvironment> both = List.of(StoreEnvironment.PRODUCTION, StoreEnvironment.DEVELOPMENT);
         when(files.storeBuild(eq(StorePlatform.IOS), eq("2.0"), eq(both), eq(app.id()), eq("app.ipa"), any(), any()))
-                .thenReturn(new StoreFileStorage.StoredBuild(Map.of(
+                .thenReturn(new StoreFiles.StoredBuild(Map.of(
                         StoreEnvironment.PRODUCTION, "ios/2.0/production/x/app.ipa",
                         StoreEnvironment.DEVELOPMENT, "ios/2.0/development/x/app.ipa"), 1, "0".repeat(64)));
 
@@ -190,7 +198,7 @@ class StoreServiceTest {
         StoreApp app = app(8, true);
         when(repository.liveBuildExists(app.id(), StorePlatform.ANDROID, "1.0", StoreEnvironment.PRODUCTION)).thenReturn(true);
         when(files.storeBuild(eq(StorePlatform.IOS), eq("1.0"), any(), eq(app.id()), any(), any(), any()))
-                .thenReturn(new StoreFileStorage.StoredBuild(
+                .thenReturn(new StoreFiles.StoredBuild(
                         Map.of(StoreEnvironment.PRODUCTION, "ios/1.0/production/x/a.ipa"), 1, "0".repeat(64)));
 
         upload(app, "1.0", List.of("production"), "a.ipa");
@@ -226,6 +234,37 @@ class StoreServiceTest {
         verify(files, never()).delete(other.filePath());
         verify(audit).append(any(), any(), eq(AuditAction.STORE_BUILD_REMOVE), eq(AuditAction.TARGET_STORE_APP),
                 eq(app.id()), any());
+    }
+
+    @Test
+    void removingABuildStillSucceedsWhenItsFileCannotBeDeleted() {
+        StoreApp app = app(13, true);
+        StoreBuild target = build(app, StorePlatform.ANDROID, "1.1.1", StoreEnvironment.PRODUCTION, null);
+        when(repository.markBuildRemoved(eq(target.id()), any())).thenReturn(true);
+        org.mockito.Mockito.doThrow(new IllegalStateException("disk gone")).when(files).delete(target.filePath());
+
+        service.removeBuild(app.id(), target.id(), admin);
+
+        verify(repository).markBuildRemoved(eq(target.id()), any());
+        verify(audit).append(any(), any(), eq(AuditAction.STORE_BUILD_REMOVE), eq(AuditAction.TARGET_STORE_APP),
+                eq(app.id()), any());
+    }
+
+    @Test
+    void aRemovedBuildCannotBeDownloadedByAUserOrAVisitor() {
+        StoreApp app = app(14, true);
+        StoreBuild gone = build(app, StorePlatform.ANDROID, "1.1.1", StoreEnvironment.PRODUCTION, Instant.now());
+        assertStatus(() -> service.download(gone.id(), user), HttpStatus.NOT_FOUND);
+        assertStatus(() -> service.download(gone.id(), null), HttpStatus.NOT_FOUND);
+        verify(files, never()).deliver(any(), any(), any());
+    }
+
+    @Test
+    void aLiveBuildWhoseFileIsMissingIsNotFoundRatherThanAnError() {
+        StoreApp app = app(15, true);
+        StoreBuild live = build(app, StorePlatform.ANDROID, "1.1.2", StoreEnvironment.PRODUCTION, null);
+        when(files.deliver(eq(live.filePath()), any(), any())).thenThrow(com.coc.docs.web.ApiException.notFound("build file"));
+        assertStatus(() -> service.download(live.id(), user), HttpStatus.NOT_FOUND);
     }
 
     @Test

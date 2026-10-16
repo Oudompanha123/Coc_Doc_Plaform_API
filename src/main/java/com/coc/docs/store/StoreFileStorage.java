@@ -20,15 +20,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Predicate;
-import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Component;
 
 /**
- * The Store's files on the backend's local disk (ADR-108, ADR-111):
+ * The Store's files on the backend's local disk (ADR-108, ADR-111) — the
+ * {@link StoreFiles} used in development and tests, and on a deployment that
+ * has not chosen S3 (ADR-115):
  *
  * <pre>
  * {root}/{platform}/{version}/{environment}/{app id}/{file name}   a build
@@ -36,11 +37,11 @@ import org.springframework.stereotype.Component;
  * </pre>
  *
  * <p><b>Every path is built here, from validated parts, and checked to stay
- * under the root.</b> A version is held to {@link #VERSION} and a file name is
- * reduced to {@link #safeFileName}; neither can carry a separator or "..",
- * and {@link #resolve} refuses anything that normalises outside the root
- * anyway, so a crafted value in the database could not reach another file
- * either.
+ * under the root.</b> A version is held to {@link StoreFileRules#VERSION} and a
+ * file name is reduced to {@link StoreFileRules#safeFileName}; neither can
+ * carry a separator or "..", and {@link #resolve} refuses anything that
+ * normalises outside the root anyway, so a crafted value in the database could
+ * not reach another file either.
  *
  * <p><b>Writes are whole or absent.</b> Bytes stream to a temporary file in
  * the destination folder — never buffered in memory, since an installer can
@@ -53,36 +54,19 @@ import org.springframework.stereotype.Component;
  * so each build owns its own path and can be removed without touching the
  * other.
  *
- * <p>// req: ADR-108, ADR-111
+ * <p>Not a {@code @Component}: {@code StoreFilesConfig} builds it when the
+ * Store is set to local storage.
+ *
+ * <p>// req: ADR-108, ADR-111, ADR-115
  */
-@Component
-public class StoreFileStorage {
+public class StoreFileStorage implements StoreFiles {
 
     private static final Logger log = LoggerFactory.getLogger(StoreFileStorage.class);
-
-    /** Mirrors {@code store_build.version}'s check constraint (V85). */
-    static final Pattern VERSION = Pattern.compile("^[0-9A-Za-z]([0-9A-Za-z._+-]{0,62}[0-9A-Za-z])?$");
-
-    static final int MAX_FILE_NAME = 120;
-
-    /** A logo is an icon, not a photo album. */
-    static final long MAX_LOGO_BYTES = 2L * 1024 * 1024;
-
-    /**
-     * Raster only. SVG is left out on purpose: it is a document that can carry
-     * script, and the logo route is public.
-     */
-    static final Map<String, String> LOGO_TYPES = Map.of(
-            "image/png", "png",
-            "image/jpeg", "jpg",
-            "image/webp", "webp");
 
     private final Path root;
     private final long maxFileBytes;
 
-    public StoreFileStorage(
-            @Value("${coc.store.root:store-files}") String root,
-            @Value("${coc.store.max-file-bytes:2147483648}") long maxFileBytes) {
+    public StoreFileStorage(String root, long maxFileBytes) {
         this.root = Path.of(root).toAbsolutePath().normalize();
         this.maxFileBytes = maxFileBytes;
     }
@@ -91,52 +75,12 @@ public class StoreFileStorage {
         return root;
     }
 
+    @Override
     public long maxFileBytes() {
         return maxFileBytes;
     }
 
-    /** A logo as written: where (relative to the root) and how big. */
-    public record StoredFile(String relativePath, long sizeBytes) {}
-
-    /** A build as written: its path per environment, its size and its SHA-256. */
-    public record StoredBuild(Map<StoreEnvironment, String> paths, long sizeBytes, String sha256) {}
-
-    public static boolean isValidVersion(String version) {
-        return version != null && VERSION.matcher(version).matches();
-    }
-
-    /**
-     * The uploader's file name, reduced to something every file system will
-     * take as a single name: path parts dropped, anything outside a
-     * conservative set replaced, no leading dot, trailing dots and spaces gone
-     * (Windows strips them silently, which would make two names one).
-     */
-    public static String safeFileName(String original) {
-        String name = original == null ? "" : original;
-        int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
-        name = name.substring(slash + 1);
-        name = name.replaceAll("[^0-9A-Za-z._()\\- ]", "_").trim();
-        name = name.replaceAll("^[.\\s]+", "").replaceAll("[.\\s]+$", "");
-        if (name.length() > MAX_FILE_NAME) {
-            int dot = name.lastIndexOf('.');
-            String extension = dot > 0 && name.length() - dot <= 10 ? name.substring(dot) : "";
-            name = name.substring(0, MAX_FILE_NAME - extension.length()) + extension;
-        }
-        return name.isEmpty() ? "download" : name;
-    }
-
-    /**
-     * Streams a build to {@code {platform}/{version}/{environment}/{appId}/{fileName}}
-     * for each of {@code environments}. {@code fileName} must already be
-     * {@link #safeFileName safe}.
-     *
-     * <p>An existing file at a target path is never replaced blindly — it may
-     * be a build someone has already downloaded. {@code existingIsStale} is
-     * asked only when one is there, and answers whether it is debris (no live
-     * build row points at it, e.g. from a crash between the write and the
-     * insert) that may be overwritten; otherwise the upload is refused with 409
-     * and nothing is written.
-     */
+    @Override
     public StoredBuild storeBuild(
             StorePlatform platform,
             String version,
@@ -145,10 +89,10 @@ public class StoreFileStorage {
             String fileName,
             InputStream body,
             Predicate<StoreEnvironment> existingIsStale) {
-        if (!isValidVersion(version)) {
+        if (!StoreFileRules.isValidVersion(version)) {
             throw ApiException.badRequest("the version may use letters, digits, '.', '_', '+' and '-' only");
         }
-        if (!safeFileName(fileName).equals(fileName)) {
+        if (!StoreFileRules.safeFileName(fileName).equals(fileName)) {
             throw new IllegalArgumentException("file name not sanitised: " + fileName);
         }
         if (environments.isEmpty()) {
@@ -156,7 +100,7 @@ public class StoreFileStorage {
         }
         Map<StoreEnvironment, String> paths = new LinkedHashMap<>();
         for (StoreEnvironment environment : environments) {
-            String relative = String.join("/", platform.wire(), version, environment.wire(), appId.toString(), fileName);
+            String relative = StoreFileRules.buildKey(platform, version, environment, appId, fileName);
             if (Files.exists(resolve(relative)) && !existingIsStale.test(environment)) {
                 throw ApiException.conflict("this app already has a " + platform.wire() + " " + environment.wire()
                         + " build of version " + version);
@@ -204,26 +148,45 @@ public class StoreFileStorage {
      * really are the image type claimed — the logo route is public and sends
      * that type back, so a mislabelled upload must not get through.
      */
+    @Override
     public StoredFile storeLogo(UUID appId, String contentType, InputStream body) {
-        String extension = LOGO_TYPES.get(contentType);
+        String extension = StoreFileRules.LOGO_TYPES.get(contentType);
         if (extension == null) {
             throw ApiException.badRequest("a logo must be a PNG, JPEG or WebP image");
         }
-        String relative = "logos/" + appId + "." + extension;
+        String relative = StoreFileRules.logoKey(appId, extension);
         Path target = resolve(relative);
-        Written written = write(target, body, MAX_LOGO_BYTES, "a logo must be 2 MB or smaller");
+        Written written = write(target, body, StoreFileRules.MAX_LOGO_BYTES, "a logo must be 2 MB or smaller");
         if (!matchesMagic(written.temp(), contentType)) {
             deleteQuietly(written.temp());
             throw ApiException.badRequest("the logo's content is not the image type it claims to be");
         }
         commit(written.temp(), target);
         // A logo replaced by one of another type leaves its old file behind otherwise.
-        for (String other : LOGO_TYPES.values()) {
+        for (String other : StoreFileRules.LOGO_TYPES.values()) {
             if (!other.equals(extension)) {
-                deleteQuietly(resolve("logos/" + appId + "." + other));
+                deleteQuietly(resolve(StoreFileRules.logoKey(appId, other)));
             }
         }
         return new StoredFile(relative, written.size());
+    }
+
+    @Override
+    public Delivery deliver(String relativePath, String fileName, String contentType) {
+        Path path = resolve(relativePath);
+        if (!Files.isRegularFile(path)) {
+            throw ApiException.notFound("build file");
+        }
+        return new Delivery.LocalFile(path);
+    }
+
+    @Override
+    public Resource openLogo(String relativePath) {
+        Path path = resolve(relativePath);
+        if (!Files.isRegularFile(path)) {
+            throw ApiException.notFound("logo");
+        }
+        return new FileSystemResource(path);
     }
 
     /** The absolute path of a stored file, refusing anything that would leave the root. */
@@ -241,6 +204,7 @@ public class StoreFileStorage {
      * leave an empty {@code android/1.2.0/production/} tree behind. A missing
      * file is not an error.
      */
+    @Override
     public void delete(String relativePath) {
         Path file = resolve(relativePath);
         deleteQuietly(file);
@@ -311,16 +275,7 @@ public class StoreFileStorage {
         } catch (IOException e) {
             return false;
         }
-        return switch (contentType) {
-            case "image/png" -> n >= 8
-                    && (head[0] & 0xFF) == 0x89 && head[1] == 'P' && head[2] == 'N' && head[3] == 'G';
-            case "image/jpeg" -> n >= 3
-                    && (head[0] & 0xFF) == 0xFF && (head[1] & 0xFF) == 0xD8 && (head[2] & 0xFF) == 0xFF;
-            case "image/webp" -> n >= 12
-                    && head[0] == 'R' && head[1] == 'I' && head[2] == 'F' && head[3] == 'F'
-                    && head[8] == 'W' && head[9] == 'E' && head[10] == 'B' && head[11] == 'P';
-            default -> false;
-        };
+        return StoreFileRules.matchesMagic(head, n, contentType);
     }
 
     private static MessageDigest sha256() {

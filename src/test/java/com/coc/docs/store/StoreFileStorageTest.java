@@ -49,7 +49,7 @@ class StoreFileStorageTest {
 
     @Test
     void buildLandsUnderPlatformVersionEnvironment() throws IOException {
-        StoreFileStorage.StoredBuild stored = storage(1024).storeBuild(StorePlatform.ANDROID, "1.2.0",
+        StoreFiles.StoredBuild stored = storage(1024).storeBuild(StorePlatform.ANDROID, "1.2.0",
                 List.of(StoreEnvironment.PRODUCTION), APP, "app.apk", bytes("hello"), env -> false);
 
         String path = stored.paths().get(StoreEnvironment.PRODUCTION);
@@ -62,7 +62,7 @@ class StoreFileStorageTest {
     @Test
     void oneUploadToBothEnvironmentsGivesEachItsOwnRemovableFile() throws IOException {
         StoreFileStorage files = storage(1024);
-        StoreFileStorage.StoredBuild stored = files.storeBuild(StorePlatform.IOS, "3.0",
+        StoreFiles.StoredBuild stored = files.storeBuild(StorePlatform.IOS, "3.0",
                 List.of(StoreEnvironment.PRODUCTION, StoreEnvironment.DEVELOPMENT), APP, "app.ipa", bytes("both"),
                 env -> false);
 
@@ -116,18 +116,18 @@ class StoreFileStorageTest {
     void aVersionThatCouldEscapeTheFolderIsRefused() {
         StoreFileStorage files = storage(1024);
         for (String version : new String[] {"..", "../x", "1.0/..", "a\\b", ".hidden", "1.0.", ""}) {
-            assertThat(StoreFileStorage.isValidVersion(version)).as(version).isFalse();
+            assertThat(StoreFileRules.isValidVersion(version)).as(version).isFalse();
             assertThatThrownBy(() -> files.storeBuild(StorePlatform.ANDROID, version,
                             List.of(StoreEnvironment.PRODUCTION), APP, "a.apk", bytes("x"), env -> false))
                     .isInstanceOf(ApiException.class);
         }
-        assertThat(StoreFileStorage.isValidVersion("1.2.3-beta+45")).isTrue();
+        assertThat(StoreFileRules.isValidVersion("1.2.3-beta+45")).isTrue();
     }
 
     @Test
     void removingTheLastBuildOfAVersionLeavesNoEmptyFolders() throws IOException {
         StoreFileStorage files = storage(1024);
-        StoreFileStorage.StoredBuild stored = files.storeBuild(StorePlatform.ANDROID, "9.9",
+        StoreFiles.StoredBuild stored = files.storeBuild(StorePlatform.ANDROID, "9.9",
                 List.of(StoreEnvironment.DEVELOPMENT), APP, "b.apk", bytes("x"), env -> false);
 
         files.delete(stored.paths().get(StoreEnvironment.DEVELOPMENT));
@@ -137,14 +137,34 @@ class StoreFileStorageTest {
     }
 
     @Test
+    void removingOneVersionDeletesOnlyItsFileAndKeepsTheOthers() throws IOException {
+        StoreFileStorage files = storage(1024);
+        StoreFiles.StoredBuild old = files.storeBuild(StorePlatform.ANDROID, "1.1.1",
+                List.of(StoreEnvironment.PRODUCTION), APP, "app.apk", bytes("old"), env -> false);
+        StoreFiles.StoredBuild current = files.storeBuild(StorePlatform.ANDROID, "1.1.2",
+                List.of(StoreEnvironment.PRODUCTION), APP, "app.apk", bytes("new"), env -> false);
+
+        files.delete(old.paths().get(StoreEnvironment.PRODUCTION));
+
+        assertThat(Files.exists(root.resolve(old.paths().get(StoreEnvironment.PRODUCTION)))).isFalse();
+        assertThat(Files.readString(root.resolve(current.paths().get(StoreEnvironment.PRODUCTION)))).isEqualTo("new");
+    }
+
+    @Test
+    void deletingAFileThatIsAlreadyGoneIsHarmless() {
+        StoreFileStorage files = storage(1024);
+        files.delete("android/0.0.1/production/" + APP + "/never-there.apk");
+    }
+
+    @Test
     void fileNamesAreReducedToOneSafeName() {
-        assertThat(StoreFileStorage.safeFileName("../../etc/passwd")).isEqualTo("passwd");
-        assertThat(StoreFileStorage.safeFileName("C:\\Users\\me\\Setup v2.exe")).isEqualTo("Setup v2.exe");
-        assertThat(StoreFileStorage.safeFileName(".env")).isEqualTo("env");
-        assertThat(StoreFileStorage.safeFileName("app.apk. . ")).isEqualTo("app.apk");
-        assertThat(StoreFileStorage.safeFileName("")).isEqualTo("download");
-        assertThat(StoreFileStorage.safeFileName("x".repeat(300) + ".apk"))
-                .hasSize(StoreFileStorage.MAX_FILE_NAME)
+        assertThat(StoreFileRules.safeFileName("../../etc/passwd")).isEqualTo("passwd");
+        assertThat(StoreFileRules.safeFileName("C:\\Users\\me\\Setup v2.exe")).isEqualTo("Setup v2.exe");
+        assertThat(StoreFileRules.safeFileName(".env")).isEqualTo("env");
+        assertThat(StoreFileRules.safeFileName("app.apk. . ")).isEqualTo("app.apk");
+        assertThat(StoreFileRules.safeFileName("")).isEqualTo("download");
+        assertThat(StoreFileRules.safeFileName("x".repeat(300) + ".apk"))
+                .hasSize(StoreFileRules.MAX_FILE_NAME)
                 .endsWith(".apk");
     }
 
@@ -165,7 +185,7 @@ class StoreFileStorageTest {
     @Test
     void logoMustBeTheImageTypeItClaims() throws IOException {
         StoreFileStorage files = storage(1024);
-        StoreFileStorage.StoredFile stored = files.storeLogo(APP, "image/png", new ByteArrayInputStream(PNG));
+        StoreFiles.StoredFile stored = files.storeLogo(APP, "image/png", new ByteArrayInputStream(PNG));
         assertThat(stored.relativePath()).isEqualTo("logos/" + APP + ".png");
 
         assertThatThrownBy(() -> files.storeLogo(APP, "image/jpeg", new ByteArrayInputStream(PNG)))
