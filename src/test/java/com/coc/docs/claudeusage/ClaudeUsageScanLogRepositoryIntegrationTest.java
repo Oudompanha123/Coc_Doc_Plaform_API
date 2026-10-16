@@ -36,12 +36,12 @@ class ClaudeUsageScanLogRepositoryIntegrationTest extends PostgresTestBase {
     }
 
     private static ClaudeUsageScanLog running(UUID scanId, String email) {
-        return new ClaudeUsageScanLog(null, scanId, null, email, null, "scheduled", "0.6.0", STARTED, null, STARTED,
+        return new ClaudeUsageScanLog(null, scanId, null, email, null, null, "scheduled", "0.6.0", STARTED, null, STARTED,
                 "running", "not-attempted", null, null, null, null, null, null, null, List.of());
     }
 
     private static ClaudeUsageScanLog finished(UUID scanId, String email, String status, Long newTokens) {
-        return new ClaudeUsageScanLog(null, scanId, null, email, null, "scheduled", "0.6.0", STARTED,
+        return new ClaudeUsageScanLog(null, scanId, null, email, null, null, "scheduled", "0.6.0", STARTED,
                 STARTED.plusSeconds(8), STARTED, status, "uploaded", 10, 12, 0, newTokens, 1,
                 "failed".equals(status) ? "upload" : null, "failed".equals(status) ? "HTTP 503" : null, List.of());
     }

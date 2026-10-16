@@ -141,7 +141,7 @@ class ClaudeUsageDisplayNameIntegrationTest extends PostgresTestBase {
         report(email, "Lina", 10);
         UUID memberId = members.findByEmail(email).orElseThrow().id();
         Instant started = Instant.now().minusSeconds(30);
-        scanLogs.insert(new ClaudeUsageScanLog(null, UUID.randomUUID(), memberId, email, null, "manual", "0.6.0",
+        scanLogs.insert(new ClaudeUsageScanLog(null, UUID.randomUUID(), memberId, email, null, null, "manual", "0.6.0",
                 started, started.plusSeconds(5), started, "success", "uploaded", 1, 1, 0, 10L, 1, null, null,
                 List.of()), "[]");
 
@@ -151,5 +151,28 @@ class ClaudeUsageDisplayNameIntegrationTest extends PostgresTestBase {
                 .filteredOn(l -> l.email().equals(email))
                 .extracting(ClaudeUsageScanLog::displayName)
                 .containsExactly("Lina Chan");
+    }
+
+    @Test
+    @DisplayName("the scan logs carry the account's profile picture, matched by email; none without an account")
+    void scanLogsCarryTheAccountsPicture() {
+        String withPicture = email("sokha");
+        String noAccount = email("nobody");
+        Account sokha = accounts.insert(withPicture, "Sokha", AppRole.USER, null, AccountStatus.ACTIVE);
+        accounts.updateAvatarUrl(sokha.id(), "https://lh3.googleusercontent.com/a/sokha");
+        Instant started = Instant.now().minusSeconds(30);
+        for (String email : List.of(withPicture.toUpperCase(), noAccount)) {
+            scanLogs.insert(new ClaudeUsageScanLog(null, UUID.randomUUID(), null, email, null, null, "manual", "0.6.0",
+                    started, started.plusSeconds(5), started, "success", "uploaded", 1, 1, 0, 10L, 1, null, null,
+                    List.of()), "[]");
+        }
+
+        List<ClaudeUsageScanLog> logs = scanLogs.list(started.minusSeconds(60), started.plusSeconds(60), 100);
+        assertThat(logs).filteredOn(l -> l.email().equalsIgnoreCase(withPicture))
+                .extracting(ClaudeUsageScanLog::displayName, ClaudeUsageScanLog::avatarUrl)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("Sokha", "https://lh3.googleusercontent.com/a/sokha"));
+        assertThat(logs).filteredOn(l -> l.email().equals(noAccount))
+                .extracting(ClaudeUsageScanLog::avatarUrl)
+                .containsExactly((String) null);
     }
 }
