@@ -23,7 +23,40 @@ public record AxRenewalProject(
         UUID createdBy,
         Instant createdAt,
         Instant updatedAt,
-        int revision) {
+        int revision,
+        String sourceFilename) {
+
+    /** A project with no uploaded source — {@code sourceFilename} is the stored archive's name under {@code file.server-path} (ADR-118). */
+    public AxRenewalProject(
+            UUID id,
+            String name,
+            String description,
+            String status,
+            String manifestFilename,
+            String manifestContent,
+            Instant manifestAttachedAt,
+            UUID manifestAttachedBy,
+            JsonNode attachStats,
+            UUID createdBy,
+            Instant createdAt,
+            Instant updatedAt,
+            int revision) {
+        this(
+                id,
+                name,
+                description,
+                status,
+                manifestFilename,
+                manifestContent,
+                manifestAttachedAt,
+                manifestAttachedBy,
+                attachStats,
+                createdBy,
+                createdAt,
+                updatedAt,
+                revision,
+                null);
+    }
 
     public static final String STATUS_DRAFT = "draft";
     public static final String STATUS_ANALYZED = "analyzed";

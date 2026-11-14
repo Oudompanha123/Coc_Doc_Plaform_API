@@ -18,7 +18,7 @@ public class AxRenewalProjectRepository {
     private static final String COLUMNS =
             "id, name, description, status, manifest_filename, manifest_content, "
                     + "manifest_attached_at, manifest_attached_by, attach_stats::text as attach_stats, "
-                    + "created_by, created_at, updated_at, revision";
+                    + "created_by, created_at, updated_at, revision, source_filename";
 
     private final JdbcClient jdbc;
     private final Jsonb jsonb;
@@ -44,7 +44,8 @@ public class AxRenewalProjectRepository {
                 rs.getObject("created_by", UUID.class),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
                 rs.getObject("updated_at", OffsetDateTime.class).toInstant(),
-                rs.getInt("revision"));
+                rs.getInt("revision"),
+                rs.getString("source_filename"));
     }
 
     /** Every project, newest first — only ever served to a super admin (ADR-070); everyone else gets {@link #listForMember}. */
@@ -109,6 +110,13 @@ public class AxRenewalProjectRepository {
                         where id = ?
                         """)
                 .params(filename, content, stats == null ? null : jsonb.write(stats), attachedBy, id)
+                .update();
+    }
+
+    /** Records the stored source archive's name (ADR-118) — the name only, never a path. */
+    public void updateSourceFilename(UUID id, String sourceFilename) {
+        jdbc.sql("update ax_renewal_project set source_filename = ?, updated_at = now() where id = ?")
+                .params(sourceFilename, id)
                 .update();
     }
 

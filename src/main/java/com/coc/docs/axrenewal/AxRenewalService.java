@@ -237,7 +237,7 @@ public class AxRenewalService {
      * project with that id exists; a project someone was not invited to
      * should be as invisible to them as one that was never created.
      */
-    private AxRenewalProject requireMember(UUID projectId, CurrentUser actor) {
+    AxRenewalProject requireMember(UUID projectId, CurrentUser actor) {
         AxRenewalProject project = requireProject(projectId);
         if (actor.role() != AppRole.SUPER_ADMIN && !members.isMember(projectId, actor.id())) {
             throw ApiException.notFound("project");
@@ -334,7 +334,7 @@ public class AxRenewalService {
      * is not a request to delete their repository.
      */
     @Transactional
-    public void delete(UUID projectId, CurrentUser actor) {
+    public AxRenewalProject delete(UUID projectId, CurrentUser actor) {
         AxRenewalProject project = requireMember(projectId, actor);
         if (implementations.findActive(projectId).isPresent()) {
             throw ApiException.conflict("cancel or resolve the active implementation run before deleting this project");
@@ -362,10 +362,11 @@ public class AxRenewalService {
             localRunner.forget(projectId);
             stagingPaths.forEach(AxRenewalImplementationRunner::deleteStagingCopy);
         });
+        return project;
     }
 
     /** Runs {@code action} once the current transaction commits — or at once, when there is none to wait for. */
-    private static void afterCommit(Runnable action) {
+    static void afterCommit(Runnable action) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             action.run();
             return;

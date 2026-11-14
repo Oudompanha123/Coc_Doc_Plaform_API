@@ -3,12 +3,16 @@ package com.coc.docs.web;
 import com.coc.docs.axrenewal.AxRenewalPlanRepository;
 import com.coc.docs.axrenewal.AxRenewalSection;
 import com.coc.docs.axrenewal.AxRenewalService;
+import com.coc.docs.axrenewal.AxRenewalSourceService;
 import com.coc.docs.axrenewal.LocalClaudeChat;
 import com.coc.docs.auth.CurrentUser;
 import jakarta.validation.Valid;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -21,6 +25,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * AX Renewal: the attach → analyze → plan → implement workflow (ADR-037).
@@ -40,9 +45,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class AxRenewalController {
 
     private final AxRenewalService projects;
+    private final AxRenewalSourceService sources;
 
-    public AxRenewalController(AxRenewalService projects) {
+    public AxRenewalController(AxRenewalService projects, AxRenewalSourceService sources) {
         this.projects = projects;
+        this.sources = sources;
     }
 
     /** Whether Run analysis reaches a real model on this deployment (ADR-043). */
@@ -116,7 +123,10 @@ public class AxRenewalController {
     /** Deletes a project outright (ADR-051). 204, since there is nothing left to return. */
     @DeleteMapping("/projects/{projectId}")
     ResponseEntity<Void> delete(@PathVariable UUID projectId, @AuthenticationPrincipal CurrentUser actor) {
-        projects.delete(projectId, actor);
+        var deleted = projects.delete(projectId, actor);
+        // The stored source archive goes with the project (ADR-118) — only
+        // once the delete has committed, so a refused delete keeps its file.
+        sources.forget(deleted);
         return ResponseEntity.noContent().build();
     }
 
@@ -128,6 +138,26 @@ public class AxRenewalController {
         var attached =
                 projects.attachManifest(projectId, request.filename(), request.content(), request.stats(), actor);
         return ApiDtos.AxRenewalProjectResponse.of(attached, projects.isMember(projectId, actor));
+    }
+
+    /**
+     * Uploads the project's source (ADR-118): a multipart form whose {@code
+     * file} part is one zip archive, written under {@code file.server-path};
+     * its file name is recorded on the project. Replaces any earlier upload.
+     *
+     * <p>The multipart limit that lets an archive this size through is set in
+     * {@code MultipartUploadConfig}.
+     */
+    @PatchMapping(value = "/projects/{projectId}/source", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    ApiDtos.AxRenewalProjectResponse uploadSource(
+            @PathVariable UUID projectId,
+            @RequestParam("file") MultipartFile file,
+            @AuthenticationPrincipal CurrentUser actor)
+            throws IOException {
+        try (InputStream body = file.getInputStream()) {
+            var updated = sources.upload(projectId, body, actor);
+            return ApiDtos.AxRenewalProjectResponse.of(updated, projects.isMember(projectId, actor));
+        }
     }
 
     /**

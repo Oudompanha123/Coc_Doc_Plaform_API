@@ -178,6 +178,9 @@ public final class AuditAction {
     public static final String AX_RENEWAL_PROJECT_UPDATE = "ax_renewal.project_update";
 
     public static final String AX_RENEWAL_MANIFEST_ATTACH = "ax_renewal.manifest_attach";
+
+    /** A project's source archive uploaded or replaced (ADR-118). {@code detail} carries the stored file name. */
+    public static final String AX_RENEWAL_SOURCE_UPLOAD = "ax_renewal.source_upload";
     public static final String AX_RENEWAL_ANALYSIS_RUN = "ax_renewal.analysis_run";
     public static final String AX_RENEWAL_STACK_MOVE_EDIT = "ax_renewal.stack_move_edit";
     public static final String AX_RENEWAL_ARCHITECTURE_EDIT = "ax_renewal.architecture_edit";

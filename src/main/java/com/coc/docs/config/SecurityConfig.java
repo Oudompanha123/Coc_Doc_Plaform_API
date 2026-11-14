@@ -495,6 +495,11 @@ public class SecurityConfig {
                         .hasRole(AppRole.ADMIN.name())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/manifest")
                         .hasRole(AppRole.ADMIN.name())
+                        // Uploading the project's source (ADR-118) is the
+                        // other half of Attach, so it shares the manifest's
+                        // floor. Membership is AxRenewalSourceService's check.
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/ax-renewal/projects/*/source")
+                        .hasRole(AppRole.ADMIN.name())
                         .requestMatchers(HttpMethod.POST, "/api/v1/ax-renewal/projects/*/analysis/run")
                         .hasRole(AppRole.ADMIN.name())
                         // Assistant chat sits at the analysis floor, not the
