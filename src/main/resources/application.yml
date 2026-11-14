@@ -258,3 +258,9 @@ springdoc:
 logging:
   level:
     org.flywaydb: INFO
+
+# Where uploaded files are kept on this backend's own disk (ADR-118, ADR-119):
+# profile photos when no object storage is configured, and AX Renewal source
+# archives. Set FILE_SERVER_PATH to use another folder.
+file:
+  server-path: ${FILE_SERVER_PATH:F:/Image}
