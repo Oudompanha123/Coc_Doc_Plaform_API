@@ -125,6 +125,10 @@ public class SecurityConfig {
                         // any key the named account does not actually hold.
                         // // req: FR-AUTH-005, NFR-SEC-PII, ADR-101
                         .requestMatchers(HttpMethod.GET, "/api/v1/avatars/**").permitAll()
+                        // The same photo, kept on local disk (ADR-119) — public
+                        // for the same reason; ImageController serves only the
+                        // exact file-name shape the uploader writes.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/image/*").permitAll()
                         // Store app logos (ADR-108): public for the same <img>
                         // reason as profile photos just above. A logo is only a
                         // picture, addressed by a random app id; nothing else
@@ -185,6 +189,7 @@ public class SecurityConfig {
                         // the same reasoning as PATCH /auth/me above — acts on the
                         // caller's own account only.
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/me/avatar").hasRole(AppRole.USER.name())
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/auth/me/avatar").hasRole(AppRole.USER.name())
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/auth/me/avatar").hasRole(AppRole.USER.name())
 
                         // Self-service password change (revision of ADR-017): acts on

@@ -27,9 +27,17 @@ public class AvatarStorageConfig {
     private static final Logger log = LoggerFactory.getLogger(AvatarStorageConfig.class);
 
     @Bean
-    public AvatarStorage avatarStorage(AppProperties properties) {
+    public AvatarStorage avatarStorage(AppProperties properties, FileInfoProperties files) {
         AppProperties.Storage storage = properties.storage();
         if (!storage.configured()) {
+            // No object storage: keep photos on this backend's own disk when a
+            // folder is configured for that (ADR-119). Object storage still
+            // wins when both are set, so a deployment whose photos are already
+            // in a bucket does not silently move away from them.
+            if (files.configured()) {
+                log.info("STORAGE: profile photos are kept on local disk under file.server-path");
+                return new LocalAvatarStorage(files.serverPath());
+            }
             return null;
         }
 

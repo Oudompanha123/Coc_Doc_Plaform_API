@@ -205,7 +205,16 @@ public class AuthController {
      *
      * <p>// req: FR-AUTH-005, NFR-SEC-PII, ADR-026
      */
-    @PostMapping(value = "/me/avatar", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    @org.springframework.web.bind.annotation.RequestMapping(
+            value = "/me/avatar",
+            // PATCH is what the web app sends (ADR-119) — it changes one
+            // attribute of the caller's own account. POST is still accepted so
+            // a frontend deployed before this change keeps working.
+            method = {
+                org.springframework.web.bind.annotation.RequestMethod.PATCH,
+                org.springframework.web.bind.annotation.RequestMethod.POST
+            },
+            consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
     ApiDtos.MeResponse uploadAvatar(
             @org.springframework.web.bind.annotation.RequestParam("file")
                     org.springframework.web.multipart.MultipartFile file,
