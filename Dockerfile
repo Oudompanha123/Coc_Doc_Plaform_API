@@ -38,7 +38,8 @@ WORKDIR /app
 COPY --from=build /src/target/*.jar app.jar
 
 # Logback writes to /app/logs; the non-root user must own it or startup fails.
-RUN mkdir -p /app/logs && chown -R app:app /app
+# /app/uploads is where uploaded files are kept (ADR-118, ADR-119).
+RUN mkdir -p /app/logs /app/uploads && chown -R app:app /app
 
 USER app
 
@@ -48,5 +49,12 @@ EXPOSE 8080
 # host's environment settings if the instance is very small (e.g. 512 MB).
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError"
 
-# exec so the JVM is pid 1 and receives SIGTERM directly.
-ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]
+# Where uploaded files go: profile photos when no object storage is
+# configured, and AX Renewal source archives (ADR-118, ADR-119). Inside the
+# container this folder is lost whenever the container is recreated -- mount
+# a persistent disk here, or point FILE_SERVER_PATH at one, to keep uploads.
+ENV FILE_SERVER_PATH=/app/uploads
+
+# exec so the JVM is pid 1 and receives SIGTERM directly. The folder is passed
+# as a system property so it binds to file.server-path exactly.
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -Dfile.server-path=\"$FILE_SERVER_PATH\" -jar /app/app.jar"]
