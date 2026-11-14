@@ -13,7 +13,11 @@ app:
   # Local development is plain http; a browser discards a Secure cookie on an
   # http origin, so sign-in appears to succeed and then silently does
   # nothing. // req: NFR-SEC-SESSION, NFR-SEC-CHANNEL
-  cookie-secure: false
+  #
+  # Still reads COOKIE_SECURE: a profile file outranks application.yml, so a
+  # literal `false` here silently ignored the variable on any deployment left
+  # on this default profile (Render, 2026-11-14).
+  cookie-secure: ${COOKIE_SECURE:false}
 
 
 # Swagger UI at http://localhost:8081/swagger-ui.html, and the contract it
