@@ -705,7 +705,8 @@ public class SecurityConfig {
     }
 
     /**
-     * CORS for exactly one origin, with credentials.
+     * CORS for one origin, with credentials, plus any patterns a deployment
+     * opts into.
      *
      * <p>The two services sit on different origins, which is a surface the
      * single-service design did not have (ADR-012). {@code allowCredentials} and
@@ -713,12 +714,19 @@ public class SecurityConfig {
      * here is configuration rather than a pattern so that a staging host cannot
      * be reached by a lookalike domain.
      *
+     * <p>{@code app.cors-allowed-origin-patterns} is empty unless a deployment
+     * sets it, and then it is that deployment's decision: see
+     * {@link AppProperties} for what a safe pattern looks like.
+     *
      * <p>// req: NFR-SEC-CHANNEL, ADR-012
      */
     @Bean
     CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(List.of(properties.frontendOrigin()));
+        if (!properties.corsAllowedOriginPatterns().isEmpty()) {
+            config.setAllowedOriginPatterns(properties.corsAllowedOriginPatterns());
+        }
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("Content-Type", "Accept", "If-Match"));
         // The frontend reads the canonical location out of a 301 when a slug has

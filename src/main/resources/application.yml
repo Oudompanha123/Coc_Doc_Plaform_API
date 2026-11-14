@@ -181,6 +181,18 @@ app:
   # issues host-only cookies.  // req: NFR-SEC-SESSION, NFR-SEC-CHANNEL
   cookie-secure: ${COOKIE_SECURE:true}
 
+  # Extra CORS origins on top of frontend-origin, comma-separated, as origin
+  # patterns. Empty by default. For hosts that give each deployment its own
+  # URL, e.g. https://myapp-*-myteam.vercel.app. The pattern must end in a
+  # suffix only this team can deploy under — credentials are allowed.
+  cors-allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:}
+
+  # SameSite of the cookies the API sets: Lax (default), Strict or None.
+  # None is required when the frontend and the API are on different sites
+  # (vercel.app and onrender.com are), or the browser refuses to store the
+  # session cookie. None needs cookie-secure true; startup fails otherwise.
+  cookie-same-site: ${COOKIE_SAME_SITE:Lax}
+
   # Google OAuth client id.
   # // req: FR-AUTH-001
   google-client-id: ${GOOGLE_CLIENT_ID:}

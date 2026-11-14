@@ -1,0 +1,34 @@
+# Build output
+/target/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Local env — never commit credentials.
+# `*env.local` also catches near-misses such as `env.local` and `..env.local`.
+.env
+.env.*
+!.env.example
+*env.local
+env.*.local
+
+# Personal Spring overrides (real DB/OAuth values) — see application.yml's header.
+*-local.yml
+*.local.yml
+
+# Personal Claude Code overrides
+.claude/settings.local.json
+
+# Backend log output (logback-spring.xml)
+/logs/
+
+# Store uploads (ADR-108) — the default `coc.store.root`. Installers, not source.
+/store-files/
+
+# Audit reports are build output, not source.
+/security/
+
+# Git Bash / Cygwin crash dumps
+*.stackdump

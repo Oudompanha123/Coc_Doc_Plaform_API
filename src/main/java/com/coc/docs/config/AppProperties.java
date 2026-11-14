@@ -3,7 +3,10 @@ package com.coc.docs.config;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.Duration;
+import java.util.List;
+import java.util.Locale;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.validation.annotation.Validated;
 
 /**
@@ -33,6 +36,19 @@ import org.springframework.validation.annotation.Validated;
  *     with Google's public keys, so a deployment that wants sign-in and not
  *     Gmail access leaves this blank and loses nothing.
  * @param storage object storage behind the S3 API
+ * @param corsAllowedOriginPatterns extra origins allowed by CORS on top of
+ *     {@code frontendOrigin}, as Spring origin patterns ({@code *} matches
+ *     within a host). Empty by default, which keeps the allowlist at exactly
+ *     one entry. It exists for hosts that give every deployment its own URL
+ *     (Vercel previews). A pattern must end in a suffix only this team can
+ *     deploy under: credentials are allowed, so a pattern anyone can register
+ *     a matching host for hands them a signed-in session.
+ * @param cookieSameSite the {@code SameSite} attribute of every cookie the
+ *     API sets: {@code Lax} (default), {@code Strict} or {@code None}.
+ *     {@code None} is needed when the frontend and the API are on different
+ *     sites (for example {@code vercel.app} and {@code onrender.com}), where
+ *     a browser otherwise refuses to store the session cookie and sign-in
+ *     succeeds and then does nothing. It requires {@code cookieSecure}.
  *
  * <p>// req: CONST-TECH-08, NFR-SEC-SESSION, NFR-SEC-CHANNEL, ADR-011, ADR-012
  */
@@ -44,7 +60,50 @@ public record AppProperties(
         boolean cookieSecure,
         String googleClientId,
         String googleClientSecret,
-        @NotNull Storage storage) {
+        @NotNull Storage storage,
+        List<String> corsAllowedOriginPatterns,
+        String cookieSameSite) {
+
+    /** Normalizes the two optional settings and refuses a combination a browser would reject. */
+    @ConstructorBinding
+    public AppProperties {
+        corsAllowedOriginPatterns = corsAllowedOriginPatterns == null
+                ? List.of()
+                : corsAllowedOriginPatterns.stream()
+                        .map(String::trim)
+                        .filter(pattern -> !pattern.isEmpty())
+                        .toList();
+        cookieSameSite = canonicalSameSite(cookieSameSite);
+        if ("None".equals(cookieSameSite) && !cookieSecure) {
+            throw new IllegalArgumentException(
+                    "app.cookie-same-site=None requires app.cookie-secure=true: "
+                            + "browsers discard a SameSite=None cookie that is not Secure");
+        }
+    }
+
+    /** The single-site shape: no extra CORS origins, {@code SameSite=Lax}. */
+    public AppProperties(
+            Duration sessionTtl,
+            String frontendOrigin,
+            boolean cookieSecure,
+            String googleClientId,
+            String googleClientSecret,
+            Storage storage) {
+        this(sessionTtl, frontendOrigin, cookieSecure, googleClientId, googleClientSecret, storage, List.of(), "Lax");
+    }
+
+    private static String canonicalSameSite(String value) {
+        if (value == null || value.isBlank()) {
+            return "Lax";
+        }
+        return switch (value.trim().toLowerCase(Locale.ROOT)) {
+            case "lax" -> "Lax";
+            case "strict" -> "Strict";
+            case "none" -> "None";
+            default -> throw new IllegalArgumentException(
+                    "app.cookie-same-site must be Lax, Strict or None, not '" + value + "'");
+        };
+    }
 
     /**
      * Object storage behind the S3 API.

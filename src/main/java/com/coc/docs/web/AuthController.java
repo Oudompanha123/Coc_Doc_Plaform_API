@@ -346,7 +346,7 @@ public class AuthController {
         return ResponseCookie.from(SessionService.COOKIE_NAME, issued.token())
                 .httpOnly(true)
                 .secure(properties.cookieSecure())
-                .sameSite("Lax")
+                .sameSite(properties.cookieSameSite())
                 .path("/")
                 .maxAge(properties.sessionTtl())
                 .build();
@@ -356,7 +356,7 @@ public class AuthController {
         return ResponseCookie.from(SessionService.COOKIE_NAME, "")
                 .httpOnly(true)
                 .secure(properties.cookieSecure())
-                .sameSite("Lax")
+                .sameSite(properties.cookieSameSite())
                 .path("/")
                 .maxAge(0)
                 .build();
@@ -378,7 +378,7 @@ public class AuthController {
         return ResponseCookie.from(NonceService.COOKIE_NAME, value)
                 .httpOnly(true)
                 .secure(properties.cookieSecure())
-                .sameSite("Lax")
+                .sameSite(properties.cookieSameSite())
                 .path("/")
                 .maxAge(NonceService.TTL)
                 .build();
@@ -388,7 +388,7 @@ public class AuthController {
         return ResponseCookie.from(NonceService.COOKIE_NAME, "")
                 .httpOnly(true)
                 .secure(properties.cookieSecure())
-                .sameSite("Lax")
+                .sameSite(properties.cookieSameSite())
                 .path("/")
                 .maxAge(0)
                 .build();
@@ -405,7 +405,7 @@ public class AuthController {
         return ResponseCookie.from(TotpService.MFA_PENDING_COOKIE_NAME, mfaRequired.challengeToken())
                 .httpOnly(true)
                 .secure(properties.cookieSecure())
-                .sameSite("Lax")
+                .sameSite(properties.cookieSameSite())
                 .path("/")
                 .maxAge(Duration.between(Instant.now(), mfaRequired.expiresAt()))
                 .build();
@@ -415,7 +415,7 @@ public class AuthController {
         return ResponseCookie.from(TotpService.MFA_PENDING_COOKIE_NAME, "")
                 .httpOnly(true)
                 .secure(properties.cookieSecure())
-                .sameSite("Lax")
+                .sameSite(properties.cookieSameSite())
                 .path("/")
                 .maxAge(0)
                 .build();
